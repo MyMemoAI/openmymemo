@@ -60,13 +60,17 @@ Each plugin uses `~/OpenMyMemo` by default (created on first use), loads your me
 
 | App | Install |
 | --- | --- |
-| **Claude Desktop** | Download `openmymemo-<version>.mcpb` from the [latest release](https://github.com/MyMemoAI/openmymemo/releases/latest) (or build it with `uv run python scripts/build_mcpb.py`), then double-click it (or Settings → Extensions). Nothing to fill in: leave the memory folder empty to use `~/OpenMyMemo`. Claude Desktop installs Python and the dependencies itself; no uv needed. |
-| **Claude Code** | `/plugin marketplace add MyMemoAI/openmymemo`, then `/plugin install openmymemo@openmymemo`. Adds `/openmymemo:memory` and `/openmymemo:remember`. |
+| **Claude Desktop** | Download `openmymemo-<version>.mcpb` from the [latest release](https://github.com/MyMemoAI/openmymemo/releases/latest) (or build it with `uv run python scripts/build_mcpb.py`), then double-click it (or Settings → Extensions). Nothing to fill in: leave the memory folder empty to use `~/OpenMyMemo`. Then quit Claude Desktop and open it again. Claude Desktop installs Python and the dependencies itself; no uv needed. |
+| **Claude Code** | `/plugin marketplace add MyMemoAI/openmymemo`, then `/plugin install openmymemo@openmymemo`, then restart Claude Code. Adds `/openmymemo:memory` and `/openmymemo:remember`. |
 | **Codex** | Three steps, see [Codex](#codex) below. |
 | **Cursor** | Panel → Connectors → Setup → **Add to Cursor**. |
 | **VS Code** | Panel → Connectors → Setup → VS Code, then run the `code --add-mcp …` command. |
 
-The first launch downloads Python and the dependencies (about 5 seconds on a fast connection; Codex gives MCP servers 10). If an app says the OpenMyMemo server failed to start, restart the app once.
+**After installing, quit the app completely and open it again** so it loads OpenMyMemo. The first launch downloads Python and the dependencies (about 5 seconds on a fast connection; Codex gives MCP servers 10). If an app then says the OpenMyMemo server failed to start, restart it once more.
+
+**Then open the panel at [http://127.0.0.1:8787](http://127.0.0.1:8787)** in your browser; bookmark it. It's there whenever Claude Desktop, Claude Code or Codex is running: your memories, what AI changed (Changes), the exact text each app gets (What AI sees) and the connected apps (Connectors). Without a plugin, `openmymemo serve` starts it and opens the browser.
+
+![The Memories page of the OpenMyMemo panel: memories grouped by topic, each showing where it came from](docs/images/panel-memories.png)
 
 #### Codex
 
@@ -78,6 +82,8 @@ You need [uv](https://docs.astral.sh/uv/). Steps 2 and 3 are needed only once: C
    codex plugin marketplace add MyMemoAI/openmymemo
    codex plugin add openmymemo@openmymemo
    ```
+
+   Then restart Codex: quit the ChatGPT desktop app and open it again, or start `codex` again in the terminal.
 
 2. **Set up the hook.** Start a new Codex session and ask it to "set up OpenMyMemo". It adds a hook to `~/.codex/hooks.json` and leaves your other hooks alone. If you installed the CLI, `openmymemo setup codex` does the same.
 3. **Trust the hook.** In the ChatGPT desktop app, open Settings → Coding → Hooks and trust "Loading your OpenMyMemo memory". Or open Codex in a terminal (`codex`), type `/hooks`, select SessionStart and trust it there. The app and the terminal share these settings, so trusting it in either place covers both.
@@ -93,6 +99,8 @@ From your next new session on, Codex starts with your memory. The plugin also ad
 Tools AI apps see: `memory_context`, `memory_search`, `memory_get`, `memory_propose`, `memory_proposals`, plus the `recall` prompt.
 
 ## What happens when an AI writes
+
+![The Changes page: an AI's change to a memory you wrote and an addition to a private topic wait for you, with Accept, Edit and accept, and Reject](docs/images/panel-changes.png)
 
 - **An addition applies right away.** It is marked as new until you look at it: on the panel's Changes page, in `openmymemo review`, or in the one-line summary at the start of your next Claude Code or Codex session.
 - **A change to a memory you wrote, imported or approved yourself waits for you.** So does anything in a private topic (`health` and `finance` by default). AI never silently changes what you wrote.
