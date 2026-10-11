@@ -68,6 +68,8 @@ Each plugin uses `~/OpenMyMemo` by default (created on first use), loads your me
 
 **After installing, quit the app completely and open it again** so it loads OpenMyMemo. The first launch downloads Python and the dependencies (about 5 seconds on a fast connection; Codex gives MCP servers 10). If an app then says the OpenMyMemo server failed to start, restart it once more.
 
+**Then open the panel at [http://127.0.0.1:8787](http://127.0.0.1:8787)** in your browser; bookmark it. It's there whenever Claude Desktop, Claude Code or Codex is running: your memories, what AI changed (Changes), the exact text each app gets (What AI sees) and the connected apps (Connectors). Without a plugin, `openmymemo serve` starts it and opens the browser.
+
 #### Codex
 
 You need [uv](https://docs.astral.sh/uv/). Steps 2 and 3 are needed only once: Codex doesn't run hooks that plugins ship, so OpenMyMemo adds its own session-start hook.
