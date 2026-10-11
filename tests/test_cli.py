@@ -15,9 +15,9 @@ def test_context_hook_is_silent_and_safe(tmp_path, vault):
     missing = runner.invoke(app, ["--vault", str(tmp_path / "nope"), "context", "--hook", "--connector", "claude-code"])
     assert missing.exit_code == 0 and missing.stdout == ""
 
-    vault.add("work", "CTO at MyMemo")
+    vault.add("work", "CTO at Acme")
     ok = runner.invoke(app, ["--vault", str(vault.root), "context", "--hook", "--connector", "claude-code"])
-    assert ok.exit_code == 0 and "CTO at MyMemo" in ok.stdout
+    assert ok.exit_code == 0 and "CTO at Acme" in ok.stdout
     assert Connectors(vault).get("claude-code")  # registered on first use
     assert vault.activity("claude-code")[0]["via"] == "hook"
 
@@ -28,7 +28,7 @@ def test_context_hook_is_silent_and_safe(tmp_path, vault):
 
 def test_context_hook_starts_with_the_digest_line(vault):
     hook = ["--vault", str(vault.root), "context", "--hook", "--connector", "claude-code"]
-    vault.add("work", "CTO at MyMemo")
+    vault.add("work", "CTO at Acme")
     quiet = runner.invoke(app, hook)
     assert quiet.exit_code == 0 and quiet.stdout.startswith("# About the user")  # nothing unreviewed: no line
 
@@ -62,7 +62,7 @@ def _topics(vault):
 def test_import_then_sort_interactively(tmp_path, vault):
     paste = tmp_path / "chatgpt.txt"
     paste.write_text("Saved memories\nPrefers concise answers with the conclusion first.\nDelete\nGrows tomatoes\n"
-                     "Is the CTO of MyMemo, a note-taking startup.\nUses a MacBook Pro with VS Code and Python.\n"
+                     "Is the CTO of Acme, a note-taking startup.\nUses a MacBook Pro with VS Code and Python.\n"
                      "Has a daughter who is five years old.\n")
     r = runner.invoke(app, ["--vault", str(vault.root), "import", "chatgpt", str(paste)], input="y\n")
     assert r.exit_code == 0, r.output
@@ -89,14 +89,14 @@ def test_import_then_sort_interactively(tmp_path, vault):
     assert _topics(vault) == {
         "Prefers concise answers with the conclusion first.": "how-to-work-with-me",
         "Grows tomatoes": "from-chatgpt",
-        "Is the CTO of MyMemo, a note-taking startup.": "from-chatgpt",
+        "Is the CTO of Acme, a note-taking startup.": "from-chatgpt",
         "Uses a MacBook Pro with VS Code and Python.": "lifestyle",
         "Has a daughter who is five years old.": "from-chatgpt",
     }
 
     r = runner.invoke(app, ["--vault", str(vault.root), "sort", "--topic", "from-chatgpt"], input="a\n")
     assert r.exit_code == 0 and "[1/3]" in r.stdout and r.stdout.rstrip().endswith("Moved 2 memories.")
-    assert _topics(vault)["Is the CTO of MyMemo, a note-taking startup."] == "work"
+    assert _topics(vault)["Is the CTO of Acme, a note-taking startup."] == "work"
     assert _topics(vault)["Has a daughter who is five years old."] == "people"
     assert _topics(vault)["Grows tomatoes"] == "from-chatgpt"  # [a]ll skips rows without a suggestion
 
@@ -106,15 +106,15 @@ def test_import_then_sort_interactively(tmp_path, vault):
 
 def test_sort_yes_applies_only_confident_suggestions(vault):
     r = runner.invoke(app, ["--vault", str(vault.root), "import", "gemini", "-", "--yes"],
-                      input="Is the CTO of MyMemo\nLikes jazz\nGrows tomatoes\n")
+                      input="Is the CTO of Acme\nLikes jazz\nGrows tomatoes\n")
     assert r.exit_code == 0 and "Imported 3 memories into From Gemini (from-gemini)." in r.stdout
     help_text = runner.invoke(app, ["sort", "--help"]).stdout
     assert "0.5" in help_text
     r = runner.invoke(app, ["--vault", str(vault.root), "sort", "--yes"])
     assert r.exit_code == 0, r.output
-    assert '"Is the CTO of MyMemo" → Work (work)' in r.stdout
+    assert '"Is the CTO of Acme" → Work (work)' in r.stdout
     assert "Left 2 memories" in r.stdout and r.stdout.rstrip().endswith("Moved 1 memories.")
-    assert _topics(vault) == {"Is the CTO of MyMemo": "work", "Likes jazz": "from-gemini",  # 0.43: not sure enough
+    assert _topics(vault) == {"Is the CTO of Acme": "work", "Likes jazz": "from-gemini",  # 0.43: not sure enough
                               "Grows tomatoes": "from-gemini"}
     assert runner.invoke(app, ["--vault", str(vault.root), "sort", "--topic", "nope"]).exit_code == 1
 

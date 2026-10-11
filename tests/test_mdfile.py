@@ -10,7 +10,7 @@ tags: [memory]
 
 Some free prose the user wrote.
 
-- 在 MyMemo 做 CTO ^m7f3a
+- 在 Acme 做 CTO ^m7f3a
 - 2026-09 起在用 Claude Agent SDK <!-- until: 2026-12 --> ^k2p9d
   - a nested note that is not a memory
 * star bullet without id
@@ -43,7 +43,7 @@ def test_parse_structure():
     assert mf.description == "职位、公司、团队、职责、行业"
     assert [s for s, _ in mf.sections] == ["团队"]
     assert [(i.content, i.id, i.section) for i in mf.items] == [
-        ("在 MyMemo 做 CTO", "m7f3a", None),
+        ("在 Acme 做 CTO", "m7f3a", None),
         ("2026-09 起在用 Claude Agent SDK", "k2p9d", None),
         ("star bullet without id", None, None),
         ("后端两人", "q1x4e", "团队"),
@@ -94,8 +94,8 @@ def test_add_before_existing_section_when_top_is_empty():
 
 def test_set_and_remove():
     mf = MemoryFile(SAMPLE)
-    mf.set_line(mf.find("m7f3a"), "在 MyMemo 做 CTO 和产品", {"private": True})
-    assert "- 在 MyMemo 做 CTO 和产品 <!-- private --> ^m7f3a" in mf.render()
+    mf.set_line(mf.find("m7f3a"), "在 Acme 做 CTO 和产品", {"private": True})
+    assert "- 在 Acme 做 CTO 和产品 <!-- private --> ^m7f3a" in mf.render()
     assert mf.remove("k2p9d")
     assert "k2p9d" not in mf.render()
     assert "  - a nested note that is not a memory" in mf.render()

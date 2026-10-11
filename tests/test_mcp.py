@@ -94,7 +94,7 @@ def test_instructions_describe_apply_now_and_review_later(vault):
 
 
 def test_stdio_subprocess_end_to_end(vault):
-    vault.add("work", "在 MyMemo 做 CTO")
+    vault.add("work", "在 Acme 做 CTO")
     params = StdioServerParameters(
         command=sys.executable,
         args=["-m", "openmymemo", "--vault", str(vault.root), "mcp", "--connector", "claude-code"],
@@ -108,7 +108,7 @@ def test_stdio_subprocess_end_to_end(vault):
         return ctx, prop, listed
 
     ctx, prop, listed = call(params, steps)
-    assert "在 MyMemo 做 CTO" in ctx.content[0].text
+    assert "在 Acme 做 CTO" in ctx.content[0].text
     assert prop.structured_content["status"] == "applied"
     assert listed.structured_content["proposals"][0]["content"] == "正在学习日语"
     on_disk = list(vault.proposals_dir.glob("*.json"))

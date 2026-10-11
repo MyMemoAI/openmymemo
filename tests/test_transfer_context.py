@@ -13,7 +13,7 @@ CHATGPT_PASTE = """Saved memories
 Memory is full
 Prefers concise answers with the conclusion first.
 Delete
-Is the CTO of MyMemo, a note-taking startup.
+Is the CTO of Acme, a note-taking startup.
 Delete
 Uses a MacBook Pro with VS Code and Python.
 Delete
@@ -24,13 +24,13 @@ Prefers concise answers with the conclusion first.
 
 CHATGPT_ZH = """管理记忆
 - 用户喜欢用中文交流，回答先给结论
-- 用户在 MyMemo 担任 CTO
+- 用户在 Acme 担任 CTO
 - 用户正在学习日语
 删除
 """
 
 CLAUDE_EXPORT = """```
-[2026-03-02] – Works as CTO at MyMemo, building an AI notes product
+[2026-03-02] – Works as CTO at Acme, building an AI notes product
 [2026-03-05] – Prefers TypeScript over JavaScript for new projects
 [unknown] - Lives in San Francisco
 ```
@@ -46,18 +46,18 @@ def test_parse_chatgpt_paste_strips_ui_and_duplicates():
     items = transfer.parse("chatgpt", CHATGPT_PASTE)
     assert [i.content for i in items] == [
         "Prefers concise answers with the conclusion first.",
-        "Is the CTO of MyMemo, a note-taking startup.",
+        "Is the CTO of Acme, a note-taking startup.",
         "Uses a MacBook Pro with VS Code and Python.",
         "Has a daughter who is five years old.",
     ]
     zh = transfer.parse("chatgpt", CHATGPT_ZH)
-    assert [i.content for i in zh] == ["用户喜欢用中文交流，回答先给结论", "用户在 MyMemo 担任 CTO", "用户正在学习日语"]
+    assert [i.content for i in zh] == ["用户喜欢用中文交流，回答先给结论", "用户在 Acme 担任 CTO", "用户正在学习日语"]
 
 
 def test_parse_claude_dated_list():
     items = transfer.parse("claude", CLAUDE_EXPORT)
     assert [(i.created_at, i.content) for i in items] == [
-        ("2026-03-02", "Works as CTO at MyMemo, building an AI notes product"),
+        ("2026-03-02", "Works as CTO at Acme, building an AI notes product"),
         ("2026-03-05", "Prefers TypeScript over JavaScript for new projects"),
         (None, "[unknown] - Lives in San Francisco"),
     ]
@@ -140,7 +140,7 @@ def test_json_import_keeps_dates_and_hints_without_classifying(vault):
 
 
 def test_openmymemo_json_export_round_trips_into_the_original_topics(tmp_path, vault):
-    work = vault.add("work", "CTO at MyMemo", created_at="2024-02-03T04:05:06+00:00")
+    work = vault.add("work", "CTO at Acme", created_at="2024-02-03T04:05:06+00:00")
     vault.add("people", "Has a daughter who is five")
     _import(vault, "chatgpt", "Prefers green tea")
     exported = transfer.export(vault, "json")
@@ -169,11 +169,11 @@ def test_sort_suggests_and_moves_only_what_is_listed(vault):
     assert [r["memory_id"] for r in rows] == [*ids, rows[-1]["memory_id"]]
     assert set(rows[0]) == {"memory_id", "content", "from_topic", "topic", "confidence"}
     by_content = {r["content"]: r for r in rows}
-    assert by_content["Is the CTO of MyMemo, a note-taking startup."]["topic"] == "work"
+    assert by_content["Is the CTO of Acme, a note-taking startup."]["topic"] == "work"
     assert by_content["Has a daughter who is five years old."]["topic"] == "people"
     assert by_content["Grows tomatoes"] == {**by_content["Grows tomatoes"], "from_topic": "from-text", "topic": None}
     assert all(r["topic"] is None or not r["topic"].startswith("from-") for r in rows)
-    assert 0 < by_content["Is the CTO of MyMemo, a note-taking startup."]["confidence"] <= 1
+    assert 0 < by_content["Is the CTO of Acme, a note-taking startup."]["confidence"] <= 1
 
     assert [r["from_topic"] for r in transfer.sort_plan(vault, "from-text")] == ["from-text"]
     with pytest.raises(VaultError):
@@ -206,7 +206,7 @@ def test_ai_additions_are_never_filed_into_an_import_topic(vault):
 
 def test_context_topic_index_skips_import_topics_but_shows_their_memories(vault):
     _import(vault, "chatgpt", "Prefers green tea")
-    vault.add("work", "CTO at MyMemo")
+    vault.add("work", "CTO at Acme")
     text = compile_context(vault, Connectors(vault).ensure("claude"))["text"]
     index = text.split("Topics to file proposals under", 1)[1].split("\n\n", 1)[0]
     assert "`work`" in index and "from-chatgpt" not in index and "From ChatGPT" not in index
@@ -215,12 +215,12 @@ def test_context_topic_index_skips_import_topics_but_shows_their_memories(vault)
 
 
 def test_exports(vault):
-    vault.add("work", "在 MyMemo 做 CTO")
+    vault.add("work", "在 Acme 做 CTO")
     vault.add("health", "对青霉素过敏")
     assert "对青霉素过敏" not in transfer.export(vault, "markdown")
     assert "对青霉素过敏" in transfer.export(vault, "markdown", include_private=True)
     claude = transfer.export(vault, "claude")
-    assert claude.startswith("[20") and "– 在 MyMemo 做 CTO" in claude
+    assert claude.startswith("[20") and "– 在 Acme 做 CTO" in claude
     assert transfer.export(vault, "chatgpt").startswith("Please remember")
     data = json.loads(transfer.export(vault, "json"))
     assert data["format"] == "openmymemo/1" and len(data["memories"]) == 1
@@ -228,14 +228,14 @@ def test_exports(vault):
 
 def test_context_respects_scope_order_and_budget(vault):
     cons = Connectors(vault)
-    vault.add("work", "在 MyMemo 做 CTO")
+    vault.add("work", "在 Acme 做 CTO")
     vault.add("how-to-work-with-me", "回答先给结论再给原因")
     vault.add("health", "对青霉素过敏")
     vault.add("people", "女儿五岁", private=True)
     c = cons.ensure("claude")
     ctx = compile_context(vault, c)
     text = ctx["text"]
-    assert text.index("回答先给结论") < text.index("在 MyMemo 做 CTO")
+    assert text.index("回答先给结论") < text.index("在 Acme 做 CTO")
     assert "青霉素" not in text and "女儿" not in text
     assert "`health`" in text  # topic index still lists where to propose
     full = cons.update("claude", include_private=True)
@@ -249,7 +249,7 @@ def test_context_respects_scope_order_and_budget(vault):
 
 
 def test_search_handles_short_cjk_queries(vault):
-    m = vault.add("work", "在 MyMemo 做 CTO")
+    m = vault.add("work", "在 Acme 做 CTO")
     vault.add("interests", "喜欢科幻小说")
     hits = search(vault, None, "work")
     assert [h[1].id for h in hits] == [m.id]  # matched through the topic title
@@ -259,8 +259,8 @@ def test_search_handles_short_cjk_queries(vault):
 
 
 @pytest.mark.parametrize("text,topic", [
-    ("Is the CTO of MyMemo; the stack is FastAPI, Vue 3 and Swift.", "work"),
-    ("用户在 MyMemo 担任 CTO，技术栈是 FastAPI + Vue 3 + Swift", "work"),
+    ("Is the CTO of Acme; the stack is FastAPI, Vue 3 and Swift.", "work"),
+    ("用户在 Acme 担任 CTO，技术栈是 FastAPI + Vue 3 + Swift", "work"),
     ("Uses a MacBook Pro with VS Code as the main editor.", "tools"),
     ("Has a five-year-old daughter.", "people"),
     ("Goes running every morning at 6.", "lifestyle"),
