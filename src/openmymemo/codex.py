@@ -3,8 +3,8 @@
 Codex doesn't run hooks that plugins ship (as of 0.162 its ``plugin_hooks`` feature is marked removed), so
 the hook goes into the user's own ``$CODEX_HOME/hooks.json``. Codex trusts a hook by a hash of its content,
 so the entry we write never changes across plugin upgrades: in plugin mode the command finds the newest
-installed plugin version when it runs instead of naming one. The user trusts it once with ``/hooks`` in
-the Codex CLI; the ChatGPT desktop app reads the same config but has no ``/hooks`` of its own.
+installed plugin version when it runs instead of naming one. The user trusts it once, either in the ChatGPT
+desktop app (Settings → Coding → Hooks) or with ``/hooks`` in the Codex CLI; both read the same config.
 """
 
 from __future__ import annotations
