@@ -1,5 +1,5 @@
 import json
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 import yaml
@@ -103,7 +103,8 @@ def test_claude_dates_survive_the_import(vault):
     assert [m.topic for m in mems] == ["from-claude"] * 3
     assert [m.created_at[:10] for m in mems[:2]] == ["2026-03-02", "2026-03-05"]
     assert mems[0].created_at == "2026-03-02T00:00:00+00:00"
-    assert mems[2].created_at[:10] == date.today().isoformat()  # no date in the source: now
+    # No date in the source: stamped now, in UTC, so compare instants rather than the local calendar date.
+    assert abs(datetime.now(UTC) - datetime.fromisoformat(mems[2].created_at)) < timedelta(minutes=1)
     assert vault.topic("from-claude")["title"] == "From Claude"
 
 
