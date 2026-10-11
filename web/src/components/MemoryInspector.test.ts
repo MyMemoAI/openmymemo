@@ -89,6 +89,26 @@ describe("the inspector's text field", () => {
     expect(store.toast?.text ?? "").not.toContain("while you were typing"); // B was the user's own save
   });
 
+  it("keeps text typed back to the original while a save is on its way, even if the refresh comes first", async () => {
+    let finish: (m: Memory) => void = () => {};
+    api.patchMemory.mockImplementationOnce(() => new Promise<Memory>((resolve) => (finish = resolve)));
+    const w = mount(MemoryInspector, { props: { memory: memory("A") } });
+    const field = w.get("textarea");
+    await field.setValue("B");
+    await field.trigger("blur"); // saving B…
+    await field.trigger("focus");
+    await field.setValue("A"); // …while the user types the old text back
+    await w.setProps({ memory: memory("B", { version: 2 }) }); // the refresh lands before the save returns
+    expect((field.element as HTMLTextAreaElement).value).toBe("A");
+    finish(memory("B", { version: 2 }));
+    await flushPromises();
+    expect((field.element as HTMLTextAreaElement).value).toBe("A");
+    await field.trigger("blur");
+    await flushPromises();
+    expect(api.patchMemory).toHaveBeenLastCalledWith("m1", { content: "A" });
+    expect(store.toast?.text ?? "").not.toContain("while you were typing"); // B was the user's own save
+  });
+
   it("lets only the newest of two overlapping saves move the baseline", async () => {
     const pending: ((m: Memory) => void)[] = [];
     api.patchMemory.mockImplementation(() => new Promise<Memory>((resolve) => pending.push(resolve)));

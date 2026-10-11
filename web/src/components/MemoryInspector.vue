@@ -15,15 +15,23 @@ const m = computed(() => props.memory);
 const history = ref<HistoryRow[]>([]);
 
 /**
- * The text field. `baseline` is the memory's text the draft started from: an untouched draft follows the
- * vault when an AI app or an editor changes the memory (even while the field has focus), and only text the
- * user actually changed is ever written back.
+ * The text field. Typing is counted, not inferred from the text: the draft follows the vault (an AI app,
+ * an editor, the refresh after a save) until the user types, and from then on only the user's text is
+ * written back, even when they type it back to what it was. `baseline` is the vault's text the draft was
+ * last in step with, to tell when someone else changed the memory meanwhile.
  */
 const draft = ref("");
 const baseline = ref("");
-const dirty = computed(() => draft.value !== baseline.value);
+let typed = 0; // input events so far
+let inStep = 0; // the count when the draft last took the vault's text
+const touched = () => typed !== inStep;
+
+function follow(content: string) {
+  draft.value = baseline.value = content;
+  inStep = typed;
+}
 watch(() => [m.value.id, m.value.content], () => {
-  if (!dirty.value) draft.value = baseline.value = m.value.content;
+  if (!touched()) follow(m.value.content);
 }, { immediate: true });
 
 async function loadHistory() {
@@ -35,27 +43,25 @@ watch(() => [m.value.id, m.value.version, m.value.status], loadHistory, { immedi
 
 const patch = (body: Parameters<typeof api.patchMemory>[1]) => act(() => api.patchMemory(m.value.id, body));
 
-function revert() {
-  draft.value = baseline.value = m.value.content;
-}
+const revert = () => follow(m.value.content);
 
 /** Bumped by every save, so only the newest one to finish moves the baseline. */
 let saves = 0;
 
 async function save() {
-  const sent = draft.value;
-  const text = sent.trim();
-  if (!dirty.value || !text || text === m.value.content) return revert();
+  const text = draft.value.trim();
+  if (!touched() || !text || text === m.value.content) return revert();
   // Someone else changed the memory while the user was typing: the user's words win, and they hear about
-  // it, because the other version is now only in the history.
-  const changedMeanwhile = m.value.content !== baseline.value;
+  // it, because the other version is now only in the history. (The user's own earlier save isn't news.)
+  const changedMeanwhile = m.value.content !== baseline.value && m.value.last_actor !== "user";
   const other = actor(m.value.last_actor);
+  const sentAt = typed;
   const generation = ++saves;
   const saved = await patch({ content: text });
   if (!saved || generation !== saves) return;
-  baseline.value = saved.content;
-  // The user may have typed again while this was saving: keep that, it's the next edit.
-  if (draft.value === sent) draft.value = saved.content;
+  // Typing since this save started is the next edit: keep it for the next save.
+  if (typed === sentAt) follow(saved.content);
+  else baseline.value = saved.content;
   if (changedMeanwhile) toast(t("ins.changedMeanwhile", { who: other }));
 }
 
@@ -151,6 +157,7 @@ const rollback = (row: HistoryRow) => act(() => api.rollback(m.value.id, row.ver
       rows="3"
       class="min-h-21 w-full resize-y rounded-[10px] bg-surface px-3 py-2.5 text-sm leading-normal shadow-[0_0_0_1px_var(--color-sep)] outline-none focus:shadow-[0_0_0_3px_var(--color-focus)]"
       :readonly="m.status !== 'active'"
+      @input="typed++"
       @blur="save"
       @keydown="onKey"
     />
