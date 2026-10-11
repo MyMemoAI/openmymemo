@@ -16,9 +16,9 @@ const history = ref<HistoryRow[]>([]);
 
 /**
  * The text field. Typing is counted, not inferred from the text: the draft follows the vault (an AI app,
- * an editor, the refresh after a save) until the user types, and from then on only the user's text is
- * written back, even when they type it back to what it was. `baseline` is the vault's text the draft was
- * last in step with, to tell when someone else changed the memory meanwhile.
+ * an editor, the refresh after a save) until the user types, and from then on it is the user's until what
+ * they typed has been saved. `baseline` is the vault's text the draft was last in step with, to tell when
+ * someone else changed the memory meanwhile.
  */
 const draft = ref("");
 const baseline = ref("");
@@ -43,26 +43,43 @@ watch(() => [m.value.id, m.value.version, m.value.status], loadHistory, { immedi
 
 const patch = (body: Parameters<typeof api.patchMemory>[1]) => act(() => api.patchMemory(m.value.id, body));
 
-const revert = () => follow(m.value.content);
+/** Leaving the field: save what the user typed. Saves go out one at a time, newest last. */
+type Save = { text: string; at: number; meanwhile: boolean; other: string };
+let queued: Save | null = null;
+let saving = false;
 
-/** Bumped by every save, so only the newest one to finish moves the baseline. */
-let saves = 0;
+function revert() {
+  queued = null;
+  follow(m.value.content);
+}
 
-async function save() {
+function save() {
   const text = draft.value.trim();
-  if (!touched() || !text || text === m.value.content) return revert();
+  if (!touched() || !text) return revert();
+  // With a save on its way, the memory's text here is out of date, so it can't tell that nothing changed.
+  if (!saving && text === m.value.content) return follow(m.value.content);
   // Someone else changed the memory while the user was typing: the user's words win, and they hear about
   // it, because the other version is now only in the history. (The user's own earlier save isn't news.)
-  const changedMeanwhile = m.value.content !== baseline.value && m.value.last_actor !== "user";
-  const other = actor(m.value.last_actor);
-  const sentAt = typed;
-  const generation = ++saves;
-  const saved = await patch({ content: text });
-  if (!saved || generation !== saves) return;
-  // Typing since this save started is the next edit: keep it for the next save.
-  if (typed === sentAt) follow(saved.content);
-  else baseline.value = saved.content;
-  if (changedMeanwhile) toast(t("ins.changedMeanwhile", { who: other }));
+  const meanwhile = m.value.content !== baseline.value && m.value.last_actor !== "user";
+  queued = { text, at: typed, meanwhile, other: actor(m.value.last_actor) };
+  if (!saving) void flush();
+}
+
+async function flush() {
+  saving = true;
+  let previous = null as Memory | null; // what the last save left in the vault; the prop may lag behind it
+  while (queued) {
+    const job: Save = queued;
+    queued = null;
+    const saved: Memory | undefined = previous?.content === job.text ? previous : await patch({ content: job.text });
+    if (!saved) break; // the error is shown; the draft stays the user's, and leaving the field again retries
+    previous = saved;
+    baseline.value = saved.content;
+    if (job.meanwhile) toast(t("ins.changedMeanwhile", { who: job.other }));
+    // Done with what the user typed, unless they typed more since: that is the next save.
+    if (!queued && typed === job.at) follow(saved.content);
+  }
+  saving = false;
 }
 
 function onKey(e: KeyboardEvent) {
