@@ -1,5 +1,6 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { defineComponent, h, ref } from "vue";
 import type { Memory } from "../api";
 import { store } from "../store";
 import MemoryInspector from "./MemoryInspector.vue";
@@ -165,6 +166,31 @@ describe("the inspector's text field", () => {
     await field.trigger("blur");
     await flushPromises();
     expect(api.patchMemory).toHaveBeenCalledTimes(2); // D is saved and clean: nothing more to write
+  });
+
+  it("never lets an older edit land after a newer one when the user selects away and back", async () => {
+    // Like MemoriesDesktopView: the inspector is keyed by the selected memory, so coming back remounts it.
+    const selected = ref("m1");
+    const memories: Record<string, Memory> = { m1: memory("A"), m2: memory("Other", { id: "m2" }) };
+    const Parent = defineComponent(() => () => h(MemoryInspector, { key: selected.value, memory: memories[selected.value] }));
+    let finish: (m: Memory) => void = () => {};
+    api.patchMemory.mockImplementationOnce(() => new Promise<Memory>((resolve) => (finish = resolve)));
+    const w = mount(Parent);
+
+    await w.get("textarea").setValue("B");
+    await w.get("textarea").trigger("blur"); // saving B…
+    await w.get("textarea").setValue("C");
+    await w.get("textarea").trigger("blur"); // …C waits behind it
+    selected.value = "m2";
+    await flushPromises();
+    selected.value = "m1"; // a new inspector for the same memory
+    await flushPromises();
+    await w.get("textarea").setValue("D");
+    await w.get("textarea").trigger("blur"); // D replaces C in the queue
+    finish(memory("B", { version: 2 }));
+    await flushPromises();
+
+    expect(api.patchMemory.mock.calls.map(([, body]) => body.content)).toEqual(["B", "D"]);
   });
 
   it("keeps the user's text when a save fails, and tries again when the field is left again", async () => {

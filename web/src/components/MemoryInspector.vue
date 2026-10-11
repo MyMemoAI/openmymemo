@@ -4,6 +4,7 @@ import { api, type HistoryRow, type Kind, type Memory } from "../api";
 import { native, shell } from "../desktop";
 import { relTime, sourceLabel, t } from "../i18n";
 import { srcLabel } from "../memoryList";
+import { SUPERSEDED, saveText, saving, waiting } from "../memorySaves";
 import { act, connectorName, copy, store, toast, topicsBySlug, topicTitle } from "../store";
 import AppIcon from "./AppIcon.vue";
 import DropMenu from "./DropMenu.vue";
@@ -17,7 +18,7 @@ const history = ref<HistoryRow[]>([]);
 /**
  * The text field. Typing is counted, not inferred from the text: the draft follows the vault (an AI app,
  * an editor, the refresh after a save) until the user types, and from then on it is the user's until what
- * they typed has been saved. `baseline` is the vault's text the draft was last in step with, to tell when
+ * they typed has been saved. Escape gives up what is being typed; text already left to save still saves. `baseline` is the vault's text the draft was last in step with, to tell when
  * someone else changed the memory meanwhile.
  */
 const draft = ref("");
@@ -43,43 +44,26 @@ watch(() => [m.value.id, m.value.version, m.value.status], loadHistory, { immedi
 
 const patch = (body: Parameters<typeof api.patchMemory>[1]) => act(() => api.patchMemory(m.value.id, body));
 
-/** Leaving the field: save what the user typed. Saves go out one at a time, newest last. */
-type Save = { text: string; at: number; meanwhile: boolean; other: string };
-let queued: Save | null = null;
-let saving = false;
+const revert = () => follow(m.value.content);
 
-function revert() {
-  queued = null;
-  follow(m.value.content);
-}
-
-function save() {
+/** Leaving the field: save what the user typed (memorySaves.ts sends one save per memory at a time). */
+async function save() {
+  const id = m.value.id;
   const text = draft.value.trim();
   if (!touched() || !text) return revert();
   // With a save on its way, the memory's text here is out of date, so it can't tell that nothing changed.
-  if (!saving && text === m.value.content) return follow(m.value.content);
+  if (!saving(id) && text === m.value.content) return follow(m.value.content);
   // Someone else changed the memory while the user was typing: the user's words win, and they hear about
   // it, because the other version is now only in the history. (The user's own earlier save isn't news.)
   const meanwhile = m.value.content !== baseline.value && m.value.last_actor !== "user";
-  queued = { text, at: typed, meanwhile, other: actor(m.value.last_actor) };
-  if (!saving) void flush();
-}
-
-async function flush() {
-  saving = true;
-  let previous = null as Memory | null; // what the last save left in the vault; the prop may lag behind it
-  while (queued) {
-    const job: Save = queued;
-    queued = null;
-    const saved: Memory | undefined = previous?.content === job.text ? previous : await patch({ content: job.text });
-    if (!saved) break; // the error is shown; the draft stays the user's, and leaving the field again retries
-    previous = saved;
-    baseline.value = saved.content;
-    if (job.meanwhile) toast(t("ins.changedMeanwhile", { who: job.other }));
-    // Done with what the user typed, unless they typed more since: that is the next save.
-    if (!queued && typed === job.at) follow(saved.content);
-  }
-  saving = false;
+  const other = actor(m.value.last_actor);
+  const at = typed;
+  const saved = await saveText(id, text);
+  if (saved === SUPERSEDED || !saved) return; // newer text is being saved instead, or the error is shown
+  baseline.value = saved.content;
+  if (meanwhile) toast(t("ins.changedMeanwhile", { who: other }));
+  // Done with what the user typed, unless they typed more since, or newer text waits: that's the next save.
+  if (typed === at && !waiting(id)) follow(saved.content);
 }
 
 function onKey(e: KeyboardEvent) {
