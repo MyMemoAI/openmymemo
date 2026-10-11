@@ -1,67 +1,39 @@
-"""Render the OpenMyMemo logo (web/public/favicon.svg) to PNGs without any imaging library.
+"""Render the app icons and the panel logo from the MyMemo logo.
 
-    uv run python scripts/make_icons.py
+    uv run --with pillow python scripts/make_icons.py <square logo, at least 512 px>
 
-The logo is a dark rounded square with three amber lines, defined on a 32x32 grid.
+The source is MyMemo's square app icon (the gradient "M" on black, 1024x1024, full bleed). This rounds the
+corners the way mymemo.ai's favicon does and writes integrations/icons/icon-*.png and web/public/logo.png.
+Pillow is only needed here, so it isn't a project dependency.
 """
 
-import struct
-import zlib
+import sys
 from pathlib import Path
 
-BG = (28, 25, 23)       # stone-900
-FG = (251, 191, 36)     # amber-400
-LINES = [(9, 11.5, 23), (9, 16, 23), (9, 20.5, 18)]  # x0, y, x1 on the 32 grid
-STROKE = 2.4
-RADIUS = 8
-OUT = Path(__file__).resolve().parent.parent / "integrations" / "icons"
+from PIL import Image, ImageDraw
+
+ROOT = Path(__file__).resolve().parent.parent
+RADIUS = 0.22    # corner radius as a share of the side, matching mymemo.ai's favicon
+SUPERSAMPLE = 4  # draw the corner mask larger, then scale it down, for smooth edges
 
 
-def coverage(x: float, y: float) -> tuple[float, float]:
-    """(in_square, on_line) for a point on the 32x32 grid."""
-    cx = min(max(x, RADIUS), 32 - RADIUS)
-    cy = min(max(y, RADIUS), 32 - RADIUS)
-    in_square = (x - cx) ** 2 + (y - cy) ** 2 <= RADIUS ** 2 and 0 <= x <= 32 and 0 <= y <= 32
-    on_line = False
-    for x0, ly, x1 in LINES:
-        px = min(max(x, x0), x1)
-        if (x - px) ** 2 + (y - ly) ** 2 <= (STROKE / 2) ** 2:
-            on_line = True
-            break
-    return in_square, on_line
-
-
-def render(size: int, samples: int = 4) -> bytes:
-    rows = []
-    step = 32 / size
-    for j in range(size):
-        row = bytearray([0])  # filter type 0
-        for i in range(size):
-            sq = ln = 0
-            for sj in range(samples):
-                for si in range(samples):
-                    x = (i + (si + 0.5) / samples) * step
-                    y = (j + (sj + 0.5) / samples) * step
-                    a, b = coverage(x, y)
-                    sq += a
-                    ln += a and b
-            n = samples * samples
-            alpha = sq / n
-            mix = ln / sq if sq else 0
-            rgb = [round(BG[k] * (1 - mix) + FG[k] * mix) for k in range(3)]
-            row += bytes([*rgb, round(alpha * 255)])
-        rows.append(bytes(row))
-    raw = zlib.compress(b"".join(rows), 9)
-
-    def chunk(kind: bytes, data: bytes) -> bytes:
-        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
-
-    header = struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0)
-    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", raw) + chunk(b"IEND", b"")
+def rounded(src: Image.Image, size: int) -> Image.Image:
+    big = size * SUPERSAMPLE
+    mask = Image.new("L", (big, big), 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, big - 1, big - 1), radius=round(big * RADIUS), fill=255)
+    icon = src.convert("RGB").resize((size, size), Image.Resampling.LANCZOS).convert("RGBA")
+    icon.putalpha(mask.resize((size, size), Image.Resampling.LANCZOS))
+    return icon
 
 
 if __name__ == "__main__":
-    OUT.mkdir(parents=True, exist_ok=True)
-    for size in (16, 32, 48, 128, 512):
-        (OUT / f"icon-{size}.png").write_bytes(render(size))
-        print(f"wrote {OUT / f'icon-{size}.png'}")
+    if len(sys.argv) != 2:
+        sys.exit(__doc__)
+    src = Image.open(sys.argv[1])
+    if src.width != src.height or src.width < 512:
+        sys.exit("The logo must be square and at least 512 px.")
+    targets = {ROOT / "integrations" / "icons" / f"icon-{s}.png": s for s in (16, 32, 48, 128, 512)}
+    targets[ROOT / "web" / "public" / "logo.png"] = 256
+    for path, size in targets.items():
+        rounded(src, size).save(path, optimize=True)
+        print(f"wrote {path.relative_to(ROOT)}")
