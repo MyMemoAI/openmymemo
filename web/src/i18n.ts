@@ -125,6 +125,7 @@ const strings: Record<string, string> = {
   "ins.history": "History",
   "ins.showInFinder": "Show in Finder",
   "ins.copyText": "Copy text",
+  "ins.changedMeanwhile": "{who} changed this memory while you were typing. Your version is saved; theirs is in the history.",
   "set.title": "Settings",
   "set.folder": "Memory folder",
   "set.folderHelp": "Every AI app that uses this folder shares the same memory.",

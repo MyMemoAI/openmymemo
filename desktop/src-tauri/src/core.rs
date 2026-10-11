@@ -7,6 +7,7 @@
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom};
+use std::ops::Range;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -15,8 +16,9 @@ use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 
-pub const BASE_PORT: u16 = 8787;
-const PORTS: u16 = 10;
+/// The ports the app looks at for this folder's server, and starts its own on: 8787, the panel's usual
+/// port, and the next nine.
+pub const PORTS: Range<u16> = 8787..8797;
 /// The first launch downloads Python and the dependencies; give it time.
 const START_TIMEOUT: Duration = Duration::from_secs(600);
 
@@ -103,7 +105,10 @@ pub struct Paths {
 pub struct Core {
     pub vault: PathBuf,
     paths: Paths,
+    ports: Range<u16>,
     child: Option<(Child, u16)>,
+    /// The port that served this folder last, looked at first so the window's address stays put.
+    last_port: Option<u16>,
 }
 
 /// The process group of the server this app started, so the exit handler can stop it.
@@ -120,26 +125,51 @@ pub fn stop_child() {
 }
 
 impl Core {
-    pub fn new(vault: PathBuf, paths: Paths) -> Self {
-        Core { vault, paths, child: None }
+    pub fn new(vault: PathBuf, paths: Paths, ports: Range<u16>) -> Self {
+        Core { vault, paths, ports, child: None, last_port: None }
+    }
+
+    /// The memory folder changed: forget the old folder's server.
+    pub fn set_vault(&mut self, vault: PathBuf) {
+        self.stop();
+        self.vault = vault;
+        self.last_port = None;
     }
 
     /// The port that serves this folder, starting a server if none does. `status` reports progress.
+    ///
+    /// One server per folder: every candidate port is asked before a server is started, so a server for
+    /// this folder on a higher port is found even when a lower one is free.
     pub fn ensure(&mut self, status: &dyn Fn(&str, &str)) -> Result<(u16, PanelState), String> {
-        if let Some(port) = self.child_port() {
-            return self.wait_ready(port, status);
+        let found = match self.child_port() {
+            Some(port) => self.wait_ready(port, status),
+            None => self.find_or_start(status),
+        };
+        if let Ok((port, _)) = &found {
+            self.last_port = Some(*port);
         }
-        for port in BASE_PORT..BASE_PORT + PORTS {
+        found
+    }
+
+    fn find_or_start(&mut self, status: &dyn Fn(&str, &str)) -> Result<(u16, PanelState), String> {
+        let last = self.last_port.filter(|p| self.ports.contains(p));
+        let mut free = None;
+        for port in last.into_iter().chain(self.ports.clone().filter(|p| Some(*p) != last)) {
             match probe(port, &self.vault) {
                 Probe::Ours(state) => return Ok((port, state)),
-                Probe::Other => continue,
-                Probe::Free => {
-                    self.spawn(port)?;
-                    return self.wait_ready(port, status);
-                }
+                Probe::Free => free = free.or(Some(port)),
+                Probe::Other => {}
             }
         }
-        Err(format!("Ports {BASE_PORT}–{} are all in use by other programs.", BASE_PORT + PORTS - 1))
+        let Some(port) = free else {
+            return Err(format!(
+                "Ports {}–{} are all in use by other programs.",
+                self.ports.start,
+                self.ports.end - 1
+            ));
+        };
+        self.spawn(port)?;
+        self.wait_ready(port, status)
     }
 
     /// The port of the server we started, if it is still running.
@@ -164,7 +194,8 @@ impl Core {
             .arg(&p.project)
             .args(["--frozen", "--no-dev", "--quiet", "openmymemo", "--vault"])
             .arg(&self.vault)
-            .args(["serve", "--no-open", "--port", &port.to_string()])
+            // --init: a first launch creates the vault in a missing or empty folder (and refuses any other).
+            .args(["serve", "--init", "--no-open", "--port", &port.to_string()])
             // Everything the app installs stays in its own folders, and Python is uv's own, never the system's.
             .env("UV_PROJECT_ENVIRONMENT", p.support.join("venv"))
             .env("UV_PYTHON_INSTALL_DIR", p.support.join("python"))
@@ -238,3 +269,109 @@ impl Core {
         }
     }
 }
+
+/// Whether `path` can be the memory folder: an OpenMyMemo vault, or a folder that is missing or holds only
+/// hidden entries (the server creates the vault there). The same rule as `Vault.open_or_create`.
+pub fn check_folder(path: &Path) -> Result<(), String> {
+    if path.join(".openmymemo/topics.yaml").is_file() && path.join("memories").is_dir() {
+        return Ok(());
+    }
+    if !path.exists() {
+        return Ok(());
+    }
+    let entries = fs::read_dir(path).map_err(|e| format!("Can't open {}: {e}", path.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| e.to_string())?;
+        if !entry.file_name().to_string_lossy().starts_with('.') {
+            return Err(format!(
+                "{} isn't empty and isn't an OpenMyMemo memory folder. Choose an empty folder or an existing memory folder.",
+                path.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::net::TcpListener;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("openmymemo-desktop-{}-{name}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A stand-in panel server that says it serves `vault`.
+    fn fake_server(vault: &Path) -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let body = serde_json::json!({ "vault": vault, "counts": { "pending": 0, "unreviewed": 0 } }).to_string();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let mut stream = stream;
+                let mut buf = [0u8; 2048];
+                let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
+                if stream.read(&mut buf).unwrap_or(0) == 0 {
+                    continue; // a probe's bare connect
+                }
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+        });
+        port
+    }
+
+    fn core(vault: &Path, ports: Range<u16>) -> Core {
+        let none = PathBuf::from("/nonexistent/openmymemo-test");
+        let paths = Paths { uv: none.join("uv"), project: none.clone(), support: none.clone(), cache: none.clone(), log: none.join("core.log") };
+        Core::new(vault.to_path_buf(), paths, ports)
+    }
+
+    #[test]
+    fn finds_this_folders_server_above_a_free_port_instead_of_starting_one() {
+        let vault = temp_dir("found");
+        let port = fake_server(&vault);
+        let ports = port - 4..port + 1;
+        assert!(ports.clone().any(|p| p < port && matches!(probe(p, &vault), Probe::Free)), "needs a free lower port");
+        // Starting a server would fail here (no uv), so Ok means nothing was started.
+        let (found, _) = core(&vault, ports).ensure(&|_, _| {}).expect("the existing server");
+        assert_eq!(found, port);
+    }
+
+    #[test]
+    fn skips_a_server_for_another_folder() {
+        let ours = temp_dir("ours");
+        let other = temp_dir("other");
+        let theirs = fake_server(&other);
+        assert!(matches!(probe(theirs, &ours), Probe::Other));
+        let err = core(&ours, theirs..theirs + 1).ensure(&|_, _| {}).unwrap_err();
+        assert!(err.contains("in use by other programs"), "{err}");
+    }
+
+    #[test]
+    fn accepts_a_vault_or_a_missing_or_empty_folder_and_refuses_anything_else() {
+        let root = temp_dir("folders");
+        assert!(check_folder(&root.join("absent")).is_ok());
+        let empty = root.join("empty");
+        fs::create_dir_all(&empty).unwrap();
+        fs::write(empty.join(".DS_Store"), "").unwrap();
+        assert!(check_folder(&empty).is_ok());
+        let vault = root.join("vault");
+        fs::create_dir_all(vault.join(".openmymemo")).unwrap();
+        fs::create_dir_all(vault.join("memories")).unwrap();
+        fs::write(vault.join(".openmymemo/topics.yaml"), "").unwrap();
+        assert!(check_folder(&vault).is_ok());
+        let busy = root.join("busy");
+        fs::create_dir_all(&busy).unwrap();
+        fs::write(busy.join("notes.txt"), "mine").unwrap();
+        assert!(check_folder(&busy).unwrap_err().contains("isn't empty"));
+    }
+}
+

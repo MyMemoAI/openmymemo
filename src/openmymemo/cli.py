@@ -34,10 +34,11 @@ def _pad(text: str, width: int) -> str:
     return text + " " * max(0, width - cells)
 
 
-def _vault(ctx: typer.Context) -> Vault:
-    vault = Vault(ctx.obj["vault"])
+def _vault(ctx: typer.Context, init: bool = False) -> Vault:
+    """The vault; with `init`, created first when the folder is missing or empty (a folder holding anything
+    else is refused). Plugins and the Mac app pass --init so a first launch just works."""
     try:
-        return vault.ensure()
+        return Vault.open_or_create(ctx.obj["vault"]) if init else Vault(ctx.obj["vault"]).ensure()
     except VaultError as e:
         typer.secho(str(e), fg="red", err=True)
         raise typer.Exit(1) from None
@@ -443,20 +444,14 @@ def mcp(ctx: typer.Context,
     """Run the MCP server over stdio (for Claude Desktop, Claude Code, Cursor, Codex …)."""
     from .mcp_server import run_stdio
 
-    if init:
-        try:
-            vault = Vault.open_or_create(ctx.obj["vault"])
-        except VaultError as e:
-            typer.secho(str(e), fg="red", err=True)
-            raise typer.Exit(1) from None
-    else:
-        vault = _vault(ctx)
-    run_stdio(vault, connector, panel_port or None)
+    run_stdio(_vault(ctx, init), connector, panel_port or None)
 
 
 @app.command()
 def serve(ctx: typer.Context, port: int = DEFAULT_PORT,
-          open_browser: Annotated[bool, typer.Option("--open/--no-open", help="Open the panel.")] = True) -> None:
+          open_browser: Annotated[bool, typer.Option("--open/--no-open", help="Open the panel.")] = True,
+          init: Annotated[bool, typer.Option("--init", help="Create the vault if the folder is missing or empty.")] = False,
+          ) -> None:
     """Start the local panel and HTTP MCP endpoint on 127.0.0.1."""
     import socket
     import threading
@@ -466,7 +461,7 @@ def serve(ctx: typer.Context, port: int = DEFAULT_PORT,
 
     from .web import create_app
 
-    vault = _vault(ctx)
+    vault = _vault(ctx, init)
     url = f"http://127.0.0.1:{port}"
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         busy = s.connect_ex(("127.0.0.1", port)) == 0

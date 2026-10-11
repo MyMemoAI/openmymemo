@@ -154,16 +154,23 @@ async fn choose_vault(app: AppHandle) -> Result<(), String> {
         .set_directory(current.parent().unwrap_or(&current))
         .blocking_pick_folder();
     let Some(picked) = picked else { return Ok(()) };
-    let vault = picked.into_path().map_err(|e| e.to_string())?;
-    if vault == current {
-        return Ok(());
+    use_vault(&shared, picked.into_path().map_err(|e| e.to_string())?).map(|_| ())
+}
+
+/// Switch to `picked`, unless the server would refuse it: then nothing is saved, and the current folder
+/// and its server stay. Returns whether anything changed.
+fn use_vault(shared: &Shared, picked: PathBuf) -> Result<bool, String> {
+    if picked == shared.settings.lock().unwrap().vault {
+        return Ok(false);
     }
-    let settings = Settings { vault };
-    std::fs::create_dir_all(shared.settings_path.parent().unwrap()).map_err(|e| e.to_string())?;
+    core::check_folder(&picked)?;
+    let settings = Settings { vault: picked };
+    let dir = shared.settings_path.parent().ok_or("No settings folder")?;
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     std::fs::write(&shared.settings_path, serde_json::to_string_pretty(&settings).unwrap()).map_err(|e| e.to_string())?;
     *shared.settings.lock().unwrap() = settings;
     shared.restart.store(true, Ordering::SeqCst);
-    Ok(())
+    Ok(true)
 }
 
 // ---- the monitor: keep the server up, follow it, badge and notify ----------------------------------
@@ -235,13 +242,14 @@ fn update_badge(app: &AppHandle, counts: &Counts) {
 fn monitor(app: AppHandle, paths: Paths) {
     let shared = app.state::<Arc<Shared>>().inner().clone();
     let vault = shared.settings.lock().unwrap().vault.clone();
-    let mut core = Core::new(vault, paths);
+    let mut core = Core::new(vault, paths, core::PORTS);
     let mut last_counts: Option<Counts> = None;
     let mut seen: HashSet<String> = HashSet::new();
+    let mut failures: u32 = 0;
     loop {
         if shared.restart.swap(false, Ordering::SeqCst) {
-            core.stop();
-            core.vault = shared.settings.lock().unwrap().vault.clone();
+            core.set_vault(shared.settings.lock().unwrap().vault.clone());
+            failures = 0;
             shared.port.store(0, Ordering::SeqCst);
             last_counts = None;
             seen.clear();
@@ -257,6 +265,7 @@ fn monitor(app: AppHandle, paths: Paths) {
         let status = move |s: &str, d: &str| splash_status(&status_app, s, d, false);
         match core.ensure(&status) {
             Ok((port, state)) => {
+                failures = 0;
                 if shared.port.swap(port, Ordering::SeqCst) != port {
                     if let (Some(w), Ok(url)) = (main_window(&app), Url::parse(&format!("http://127.0.0.1:{port}/?desktop=1"))) {
                         let _ = w.navigate(url);
@@ -274,13 +283,17 @@ fn monitor(app: AppHandle, paths: Paths) {
                 }
             }
             Err(e) => {
+                failures += 1;
                 if on_splash {
                     splash_status(&app, "OpenMyMemo couldn't start", &e, true);
                 }
             }
         }
 
-        for _ in 0..16 {
+        // Every 4 seconds; after failures, back off to a minute so a folder that can't work isn't retried
+        // in a tight loop. Choosing another folder restarts at once.
+        let wait = if failures == 0 { 4 } else { (4u64 << failures.min(4)).min(60) };
+        for _ in 0..wait * 4 {
             if shared.restart.load(Ordering::SeqCst) {
                 break;
             }
@@ -490,3 +503,41 @@ fn main() {
             _ => {}
         });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_unusable_folder_is_refused_and_the_working_one_kept() {
+        let root = std::env::temp_dir().join(format!("openmymemo-desktop-{}-choose", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let current = root.join("current");
+        let busy = root.join("busy");
+        std::fs::create_dir_all(&busy).unwrap();
+        std::fs::write(busy.join("notes.txt"), "mine").unwrap();
+        let shared = Shared {
+            settings: Mutex::new(Settings { vault: current.clone() }),
+            settings_path: root.join("support/settings.json"),
+            port: AtomicU16::new(8787),
+            restart: AtomicBool::new(false),
+            splash_url: Mutex::new(None),
+            tray: Mutex::new(None),
+            review_item: Mutex::new(None),
+        };
+
+        let err = use_vault(&shared, busy).unwrap_err();
+        assert!(err.contains("isn't empty"), "{err}");
+        assert_eq!(shared.settings.lock().unwrap().vault, current);
+        assert!(!shared.settings_path.exists() && !shared.restart.load(Ordering::SeqCst));
+
+        // Recovery: an empty or new folder is accepted, saved, and the server restarts on it.
+        let fresh = root.join("fresh");
+        assert_eq!(use_vault(&shared, fresh.clone()), Ok(true));
+        let saved: Settings = serde_json::from_str(&std::fs::read_to_string(&shared.settings_path).unwrap()).unwrap();
+        assert_eq!(saved.vault, fresh);
+        assert!(shared.restart.load(Ordering::SeqCst));
+        assert_eq!(use_vault(&shared, fresh), Ok(false));
+    }
+}
+

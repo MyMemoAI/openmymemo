@@ -20,7 +20,9 @@ uv run ruff check src tests scripts
 uv run openmymemo --vault /tmp/v init       # CLI
 uv run python scripts/demo_vault.py /tmp/d  # demo data
 cd web && pnpm install && pnpm build        # panel → src/openmymemo/static/ (commit the build output)
+cd web && pnpm test                         # panel tests (vitest)
 cd desktop && pnpm install && pnpm tauri dev # Mac app (needs Rust); `pnpm tauri build` for the .app
+python3 scripts/stage_desktop.py && (cd desktop/src-tauri && cargo test)  # Mac app tests
 ```
 
 ## Code map
@@ -58,7 +60,7 @@ cd desktop && pnpm install && pnpm tauri dev # Mac app (needs Rust); `pnpm tauri
 - All writes go through `Vault` methods, which lock, re-read from disk, write atomically and update meta and history.
 - The mcp SDK is 2.x: `from mcp.server.mcpserver import MCPServer, Context`; static resources can't take a `Context`.
 - Plugins run `uv run` from the installed copy of this repo, so anything the package needs at runtime must be inside the repo (and inside the `.mcpb` staging list in `scripts/build_mcpb.py`). Keep the version in `pyproject.toml`, `src/openmymemo/__init__.py`, both `plugin.json` files, the `.mcpb` manifest, `web/package.json` and the Mac app (`desktop/package.json`, `desktop/src-tauri/tauri.conf.json`, `desktop/src-tauri/Cargo.toml`) in sync (`tests/test_packaging.py` checks), and run `uv lock` after a bump.
-- CI (`.github/workflows/ci.yml`) runs the tests on Linux and macOS, checks that the committed panel build matches `web/`, and packs the `.mcpb`. To release: bump the version, merge, then push a tag `v<version>`; `.github/workflows/release.yml` publishes the `.mcpb`, wheel and sdist as a GitHub release.
+- CI (`.github/workflows/ci.yml`) runs the tests on Linux and macOS, checks that the committed panel build matches `web/`, runs the panel's and the Mac app's tests, and packs the `.mcpb`. To release: bump the version, merge, then push a tag `v<version>`; `.github/workflows/release.yml` publishes the `.mcpb`, wheel and sdist as a GitHub release.
 - Don't add a root `.mcp.json`: Claude Code would treat it as project config for everyone working on this repo. The Claude Code MCP server is declared inline in `.claude-plugin/plugin.json`.
 - Commit messages are imperative English; one topic per PR.
 - The Mac app adds nothing to the panel's API: it is the same panel in another layout. New panel features go into the web screens; give the Mac layout its own version only where the design has one. A native command the panel calls must be listed in `desktop/src-tauri/build.rs` and granted in `capabilities/default.json`, because the panel is a remote origin to Tauri.

@@ -143,6 +143,7 @@ uv run pytest                          # tests
 uv run ruff check src tests scripts
 uv run python scripts/demo_vault.py /tmp/omm-demo && uv run openmymemo --vault /tmp/omm-demo serve
 cd web && pnpm install && pnpm build   # builds the panel into src/openmymemo/static/ (committed)
+cd web && pnpm test                    # panel tests
 ```
 
 Panel development: run `openmymemo serve --no-open`, then `pnpm dev` in `web/` (port 5173, proxies `/api` to 8787, or to `OPENMYMEMO_PORT`). Add `?desktop=1` to the URL to see the Mac app's layout.

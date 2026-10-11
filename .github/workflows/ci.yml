@@ -49,6 +49,8 @@ jobs:
         working-directory: web
       - run: pnpm build  # type-checks with vue-tsc first
         working-directory: web
+      - run: pnpm test
+        working-directory: web
       - name: src/openmymemo/static matches web/
         run: |
           if [ -n "$(git status --porcelain src/openmymemo/static)" ]; then
@@ -56,6 +58,16 @@ jobs:
             echo "::error::The committed panel build is out of date. Run 'cd web && pnpm build' and commit src/openmymemo/static."
             exit 1
           fi
+
+  desktop:
+    name: Mac app tests
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - run: python3 scripts/stage_desktop.py  # the bundled core and uv, which the Tauri build checks for
+      - run: cargo test --locked
+        working-directory: desktop/src-tauri
 
   extension:
     name: Claude Desktop extension packs

@@ -1,4 +1,6 @@
 @import "tailwindcss";
+/* Tests aren't part of the panel; their strings would otherwise turn into utility classes. */
+@source not "./**/*.test.ts";
 
 /*
  * One quiet surface: a grey ground, white cards with a soft shadow instead of a border, hairline

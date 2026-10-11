@@ -4,7 +4,7 @@ import { api, type HistoryRow, type Kind, type Memory } from "../api";
 import { native, shell } from "../desktop";
 import { relTime, sourceLabel, t } from "../i18n";
 import { srcLabel } from "../memoryList";
-import { act, connectorName, copy, store, topicsBySlug, topicTitle } from "../store";
+import { act, connectorName, copy, store, toast, topicsBySlug, topicTitle } from "../store";
 import AppIcon from "./AppIcon.vue";
 import DropMenu from "./DropMenu.vue";
 
@@ -12,13 +12,18 @@ import DropMenu from "./DropMenu.vue";
 const props = defineProps<{ memory: Memory }>();
 
 const m = computed(() => props.memory);
-const draft = ref("");
 const history = ref<HistoryRow[]>([]);
 
-// Follow the memory, and the vault when an AI app or an editor changes it, unless the user is typing.
-const editing = ref(false);
+/**
+ * The text field. `baseline` is the memory's text the draft started from: an untouched draft follows the
+ * vault when an AI app or an editor changes the memory (even while the field has focus), and only text the
+ * user actually changed is ever written back.
+ */
+const draft = ref("");
+const baseline = ref("");
+const dirty = computed(() => draft.value !== baseline.value);
 watch(() => [m.value.id, m.value.content], () => {
-  if (!editing.value) draft.value = m.value.content;
+  if (!dirty.value) draft.value = baseline.value = m.value.content;
 }, { immediate: true });
 
 async function loadHistory() {
@@ -30,11 +35,21 @@ watch(() => [m.value.id, m.value.version, m.value.status], loadHistory, { immedi
 
 const patch = (body: Parameters<typeof api.patchMemory>[1]) => act(() => api.patchMemory(m.value.id, body));
 
+function revert() {
+  draft.value = baseline.value = m.value.content;
+}
+
 async function save() {
-  editing.value = false;
   const text = draft.value.trim();
-  if (text && text !== m.value.content) await patch({ content: text });
-  else draft.value = m.value.content;
+  if (!dirty.value || !text || text === m.value.content) return revert();
+  // Someone else changed the memory while the user was typing: the user's words win, and they hear about
+  // it, because the other version is now only in the history.
+  const changedMeanwhile = m.value.content !== baseline.value;
+  const other = actor(m.value.last_actor);
+  const saved = await patch({ content: text });
+  if (!saved) return;
+  baseline.value = draft.value = saved.content;
+  if (changedMeanwhile) toast(t("ins.changedMeanwhile", { who: other }));
 }
 
 function onKey(e: KeyboardEvent) {
@@ -42,8 +57,7 @@ function onKey(e: KeyboardEvent) {
     e.preventDefault();
     (e.target as HTMLTextAreaElement).blur();
   } else if (e.key === "Escape") {
-    draft.value = m.value.content;
-    editing.value = false;
+    revert();
     (e.target as HTMLTextAreaElement).blur();
   }
 }
@@ -130,7 +144,6 @@ const rollback = (row: HistoryRow) => act(() => api.rollback(m.value.id, row.ver
       rows="3"
       class="min-h-21 w-full resize-y rounded-[10px] bg-surface px-3 py-2.5 text-sm leading-normal shadow-[0_0_0_1px_var(--color-sep)] outline-none focus:shadow-[0_0_0_3px_var(--color-focus)]"
       :readonly="m.status !== 'active'"
-      @focus="editing = true"
       @blur="save"
       @keydown="onKey"
     />

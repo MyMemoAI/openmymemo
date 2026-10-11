@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { fileURLToPath, URL } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import vue from "@vitejs/plugin-vue";
@@ -12,6 +13,9 @@ export default defineConfig({
   build: {
     outDir: fileURLToPath(new URL("../src/openmymemo/static", import.meta.url)),
     emptyOutDir: true,
+  },
+  test: {
+    environment: "happy-dom",
   },
   server: {
     port: 5173,
