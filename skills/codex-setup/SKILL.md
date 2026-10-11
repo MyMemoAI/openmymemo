@@ -14,8 +14,9 @@ sh "$(ls -d "${CODEX_HOME:-$HOME/.codex}"/plugins/cache/openmymemo/openmymemo/*/
 ```
 
 Tell the user in a line or two what it printed, then give them the last step, which only they can do, once:
-open Codex in a terminal (`codex`), type `/hooks`, select SessionStart and trust "Loading your OpenMyMemo
-memory". The ChatGPT desktop app has no `/hooks`, but it reads the same settings, so trusting it in the
-terminal covers it too. From the next new session on, their memory loads automatically.
+trust "Loading your OpenMyMemo memory", either in the ChatGPT desktop app under Settings → Coding → Hooks,
+or by opening Codex in a terminal (`codex`), typing `/hooks` and selecting SessionStart. The app and the
+terminal share these settings, so either place covers both. From the next new session on, their memory
+loads automatically.
 
 Don't edit `~/.codex/hooks.json` yourself, and don't try to trust the hook for them.

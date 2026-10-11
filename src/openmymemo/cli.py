@@ -588,9 +588,9 @@ def setup_codex(ctx: typer.Context,
     if codex.hooks_in_config_toml():
         typer.secho(f"{codex.codex_home() / 'config.toml'} also defines an OpenMyMemo hook; remove it there, "
                     "or memory loads twice.", fg="yellow")
-    trust = (f'open Codex in a terminal (`codex`), type /hooks, select SessionStart and trust "{codex.STATUS_MESSAGE}". '
-             "The ChatGPT desktop app has no /hooks, but it uses the same settings, so trusting it in the terminal "
-             "covers it too.")
+    trust = (f'trust "{codex.STATUS_MESSAGE}" in the ChatGPT desktop app (Settings → Coding → Hooks), or open Codex '
+             "in a terminal (`codex`), type /hooks and trust it under SessionStart. The app and the terminal share "
+             "these settings, so either place covers both.")
     if changed:
         typer.echo(f"\nOne step left, once: {trust} New sessions then start with your memory.")
     else:

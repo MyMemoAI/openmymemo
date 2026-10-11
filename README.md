@@ -80,7 +80,7 @@ You need [uv](https://docs.astral.sh/uv/). Steps 2 and 3 are needed only once: C
    ```
 
 2. **Set up the hook.** Start a new Codex session and ask it to "set up OpenMyMemo". It adds a hook to `~/.codex/hooks.json` and leaves your other hooks alone. If you installed the CLI, `openmymemo setup codex` does the same.
-3. **Trust the hook.** Open Codex in a terminal (`codex`), type `/hooks`, select SessionStart and trust "Loading your OpenMyMemo memory". The ChatGPT desktop app has no `/hooks`, but it reads the same settings, so trusting the hook in the terminal covers it too.
+3. **Trust the hook.** In the ChatGPT desktop app, open Settings → Coding → Hooks and trust "Loading your OpenMyMemo memory". Or open Codex in a terminal (`codex`), type `/hooks`, select SessionStart and trust it there. The app and the terminal share these settings, so trusting it in either place covers both.
 
 From your next new session on, Codex starts with your memory. The plugin also adds the `memory`, `remember` and `codex-setup` skills.
 
