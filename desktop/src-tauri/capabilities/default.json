@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The main window: the panel from the local server, and the setup page bundled with the app.",
+  "windows": ["main"],
+  "remote": { "urls": ["http://127.0.0.1:*"] },
+  "permissions": [
+    "core:window:allow-start-dragging",
+    "allow-reveal-path",
+    "allow-app-settings",
+    "allow-set-autostart",
+    "allow-choose-vault"
+  ]
+}

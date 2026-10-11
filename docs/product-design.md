@@ -1,6 +1,6 @@
 # OpenMyMemo product design
 
-> Status: v0.2 implemented (2026-10-08), except the PyPI release and the first installs in the real apps. §13 lists what changed against v0.1 and what is still open; [MEMORY_FORMAT.md](./MEMORY_FORMAT.md) is the normative description of the folder. Differences between v0.1 and the original draft are in §12.
+> Status: v0.2 implemented (2026-10-08), except the PyPI release and the first installs in the real apps. §13 lists what changed against v0.1 and what is still open; §14 describes the Mac app (2026-10-10); [MEMORY_FORMAT.md](./MEMORY_FORMAT.md) is the normative description of the folder. Differences between v0.1 and the original draft are in §12.
 > Scope: the **local, open-source** version. Cloud hosting is explicitly out of scope for now.
 
 ## 0. In one sentence
@@ -29,7 +29,7 @@ OpenMyMemo is **an AI memory folder that lives on your own computer**, plus a sm
 - The product (panel, CLI, docs) is English only. Memories themselves can be in any language; classification and search handle English and Chinese.
 - **Who it is for.** Consumers are the goal; developers come first. Developers who use two or more AI apps (Claude Code, Cursor, Codex) feel the pain today, can install a CLI, and will be the open-source community. Consumers need a way in with nothing to install and nothing to configure. Both get the same folder, the same core and the same MCP server, with two shells on top:
   - *The geek shell:* CLI, plugins, MCP config, editing the files directly. Shipped in v0.1.
-  - *The simple shell:* the Claude Desktop extension (`.mcpb`) is the first one and already exists — double-click, Claude Desktop installs Python itself, the panel runs inside it. A menu-bar app (Tauri with the Python core as a sidecar) and a browser extension for ChatGPT and claude.ai come later and are sized after the first real users.
+  - *The simple shell:* the Claude Desktop extension (`.mcpb`) is the first one — double-click, Claude Desktop installs Python itself, the panel runs inside it. The Mac app (Tauri with the Python core as a sidecar, §14) is the second: a window and a menu-bar item for people who never open a terminal. The web panel stays and keeps evolving; the app wraps the same panel. A browser extension for ChatGPT and claude.ai comes later and is sized after the first real users.
 - The core stays small and centred on the file format, so it could be reimplemented in another language for the consumer app without changing anything users keep.
 
 ## 4. User stories
@@ -146,7 +146,7 @@ A single CLI. Until it is on PyPI, install from the repo with `uv tool install <
 | `openmymemo context [--connector id]` | Print exactly what a connector sees right now |
 | `openmymemo add <topic> <text>` / `search <query>` | Add a memory yourself / search |
 
-The server only listens on 127.0.0.1. A menu-bar / tray app (Tauri) comes later (§3); not in this phase.
+The server only listens on 127.0.0.1. The Mac app (§14) runs the same server for people who don't use a terminal.
 
 ### 5.3 The panel
 
@@ -304,7 +304,7 @@ History (history.jsonl)
 
 - The only optional external dependency is an OpenAI-compatible inference endpoint (or Ollama) for sorting, extracting memories from chats and semantic dedupe. Without it everything still works.
 - No database server, no Docker, no account, no telemetry.
-- The consumer shells (the Claude Desktop extension today; a menu-bar app and a browser extension later) wrap the same core and the same folder.
+- The consumer shells (the Claude Desktop extension, the Mac app; a browser extension later) wrap the same core and the same folder.
 
 ## 8. Technology
 
@@ -312,7 +312,7 @@ History (history.jsonl)
 | --- | --- | --- |
 | Core / CLI / MCP | Python 3.11+, packaged with `uv`; official `mcp` SDK 2.x (`MCPServer`); FastAPI + uvicorn for local HTTP; Typer for the CLI. Search runs in memory (enough for thousands of memories); no database. | Same language as MyMemo's backend, so MCP conventions and import logic carry over; few dependencies; one-line install with `uvx` |
 | Panel | Vue 3 + Vite + Tailwind v4 (`web/`). The build output is committed to `src/openmymemo/static/` and ships inside the Python package, so running it needs no Node. | Same stack as MyMemo's web app; components can move between them |
-| Consumer app (later) | Tauri shell with the Python core as a sidecar | One core; no second implementation until the format and the behaviour have settled with real users |
+| Mac app (`desktop/`) | Tauri 2 shell; bundles `uv` and the package source and runs the Python core as a child process; the window shows the same Vue panel in its Mac layout | One core; no second implementation until the format and the behaviour have settled with real users. Tauri keeps Windows and Linux open later |
 | Optional model calls | OpenAI-compatible API (including Ollama) | No vendor lock-in |
 | License | Apache-2.0 | The more open the format and protocol, the more widely it can be adopted |
 | File format | Markdown + YAML frontmatter + Obsidian block ids; OKF-conformant | Human-readable, opens in any editor, diffs cleanly in git, readable by other tools |
@@ -349,7 +349,7 @@ Format 2 (frontmatter, `log.md`, `from-*` import topics) with migration and `MEM
 Document memories with diff review (import of `CLAUDE.md` / `AGENTS.md` / Cursor rules); with a model endpoint configured: model-based sorting and semantic dedupe, extracting proposals from ChatGPT `conversations.json` and local chat logs; system notifications; in-chat approval via MCP elicitation where clients support it.
 
 **Consumer shells**
-A menu-bar app (Tauri, Python core as a sidecar) that installs with one click, imports by paste, shows the digest and notifies. A browser extension as a localhost bridge for ChatGPT and claude.ai (inject the summary, read the "Manage memories" page, turn new facts from web chats into proposals). Still no cloud service. Scope and order are decided after v0.2 has real users.
+The Mac app (Tauri, Python core as a sidecar) that installs with one click, imports by paste, shows the digest and notifies — pulled forward on 2026-10-10, see §14. A browser extension as a localhost bridge for ChatGPT and claude.ai (inject the summary, read the "Manage memories" page, turn new facts from web chats into proposals). Still no cloud service. Scope and order are decided after v0.2 has real users.
 
 ## 11. Open questions
 
@@ -406,3 +406,21 @@ Decided after the first review of v0.1, before any user outside the team had ins
 Compatibility: readers keep accepting format-1 files (title and description from `# Title` and `> …`, groups and privacy from `topics.yaml`). On the first open after the upgrade, OpenMyMemo migrates each file (frontmatter inserted from the header lines and `topics.yaml`; the header lines removed; every other line untouched) and bumps `meta.json` to format 2. A format-1 vault whose `settings.yaml` is missing or has no `require_approval` key gets `require_approval: true` written out so an existing vault keeps its behaviour; new vaults start with the new default. Details in [MEMORY_FORMAT.md §11](./MEMORY_FORMAT.md).
 
 Implementation order, all done in one branch: (1) ✅ format 2 with migration and tests against `MEMORY_FORMAT.md`; (2) ✅ apply-now defaults, protected memories, undo without a window, `reviewed_at` and the digest in the core, MCP, HTTP API and CLI; (3) ✅ the Changes page, the hook line and `log.md`; (4) ✅ import into `from-*` and `sort`; (5) ✅ repository rename, README, plugin descriptions and version 0.2.0. Still open: the PyPI release, and the team installing the real plugins in Claude Desktop, Claude Code, Codex and Cursor and using them for two weeks before anything else is planned.
+
+## 14. The Mac app (2026-10-10)
+
+Pulled forward from the consumer shells (§10) so that people who never open a terminal, and don't use Claude Desktop, can have the panel as an app. It supplements the web panel, it doesn't replace it: both are the same Vue code, and the app switches it to a Mac layout. The design is the "Mac app · Memories" artboard on the panel redesign canvas; the other sections reuse the web screens inside the Mac window.
+
+| Area | Decision | Why |
+| --- | --- | --- |
+| Shell | Tauri 2 in `desktop/`; one window plus a menu-bar item | §8: one core, a thin shell; Tauri keeps Windows and Linux open |
+| Core | The app bundles `uv` and the package source (as the `.mcpb` does). On launch it runs `openmymemo serve --no-open` with `UV_PROJECT_ENVIRONMENT` in `~/Library/Application Support/OpenMyMemo/`; the first launch downloads Python and the dependencies | No second implementation; nothing to install by hand |
+| One server per folder | Before starting its own server the app asks the port (8787 by default) which folder it serves. If it is the same folder (e.g. Claude Desktop's extension got there first) the app uses it, and starts its own when that one goes away; if the port belongs to something else it tries the next ports | Claude Desktop, the CLI and the app share one panel and never fight over the files |
+| Window | The panel loaded from `http://127.0.0.1:<port>/?desktop=1`, so it passes the panel guard (§5.4) unchanged. Closing the window keeps the app in the menu bar; the app quits from the menu | Menu-bar apps keep running so they can notify |
+| Mac layout | Sidebar: sections, topics by group (collapsible), "New topic", and a status card ("Running on this Mac · N apps connected"). Memories: a list and an inspector for the selected memory — text, topic, kind, review date, source, file, which apps can read the topic, version history with restore, "Show in Finder", archive. Other sections keep their web screens; their page title becomes the window toolbar | The artboard; the web screens already work |
+| Menu bar | The number of changes to review next to the icon; a system notification when an AI app changes something or something starts waiting; Open, Quit | "Notifies" from §10, without opening the panel |
+| Shortcuts | ⌘N new memory, ⌘F search, ⌃⌘S hide the sidebar, ⌘, settings | The artboard's tooltips |
+| Settings | A small sheet (not drawn on the canvas): the memory folder (show in Finder, change), the approval switch, open at login | The few app-level choices there are |
+| Not in the app | "Delete" from the artboard: memories are archived, never deleted, because history is append-only (§5.5, §6) | Undo and history must keep working |
+
+Not done yet: signing and notarization (builds are signed ad hoc, so macOS asks once to open them), automatic updates, an Intel build, Windows and Linux, and a first launch without a network connection (Python is downloaded then).

@@ -24,6 +24,9 @@ export const ICONS = {
   info: `<circle ${S} cx="12" cy="12" r="9"/><path ${S} d="M12 8v4M12 16h.01"/>`,
   refresh: `<path ${S} d="M20 11a8 8 0 0 0-14.6-4.5M4 4v4h4M4 13a8 8 0 0 0 14.6 4.5M20 20v-4h-4"/>`,
   file: `<path ${S} d="M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path ${S} d="M14 3v5h5"/>`,
+  sidebar: `<rect ${S} x="3.5" y="5" width="17" height="14" rx="2.5"/><path ${S} d="M9.5 5v14"/>`,
+  filter: `<path ${S} d="M5 7h14M8 12h8M11 17h2"/>`,
+  sliders: `<path ${S} d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle ${S} cx="16" cy="7" r="2"/><circle ${S} cx="10" cy="17" r="2"/>`,
   grid: `<rect ${S} x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect ${S} x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect ${S} x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect ${S} x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/>`,
 } as const;
 

@@ -39,7 +39,9 @@ OpenMyMemo is what I wish I'd had: my AI memory as a folder on my own computer. 
 
 ## Install
 
-Requires [uv](https://docs.astral.sh/uv/). Not on PyPI yet, so install from the repo:
+**Mac app** (no terminal needed): build `OpenMyMemo.app` as described under [Mac app](#mac-app), drag it to Applications and open it. It shows the panel in its own window, puts the number of changes to review in the menu bar, and notifies you when an AI app changes something. It uses the same folder and the same panel as everything below.
+
+**Command line:** requires [uv](https://docs.astral.sh/uv/). Not on PyPI yet, so install from the repo:
 
 ```bash
 git clone https://github.com/MyMemoAI/openmymemo.git
@@ -141,9 +143,23 @@ uv run pytest                          # tests
 uv run ruff check src tests scripts
 uv run python scripts/demo_vault.py /tmp/omm-demo && uv run openmymemo --vault /tmp/omm-demo serve
 cd web && pnpm install && pnpm build   # builds the panel into src/openmymemo/static/ (committed)
+cd web && pnpm test                    # panel tests
 ```
 
-Panel development: run `openmymemo serve --no-open`, then `pnpm dev` in `web/` (port 5173, proxies `/api`).
+Panel development: run `openmymemo serve --no-open`, then `pnpm dev` in `web/` (port 5173, proxies `/api` to 8787, or to `OPENMYMEMO_PORT`). Add `?desktop=1` to the URL to see the Mac app's layout.
+
+### Mac app
+
+`desktop/` is a [Tauri](https://tauri.app) shell around the same panel. It bundles `uv` and this package; on first launch uv downloads Python and the dependencies into `~/Library/Application Support/ai.mymemo.openmymemo/`, then the app runs `openmymemo serve`. If a server for the same folder already runs (Claude Desktop's extension, or `openmymemo serve`), the app uses it. Needs Rust (`rustup`) and Node.
+
+```bash
+cd web && pnpm build                   # the panel the app shows
+cd desktop && pnpm install
+pnpm tauri dev                         # run it; OPENMYMEMO_HOME=/tmp/omm-demo to use another folder
+pnpm tauri build --bundles app,dmg     # → desktop/src-tauri/target/release/bundle/
+```
+
+Builds are signed ad hoc and not notarized yet: the first time, right-click the app and choose Open. The server's log is in `~/Library/Logs/ai.mymemo.openmymemo/core.log`.
 
 ## Relationship to MyMemo
 

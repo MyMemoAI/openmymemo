@@ -1,6 +1,7 @@
 """Plugin packaging stays consistent: versions match and every referenced file exists."""
 
 import json
+import re
 import subprocess
 import tomllib
 from pathlib import Path
@@ -20,7 +21,21 @@ def test_versions_match_everywhere():
     assert load("plugin.json")["version"] == version
     assert load("integrations/claude-desktop/manifest.json")["version"] == version
     assert load("web/package.json")["version"] == version
+    assert load("desktop/package.json")["version"] == version
+    assert load("desktop/src-tauri/tauri.conf.json")["version"] == version
+    assert tomllib.loads((ROOT / "desktop/src-tauri/Cargo.toml").read_text())["package"]["version"] == version
     assert __version__ == version
+
+
+def test_mac_app_grants_exactly_the_commands_the_panel_calls():
+    # The panel is a remote origin to Tauri: each command needs the ACL manifest and the capability.
+    panel = set(re.findall(r'invoke\("([a-z_]+)"', (ROOT / "web/src/desktop.ts").read_text()))
+    build = (ROOT / "desktop/src-tauri/build.rs").read_text()
+    declared = set(re.findall(r'"([a-z_]+)"', re.search(r"commands\(&\[(.*?)\]\)", build, re.S).group(1)))
+    caps = load("desktop/src-tauri/capabilities/default.json")
+    granted = {p[len("allow-"):].replace("-", "_") for p in caps["permissions"] if p.startswith("allow-")}
+    assert panel and panel == declared == granted
+    assert caps["remote"]["urls"] == ["http://127.0.0.1:*"]
 
 
 def test_referenced_plugin_files_exist():

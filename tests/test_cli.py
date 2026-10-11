@@ -1,4 +1,5 @@
 import shutil
+import socket
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -211,3 +212,36 @@ def test_blank_or_unsubstituted_vault_means_the_default(tmp_path, monkeypatch):
         assert Vault(tmp_path / "OpenMyMemo").is_initialized()
         assert not (Path.cwd() / "${user_config.vault}").exists()
         shutil.rmtree(tmp_path / "OpenMyMemo")
+
+
+def test_serve_init_creates_a_missing_or_empty_vault_and_refuses_other_folders(tmp_path, monkeypatch):
+    # The Mac app's first launch: `serve --init` on a folder that doesn't exist yet, or an empty one.
+    import uvicorn
+
+    served = []
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: served.append(kw["port"]))
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    serve = ["serve", "--init", "--no-open", "--port", str(port)]
+
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    (empty / ".DS_Store").write_text("")
+    for folder in (tmp_path / "absent", empty):
+        r = runner.invoke(app, ["--vault", str(folder), *serve])
+        assert r.exit_code == 0, r.output
+        assert Vault(folder).is_initialized()
+    r = runner.invoke(app, ["--vault", str(empty), *serve])  # opens it the second time
+    assert r.exit_code == 0 and len(served) == 3
+
+    busy = tmp_path / "busy"
+    busy.mkdir()
+    (busy / "notes.txt").write_text("mine")
+    r = runner.invoke(app, ["--vault", str(busy), *serve])
+    assert r.exit_code == 1 and "isn't empty" in r.output
+    assert not Vault(busy).is_initialized() and (busy / "notes.txt").read_text() == "mine"
+
+    r = runner.invoke(app, ["--vault", str(tmp_path / "other"), "serve", "--no-open", "--port", str(port)])
+    assert r.exit_code == 1 and "openmymemo init" in r.output  # without --init nothing is created
+    assert not (tmp_path / "other").exists() and len(served) == 3

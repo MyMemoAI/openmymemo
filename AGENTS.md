@@ -20,6 +20,9 @@ uv run ruff check src tests scripts
 uv run openmymemo --vault /tmp/v init       # CLI
 uv run python scripts/demo_vault.py /tmp/d  # demo data
 cd web && pnpm install && pnpm build        # panel → src/openmymemo/static/ (commit the build output)
+cd web && pnpm test                         # panel tests (vitest)
+cd desktop && pnpm install && pnpm tauri dev # Mac app (needs Rust); `pnpm tauri build` for the .app
+python3 scripts/stage_desktop.py && (cd desktop/src-tauri && cargo test)  # Mac app tests
 ```
 
 ## Code map
@@ -40,6 +43,8 @@ cd web && pnpm install && pnpm build        # panel → src/openmymemo/static/ (
 | `src/openmymemo/cli.py` | Typer CLI |
 | `src/openmymemo/codex.py` | Codex session hook: merges it into `~/.codex/hooks.json` and takes it out again (Codex doesn't run plugin hooks) |
 | `web/` | Vue 3 + Tailwind v4 panel source; all copy lives in `web/src/i18n.ts` |
+| `web/src/desktop.ts` | The Mac layout switch (`?desktop=1`), the shell's commands and shortcuts; `MemoriesDesktopView`, `MemoryInspector`, `DesktopSidebar`, `DesktopToolbar` are its screens; `memorySaves.ts` queues the inspector's saves per memory. `PageHeader` becomes the window toolbar there |
+| `desktop/` | Mac app (Tauri 2, product-design.md §14): `src-tauri/src/core.rs` finds or starts the server for the folder, `main.rs` has the window, menus, menu-bar item and notifications; `scripts/stage_desktop.py` stages the core and `uv` before each build |
 | `.claude-plugin/` | Claude Code plugin manifest and marketplace (the repo root is the plugin) |
 | `plugin.json`, `mcp.json`, `.agents/plugins/` | Codex plugin (Agent Plugins format) and its marketplace |
 | `skills/` | Skills shared by the Claude Code and Codex plugins |
@@ -54,7 +59,8 @@ cd web && pnpm install && pnpm build        # panel → src/openmymemo/static/ (
 - Topic slugs are the file names; titles come from the files.
 - All writes go through `Vault` methods, which lock, re-read from disk, write atomically and update meta and history.
 - The mcp SDK is 2.x: `from mcp.server.mcpserver import MCPServer, Context`; static resources can't take a `Context`.
-- Plugins run `uv run` from the installed copy of this repo, so anything the package needs at runtime must be inside the repo (and inside the `.mcpb` staging list in `scripts/build_mcpb.py`). Keep the version in `pyproject.toml`, `src/openmymemo/__init__.py`, both `plugin.json` files, the `.mcpb` manifest and `web/package.json` in sync (`tests/test_packaging.py` checks), and run `uv lock` after a bump.
-- CI (`.github/workflows/ci.yml`) runs the tests on Linux and macOS, checks that the committed panel build matches `web/`, and packs the `.mcpb`. To release: bump the version, merge, then push a tag `v<version>`; `.github/workflows/release.yml` publishes the `.mcpb`, wheel and sdist as a GitHub release.
+- Plugins run `uv run` from the installed copy of this repo, so anything the package needs at runtime must be inside the repo (and inside the `.mcpb` staging list in `scripts/build_mcpb.py`). Keep the version in `pyproject.toml`, `src/openmymemo/__init__.py`, both `plugin.json` files, the `.mcpb` manifest, `web/package.json` and the Mac app (`desktop/package.json`, `desktop/src-tauri/tauri.conf.json`, `desktop/src-tauri/Cargo.toml`) in sync (`tests/test_packaging.py` checks), and run `uv lock` after a bump.
+- CI (`.github/workflows/ci.yml`) runs the tests on Linux and macOS, checks that the committed panel build matches `web/`, runs the panel's and the Mac app's tests, and packs the `.mcpb`. To release: bump the version, merge, then push a tag `v<version>`; `.github/workflows/release.yml` publishes the `.mcpb`, wheel and sdist as a GitHub release.
 - Don't add a root `.mcp.json`: Claude Code would treat it as project config for everyone working on this repo. The Claude Code MCP server is declared inline in `.claude-plugin/plugin.json`.
 - Commit messages are imperative English; one topic per PR.
+- The Mac app adds nothing to the panel's API: it is the same panel in another layout. New panel features go into the web screens; give the Mac layout its own version only where the design has one. A native command the panel calls must be listed in `desktop/src-tauri/build.rs` and granted in `capabilities/default.json`, because the panel is a remote origin to Tauri.
