@@ -161,7 +161,7 @@ The human-readable change log, following the Open Knowledge Format's `log.md`: `
 
 ```markdown
 ## 2026-10-08
-- **Claude Code** added to Work: "Now works as CTO at MyMemo" (^m7f3a)
+- **Claude Code** added to Work: "Now works as engineering lead at Acme" (^m7f3a)
 - **You** edited Projects: "Rewriting the agent service …" → "Rewrote the agent service …" (^k2p9d)
 - **You** undid Cursor's change to Tools (^t00l5)
 ```
@@ -244,7 +244,7 @@ Per-memory metadata, keyed by id.
  "format": 2,
  "memories": {
   "m7f3a": {
-   "content": "CTO at MyMemo; stack is FastAPI, Vue 3 and Swift",
+   "content": "Engineering lead at Acme; stack is FastAPI, Vue 3 and Swift",
    "topic": "work",
    "section": null,
    "kind": "fact",

@@ -112,7 +112,7 @@ Tools AI apps see: `memory_context`, `memory_search`, `memory_get`, `memory_prop
 ```
 ~/OpenMyMemo/
 ├── memories/            # one file per topic: frontmatter, then one memory per line
-│   ├── work.md          # - CTO at MyMemo <!-- until: 2026-12 --> ^m7f3a
+│   ├── work.md          # - Engineering lead at Acme <!-- until: 2026-12 --> ^m7f3a
 │   └── from-chatgpt.md  # what you imported, in its original order, until you sort it
 ├── MEMORY.md            # generated: what an AI sees with the default scope
 ├── log.md               # generated: what changed, by whom, newest day first
