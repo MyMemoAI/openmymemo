@@ -39,16 +39,23 @@ function revert() {
   draft.value = baseline.value = m.value.content;
 }
 
+/** Bumped by every save, so only the newest one to finish moves the baseline. */
+let saves = 0;
+
 async function save() {
-  const text = draft.value.trim();
+  const sent = draft.value;
+  const text = sent.trim();
   if (!dirty.value || !text || text === m.value.content) return revert();
   // Someone else changed the memory while the user was typing: the user's words win, and they hear about
   // it, because the other version is now only in the history.
   const changedMeanwhile = m.value.content !== baseline.value;
   const other = actor(m.value.last_actor);
+  const generation = ++saves;
   const saved = await patch({ content: text });
-  if (!saved) return;
-  baseline.value = draft.value = saved.content;
+  if (!saved || generation !== saves) return;
+  baseline.value = saved.content;
+  // The user may have typed again while this was saving: keep that, it's the next edit.
+  if (draft.value === sent) draft.value = saved.content;
   if (changedMeanwhile) toast(t("ins.changedMeanwhile", { who: other }));
 }
 

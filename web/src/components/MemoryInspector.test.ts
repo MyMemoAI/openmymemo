@@ -32,6 +32,7 @@ const changedElsewhere = (content: string) => memory(content, { version: 2, last
 describe("the inspector's text field", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    api.patchMemory.mockImplementation(async (_id: string, body: { content?: string }) => ({ ...memory("A"), ...body, version: 3 }));
     store.toast = null;
   });
 
@@ -67,6 +68,44 @@ describe("the inspector's text field", () => {
     await flushPromises();
     expect(api.patchMemory).toHaveBeenCalledWith("m1", { content: "A2" });
     expect(store.toast?.text ?? "").not.toContain("while you were typing");
+  });
+
+  it("keeps what the user types while an earlier save is still on its way", async () => {
+    let finish: (m: Memory) => void = () => {};
+    api.patchMemory.mockImplementationOnce(() => new Promise<Memory>((resolve) => (finish = resolve)));
+    const w = mount(MemoryInspector, { props: { memory: memory("A") } });
+    const field = w.get("textarea");
+    await field.setValue("B");
+    await field.trigger("blur"); // saving B…
+    await field.trigger("focus");
+    await field.setValue("C"); // …while the user goes on typing
+    finish(memory("B", { version: 2 }));
+    await flushPromises();
+    await w.setProps({ memory: memory("B", { version: 2 }) }); // the refresh after the save
+    expect((field.element as HTMLTextAreaElement).value).toBe("C");
+    await field.trigger("blur");
+    await flushPromises();
+    expect(api.patchMemory).toHaveBeenLastCalledWith("m1", { content: "C" });
+    expect(store.toast?.text ?? "").not.toContain("while you were typing"); // B was the user's own save
+  });
+
+  it("lets only the newest of two overlapping saves move the baseline", async () => {
+    const pending: ((m: Memory) => void)[] = [];
+    api.patchMemory.mockImplementation(() => new Promise<Memory>((resolve) => pending.push(resolve)));
+    const w = mount(MemoryInspector, { props: { memory: memory("A") } });
+    const field = w.get("textarea");
+    await field.setValue("B");
+    await field.trigger("blur");
+    await field.setValue("C");
+    await field.trigger("blur");
+    pending[1](memory("C", { version: 3 })); // the newer save finishes first
+    pending[0](memory("B", { version: 2 }));
+    await flushPromises();
+    expect((field.element as HTMLTextAreaElement).value).toBe("C");
+    await w.setProps({ memory: memory("C", { version: 3 }) });
+    await field.trigger("blur");
+    await flushPromises();
+    expect(api.patchMemory).toHaveBeenCalledTimes(2); // C is saved and clean: nothing more to write
   });
 
   it("writes nothing when the text is typed back to what it was", async () => {
