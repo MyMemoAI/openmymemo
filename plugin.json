@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "openmymemo",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Your AI memory as a local folder you own. Codex starts each session with it and writes what it learns; you see every change and can undo it.",
   "author": { "name": "MyMemo", "url": "https://github.com/MyMemoAI/openmymemo" },
   "homepage": "https://github.com/MyMemoAI/openmymemo",
@@ -10,11 +10,10 @@
   "keywords": ["memory", "local-first", "mcp", "privacy"],
   "extensions": {
     "com.openai": {
-      "hooks": "./integrations/codex/hooks.json",
       "interface": {
         "displayName": "OpenMyMemo",
         "shortDescription": "Your AI memory as a local folder you own",
-        "longDescription": "OpenMyMemo keeps what AI assistants know about you in Markdown files on your own computer. Codex reads your memory at the start of each session and writes what it learns. Additions apply right away and show up in a digest in the OpenMyMemo panel at http://127.0.0.1:8787, where you can undo them; changes to anything you wrote yourself, and private topics, wait for you. Turn approval on to review every change first. The same memory works in Claude, Cursor and VS Code.",
+        "longDescription": "OpenMyMemo keeps what AI assistants know about you in Markdown files on your own computer. After a one-time setup (ask Codex to \"set up OpenMyMemo\"), Codex reads your memory at the start of each session and writes what it learns. Additions apply right away and show up in a digest in the OpenMyMemo panel at http://127.0.0.1:8787, where you can undo them; changes to anything you wrote yourself, and private topics, wait for you. Turn approval on to review every change first. The same memory works in Claude, Cursor and VS Code.",
         "developerName": "MyMemo",
         "category": "Productivity",
         "capabilities": ["Read", "Write"],

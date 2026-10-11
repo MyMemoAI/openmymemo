@@ -52,7 +52,7 @@ openmymemo serve                             # open the panel at http://127.0.0.
 openmymemo review                            # what AI changed since you last looked: keep, edit or undo
 ```
 
-More: `status`, `approval on|off` (on: every AI change waits for you), `context --connector <id>` (what an AI actually receives), `export --format claude|chatgpt|markdown|json`, `search`, `add`, `connector list|config|rotate|remove`. Use `--vault` or `OPENMYMEMO_HOME` to put the folder elsewhere.
+More: `status`, `approval on|off` (on: every AI change waits for you), `context --connector <id>` (what an AI actually receives), `export --format claude|chatgpt|markdown|json`, `search`, `add`, `connector list|config|rotate|remove`, `setup codex` (load your memory at the start of every Codex session). Use `--vault` or `OPENMYMEMO_HOME` to put the folder elsewhere.
 
 ### Plugins
 
@@ -60,9 +60,9 @@ Each plugin uses `~/OpenMyMemo` by default (created on first use), loads your me
 
 | App | Install |
 | --- | --- |
-| **Claude Desktop** | Build `dist/openmymemo-0.2.0.mcpb` with `uv run python scripts/build_mcpb.py`, then double-click it (or Settings → Extensions). Claude Desktop installs Python and the dependencies itself; no uv needed. |
+| **Claude Desktop** | Build `dist/openmymemo-0.2.1.mcpb` with `uv run python scripts/build_mcpb.py`, then double-click it (or Settings → Extensions). Claude Desktop installs Python and the dependencies itself; no uv needed. |
 | **Claude Code** | `/plugin marketplace add MyMemoAI/openmymemo`, then `/plugin install openmymemo@openmymemo`. Adds `/openmymemo:memory` and `/openmymemo:remember`. |
-| **Codex** | `codex plugin marketplace add MyMemoAI/openmymemo`, then install OpenMyMemo from `/plugins`. Trust its session-start hook in `/hooks` so memory loads automatically. Adds the `memory` and `remember` skills. |
+| **Codex** | `codex plugin marketplace add MyMemoAI/openmymemo`, then `codex plugin add openmymemo@openmymemo`. Then, once, so memory loads at the start of every session: ask Codex to "set up OpenMyMemo" (or run `openmymemo setup codex`), open Codex in a terminal (`codex`), type `/hooks` and trust "Loading your OpenMyMemo memory". The ChatGPT desktop app has no `/hooks`, but it reads the same settings, so trusting it in the terminal covers it too. Adds the `memory`, `remember` and `codex-setup` skills. |
 | **Cursor** | Panel → Connectors → Setup → **Add to Cursor**. |
 | **VS Code** | Panel → Connectors → Setup → VS Code, then run the `code --add-mcp …` command. |
 

@@ -38,11 +38,12 @@ cd web && pnpm install && pnpm build        # panel → src/openmymemo/static/ (
 | `src/openmymemo/mcp_server.py` | MCP tools (mcp SDK 2.x `MCPServer`) |
 | `src/openmymemo/web.py` | Panel API and `/mcp` combined into one ASGI app |
 | `src/openmymemo/cli.py` | Typer CLI |
+| `src/openmymemo/codex.py` | Codex session hook: merges it into `~/.codex/hooks.json` and takes it out again (Codex doesn't run plugin hooks) |
 | `web/` | Vue 3 + Tailwind v4 panel source; all copy lives in `web/src/i18n.ts` |
 | `.claude-plugin/` | Claude Code plugin manifest and marketplace (the repo root is the plugin) |
 | `plugin.json`, `mcp.json`, `.agents/plugins/` | Codex plugin (Agent Plugins format) and its marketplace |
 | `skills/` | Skills shared by the Claude Code and Codex plugins |
-| `integrations/hooks/` | Session-start hook script shared by both plugins; per-app `hooks.json` in `integrations/claude-code/` and `integrations/codex/` |
+| `integrations/hooks/` | Session-start hook script shared by Claude Code (plugin hook in `integrations/claude-code/hooks/hooks.json`) and Codex (user-level hook installed by `setup codex`; `integrations/codex/setup.sh` runs it from the installed plugin) |
 | `integrations/claude-desktop/` | `.mcpb` manifest; build with `scripts/build_mcpb.py` |
 | `integrations/icons/` | Icons rendered by `scripts/make_icons.py` |
 
