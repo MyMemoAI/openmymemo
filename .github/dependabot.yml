@@ -1,0 +1,11 @@
+# Security fixes for Python and panel dependencies come from Dependabot security updates (repo setting).
+# This file only keeps the GitHub Actions used by the workflows up to date, in one monthly PR.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]

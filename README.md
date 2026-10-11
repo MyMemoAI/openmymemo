@@ -106,6 +106,8 @@ Upgrading from v0.1: open the folder once with v0.2. The files get their frontma
 
 The server listens on 127.0.0.1 only. The panel API checks `Host`, `Origin` and a header that cross-site pages can't add; `/mcp` requires a connector token. The `health` and `finance` topics are hidden from every AI by default, and AI changes to private topics always wait for you, whatever the approval switch or an app's write mode says.
 
+Found a vulnerability? Please report it privately as described in [SECURITY.md](./SECURITY.md).
+
 ## Development
 
 ```bash
