@@ -72,6 +72,12 @@ export const freshMemories = computed<Record<string, string>>(() => {
   return out;
 });
 
+/** Topics with something in the digest (a green dot in the sidebar). */
+export const freshTopics = computed(() => new Set(store.unreviewed.map((p) => p.final_topic ?? p.topic)));
+
+/** Topics with something waiting for a decision (an amber dot in the sidebar). */
+export const waitingTopics = computed(() => new Set(store.pending.map((p) => p.topic)));
+
 export function topicTitle(slug: string | null | undefined): string {
   if (!slug) return "";
   return topicsBySlug.value[slug]?.title ?? slug;

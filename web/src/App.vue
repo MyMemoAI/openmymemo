@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import AppIcon from "./components/AppIcon.vue";
+import AppToast from "./components/AppToast.vue";
+import DesktopSidebar from "./components/DesktopSidebar.vue";
 import DropMenu from "./components/DropMenu.vue";
+import NewTopicDialog from "./components/NewTopicDialog.vue";
+import SettingsSheet from "./components/SettingsSheet.vue";
+import { desktop, onCommand, ui, type Command } from "./desktop";
 import type { IconName } from "./icons";
 import { t } from "./i18n";
 import { refresh, store, toReview } from "./store";
@@ -10,6 +15,7 @@ import ChangesView from "./views/ChangesView.vue";
 import ConnectorsView from "./views/ConnectorsView.vue";
 import ContextView from "./views/ContextView.vue";
 import ImportView from "./views/ImportView.vue";
+import MemoriesDesktopView from "./views/MemoriesDesktopView.vue";
 import MemoriesView from "./views/MemoriesView.vue";
 
 const ROUTES = ["memories", "changes", "context", "connectors", "activity", "import"] as const;
@@ -42,9 +48,26 @@ const onHash = () => {
 };
 watch(() => store.state, settleHome);
 
+/** Mac app: menu commands and shortcuts. "New memory" and "find" belong to the Memories screen. */
+function onDesktopCommand(cmd: Command) {
+  if (cmd === "toggle-sidebar") ui.sidebarHidden = !ui.sidebarHidden;
+  else if (cmd === "settings") ui.settingsOpen = true;
+  else {
+    ui.request = cmd;
+    if (current.value.route !== "memories") location.hash = "#/memories";
+  }
+}
+const newTopic = ref(false);
+function openNewTopic(slug: string) {
+  newTopic.value = false;
+  location.hash = `#/memories/${encodeURIComponent(slug)}`;
+}
+let stopCommands: (() => void) | undefined;
+
 let timer: number | undefined;
 onMounted(async () => {
   window.addEventListener("hashchange", onHash);
+  if (desktop) stopCommands = onCommand(onDesktopCommand);
   await refresh();
   // AI apps and the user's editor change the vault behind our back; keep the panel fresh.
   timer = window.setInterval(() => {
@@ -53,6 +76,7 @@ onMounted(async () => {
 });
 onBeforeUnmount(() => {
   window.removeEventListener("hashchange", onHash);
+  stopCommands?.();
   window.clearInterval(timer);
 });
 
@@ -75,7 +99,52 @@ const moreActive = computed(() => moreItems.value.some((n) => n.id === current.v
 </script>
 
 <template>
-  <div class="min-h-screen md:flex">
+  <!-- the Mac app (desktop.ts): sidebar, then a toolbar and the page; the window's buttons sit top left -->
+  <div v-if="desktop" class="flex h-screen overflow-hidden">
+    <DesktopSidebar
+      v-if="!ui.sidebarHidden"
+      :nav="nav"
+      :route="current.route"
+      :topic="current.route === 'memories' ? current.param : null"
+      @new-topic="newTopic = true"
+    />
+    <div class="flex min-w-0 flex-1 flex-col">
+      <template v-if="!store.state">
+        <div class="h-[52px] shrink-0" data-tauri-drag-region />
+        <div class="flex flex-1 items-center justify-center text-muted">{{ t("common.loading") }}</div>
+      </template>
+      <MemoriesDesktopView v-else-if="current.route === 'memories'" :initial-topic="current.param" class="min-h-0 flex-1" />
+      <template v-else>
+        <div id="desktop-toolbar" class="contents" />
+        <main class="min-h-0 flex-1 overflow-y-auto bg-ground">
+          <div class="mx-auto w-full max-w-[880px] px-8 pt-6 pb-12">
+            <ChangesView v-if="current.route === 'changes'" :initial-tab="current.param" />
+            <ContextView v-else-if="current.route === 'context'" :initial-connector="current.param" />
+            <ConnectorsView v-else-if="current.route === 'connectors'" :initial-connector="current.param" />
+            <ActivityView v-else-if="current.route === 'activity'" />
+            <ImportView v-else-if="current.route === 'import'" />
+          </div>
+        </main>
+      </template>
+    </div>
+
+    <div
+      v-if="store.offline"
+      role="alert"
+      class="notice notice-danger fixed bottom-4 left-1/2 z-40 w-[min(560px,90vw)] -translate-x-1/2 bg-surface shadow-lg"
+    >
+      <AppIcon name="warning" />{{ t("mac.offline") }}
+    </div>
+    <NewTopicDialog
+      v-if="newTopic"
+      @close="newTopic = false"
+      @created="openNewTopic"
+    />
+    <SettingsSheet v-if="ui.settingsOpen" @close="ui.settingsOpen = false" />
+    <AppToast />
+  </div>
+
+  <div v-else class="min-h-screen md:flex">
     <!-- desktop: the sidebar; MemoriesView teleports its topics into #sidebar-extra -->
     <aside class="sticky top-0 hidden h-screen w-[248px] shrink-0 flex-col gap-5 overflow-y-auto px-3.5 pt-5 pb-6 md:flex">
       <a href="#/memories" class="flex items-center gap-2.5 px-2.5 text-base font-semibold tracking-[-0.01em]">
@@ -161,20 +230,6 @@ const moreActive = computed(() => moreItems.value.some((n) => n.id === current.v
       </DropMenu>
     </nav>
 
-    <Transition
-      enter-from-class="translate-y-2 opacity-0"
-      enter-active-class="transition"
-      leave-to-class="opacity-0"
-      leave-active-class="transition"
-    >
-      <div
-        v-if="store.toast"
-        role="status"
-        class="fixed bottom-24 left-1/2 z-50 max-w-[90vw] -translate-x-1/2 rounded-xl px-4 py-2.5 text-sm font-medium shadow-lg md:bottom-6"
-        :class="store.toast.kind === 'error' ? 'bg-danger text-white' : 'bg-ink text-ground'"
-      >
-        {{ store.toast.text }}
-      </div>
-    </Transition>
+    <AppToast />
   </div>
 </template>

@@ -55,6 +55,13 @@
 
   --color-switch-off: rgb(0 0 0 / 0.16);
   --color-switch-on: #34c759;
+
+  /* The Mac app's window (desktop.ts): a white window, a grey sidebar and inspector, blue selection. */
+  --color-window: #ffffff;
+  --color-sidebar: #ececef;
+  --color-sidebar-on: rgb(0 0 0 / 0.1);
+  --color-inspector: #f7f7f9;
+  --color-selected: #0071e3;
 }
 
 @layer base {
@@ -111,8 +118,19 @@
 
       --color-switch-off: rgb(255 255 255 / 0.2);
       --color-switch-on: #30d158;
+
+      --color-window: #1e1e1f;
+      --color-sidebar: #2a2a2c;
+      --color-sidebar-on: rgb(255 255 255 / 0.1);
+      --color-inspector: #232325;
+      --color-selected: #0a6cd6;
     }
   }
+
+  /* The Mac app: native-feeling chrome; text in the content stays selectable. */
+  .desktop body { @apply bg-window text-[13px]; }
+  .desktop :is(nav, header, aside) :is(a, button) { cursor: default; }
+  .desktop :is(nav, [data-chrome]) { user-select: none; -webkit-user-select: none; }
 }
 
 @layer components {
