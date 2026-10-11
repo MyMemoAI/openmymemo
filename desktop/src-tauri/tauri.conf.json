@@ -1,0 +1,33 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "OpenMyMemo",
+  "version": "0.2.3",
+  "identifier": "ai.mymemo.openmymemo",
+  "build": {
+    "frontendDist": "../splash",
+    "beforeDevCommand": "python3 ../scripts/stage_desktop.py",
+    "beforeBuildCommand": "python3 ../scripts/stage_desktop.py"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "category": "Productivity",
+    "shortDescription": "Your AI memory, on your own computer",
+    "longDescription": "OpenMyMemo keeps what AI assistants know about you in a folder of Markdown files on your Mac. Claude, Codex, Cursor and other apps read it and write what they learn; you see every change and can undo it.",
+    "copyright": "© 2026 MyMemo. Apache-2.0.",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "resources": { "core/": "core/" },
+    "externalBin": ["binaries/uv"],
+    "macOS": {
+      "minimumSystemVersion": "12.0",
+      "signingIdentity": "-"
+    }
+  }
+}
