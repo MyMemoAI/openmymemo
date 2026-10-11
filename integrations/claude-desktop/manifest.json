@@ -2,7 +2,7 @@
   "manifest_version": "0.4",
   "name": "openmymemo",
   "display_name": "OpenMyMemo",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Your AI memory as a local folder you own. Claude reads it and writes what it learns; you see every change and can undo it.",
   "long_description": "OpenMyMemo keeps what AI assistants know about you in a folder of Markdown files on your own computer. Claude reads your memory at the start of a conversation and writes what it learns about you. Additions apply right away and show up in a digest in the OpenMyMemo panel (http://127.0.0.1:8787 while Claude Desktop is running), where you can undo them; changes to anything you wrote yourself, and the private health and finance topics, wait for you. Turn approval on to review every change first. The same memory works in Claude Code, Codex, Cursor and VS Code.",
   "author": {
@@ -23,9 +23,9 @@
       "command": "uv",
       "args": [
         "run", "--directory", "${__dirname}", "--frozen", "--no-dev", "openmymemo",
-        "--vault", "${user_config.vault}",
         "mcp", "--connector", "claude-desktop", "--init", "--panel-port", "${user_config.panel_port}"
-      ]
+      ],
+      "env": { "OPENMYMEMO_HOME": "${user_config.vault}" }
     }
   },
   "tools": [
@@ -46,9 +46,8 @@
     "vault": {
       "type": "directory",
       "title": "Memory folder",
-      "description": "Where your memories are stored. Use the same folder in every AI app to share one memory. It's created on first use.",
-      "default": "${HOME}/OpenMyMemo",
-      "required": true
+      "description": "Leave empty to use the OpenMyMemo folder in your home folder. Pick a folder only if you want your memories somewhere else; use the same folder in every AI app to share one memory. It's created on first use.",
+      "required": false
     },
     "panel_port": {
       "type": "number",

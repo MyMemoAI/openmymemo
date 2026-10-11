@@ -46,3 +46,13 @@ def test_codex_gets_its_hook_from_setup_not_from_the_plugin():
 def test_no_project_mcp_json_at_repo_root():
     # Claude Code would load it as project config for everyone who opens the repo.
     assert not (ROOT / ".mcp.json").exists()
+
+
+def test_claude_desktop_extension_installs_with_nothing_to_fill_in():
+    manifest = load("integrations/claude-desktop/manifest.json")
+    fields = manifest["user_config"].values()
+    assert not any(f.get("required") for f in fields)
+    # Claude Desktop shows defaults verbatim, so a "${HOME}" default reads as text the user must change.
+    assert not any("${" in str(f.get("default", "")) for f in fields)
+    config = manifest["server"]["mcp_config"]
+    assert config["env"]["OPENMYMEMO_HOME"] == "${user_config.vault}" and "--vault" not in config["args"]
