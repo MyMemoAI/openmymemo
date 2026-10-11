@@ -79,7 +79,7 @@ const moreActive = computed(() => moreItems.value.some((n) => n.id === current.v
     <!-- desktop: the sidebar; MemoriesView teleports its topics into #sidebar-extra -->
     <aside class="sticky top-0 hidden h-screen w-[248px] shrink-0 flex-col gap-5 overflow-y-auto px-3.5 pt-5 pb-6 md:flex">
       <a href="#/memories" class="flex items-center gap-2.5 px-2.5 text-base font-semibold tracking-[-0.01em]">
-        <img src="/favicon.svg" alt="" class="size-7 rounded-lg" />
+        <img src="/logo.png" alt="" class="size-7 rounded-lg" />
         OpenMyMemo
       </a>
       <nav :aria-label="t('nav.sections')" class="flex flex-col gap-0.5">

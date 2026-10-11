@@ -45,7 +45,7 @@ cd web && pnpm install && pnpm build        # panel → src/openmymemo/static/ (
 | `skills/` | Skills shared by the Claude Code and Codex plugins |
 | `integrations/hooks/` | Session-start hook script shared by Claude Code (plugin hook in `integrations/claude-code/hooks/hooks.json`) and Codex (user-level hook installed by `setup codex`; `integrations/codex/setup.sh` runs it from the installed plugin) |
 | `integrations/claude-desktop/` | `.mcpb` manifest; build with `scripts/build_mcpb.py` |
-| `integrations/icons/` | Icons rendered by `scripts/make_icons.py` |
+| `integrations/icons/`, `web/public/logo.png` | The MyMemo logo at each size, rendered from MyMemo's app icon by `scripts/make_icons.py` |
 
 ## Conventions
 
