@@ -4,6 +4,11 @@ Your AI memory as a plain folder on your own computer. See exactly what models r
 
 > v0.2. Product design and status: [docs/product-design.md](./docs/product-design.md). The folder format, for any tool that wants to read or write it: [docs/MEMORY_FORMAT.md](./docs/MEMORY_FORMAT.md).
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/panel-memories-dark.png">
+  <img alt="The OpenMyMemo panel: memories grouped by topic, each showing where it came from, and a note that AI apps made changes to review" src="docs/images/panel-memories-light.png">
+</picture>
+
 ## Why I built this
 
 My OpenAI account was banned on October 2, 2026, with no warning and no specific explanation. I had used ChatGPT since it launched in late 2022, and its year-end recap put me in the top 1% of users. I appealed and never got a reply. Nearly four years of conversations, and everything ChatGPT had learned about me, went with the account.
@@ -68,9 +73,7 @@ More: `status`, `approval on|off` (on: every AI change waits for you), `context 
 
 **After installing, quit the app completely and open it again** so it loads OpenMyMemo. The first launch downloads Python and the dependencies (about 5 seconds on a fast connection; Codex gives MCP servers 10). If an app then says the OpenMyMemo server failed to start, restart it once more.
 
-**Then open the panel at [http://127.0.0.1:8787](http://127.0.0.1:8787)** in your browser; bookmark it. It's there whenever Claude Desktop, Claude Code or Codex is running: your memories, what AI changed (Changes), the exact text each app gets (What AI sees) and the connected apps (Connectors). Without a plugin, `openmymemo serve` starts it and opens the browser.
-
-![The Memories page of the OpenMyMemo panel: memories grouped by topic, each showing where it came from](docs/images/panel-memories.png)
+**Then open the panel at [http://127.0.0.1:8787](http://127.0.0.1:8787)** in your browser (the page pictured at the top); bookmark it. It's there whenever Claude Desktop, Claude Code or Codex is running: your memories, what AI changed (Changes), the exact text each app gets (What AI sees) and the connected apps (Connectors). Without a plugin, `openmymemo serve` starts it and opens the browser.
 
 #### Codex
 
