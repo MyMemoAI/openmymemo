@@ -4,6 +4,16 @@ Your AI memory as a plain folder on your own computer. See exactly what models r
 
 > v0.2. Product design and status: [docs/product-design.md](./docs/product-design.md). The folder format, for any tool that wants to read or write it: [docs/MEMORY_FORMAT.md](./docs/MEMORY_FORMAT.md).
 
+## Why I built this
+
+On October 2, 2026, my OpenAI account was banned, with no warning and no explanation. I appealed and never got a reply. Every conversation I'd had with ChatGPT, and everything it had learned about me, went with the account.
+
+I had thought of that memory as mine. It wasn't. It lived inside someone else's account, and when the account was gone, so was the memory, with no one to ask for it back.
+
+OpenMyMemo is what I wish I'd had: my AI memory as a folder on my own computer. Any model can read it, I can see and undo every change a model makes, and no single company can take it away.
+
+— Leo
+
 ## Principles
 
 1. Local files are the only source of truth — Markdown with YAML frontmatter you can open in any editor and keep in iCloud, git or an Obsidian vault.
