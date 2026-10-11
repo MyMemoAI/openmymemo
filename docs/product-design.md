@@ -186,7 +186,7 @@ Pasting config is the fallback; each mainstream app gets a native install path. 
 | --- | --- | --- | --- |
 | Claude Desktop | `.mcpb` extension, MCPB "uv" server type (`integrations/claude-desktop/`, built by `scripts/build_mcpb.py`) | via `memory_context` / `recall` prompt | Claude Desktop installs Python and dependencies; user picks the memory folder and panel port. This is the first zero-setup path (§3). |
 | Claude Code | Plugin + marketplace at the repo root (`.claude-plugin/`) | SessionStart hook | `/openmymemo:memory`, `/openmymemo:remember` |
-| Codex | Agent Plugins package at the repo root (`plugin.json`, `mcp.json`) + `.agents/plugins/marketplace.json` | SessionStart hook (the user must trust it in `/hooks`) | `memory`, `remember` skills |
+| Codex | Agent Plugins package at the repo root (`plugin.json`, `mcp.json`) + `.agents/plugins/marketplace.json` | User-level SessionStart hook in `~/.codex/hooks.json`, installed once by `openmymemo setup codex` (or the `codex-setup` skill, which runs `integrations/codex/setup.sh`); the user trusts it once with `/hooks` in the Codex CLI | `memory`, `remember`, `codex-setup` skills. Codex doesn't run plugin-shipped hooks (as of 0.162, bundled in the ChatGPT desktop app, its `plugin_hooks` feature is marked removed; verified with `.codex-plugin/plugin.json`, the default `hooks/hooks.json` and an Agent Plugins extension). Codex trusts hooks by content hash, so the installed command never names a plugin version: it finds the newest installed one when it runs, and upgrades keep it trusted. The ChatGPT desktop app reads the same settings but has no `/hooks` of its own. |
 | Cursor | "Add to Cursor" install link in the panel | — | |
 | VS Code | `code --add-mcp` command in the panel | — | |
 

@@ -20,6 +20,8 @@ app = typer.Typer(help="OpenMyMemo — your AI memory as a local folder you own.
                   add_completion=False, pretty_exceptions_enable=False)
 connector_app = typer.Typer(help="Manage the AI apps that can read your memory.", no_args_is_help=True)
 app.add_typer(connector_app, name="connector")
+setup_app = typer.Typer(help="Set up AI apps that need more than an MCP config.", no_args_is_help=True)
+app.add_typer(setup_app, name="setup")
 
 DEFAULT_PORT = 8787
 
@@ -551,6 +553,48 @@ def connector_remove(ctx: typer.Context, connector_id: str) -> None:
     """Revoke a connector's access."""
     Connectors(_vault(ctx)).remove(connector_id)
     typer.echo(f"Revoked {connector_id}. Its MCP calls will now fail; `connector add --id {connector_id}` re-grants.")
+
+
+# ---- setup ------------------------------------------------------------------------------------------
+
+@setup_app.command("codex")
+def setup_codex(ctx: typer.Context,
+                remove: Annotated[bool, typer.Option("--remove", help="Take the hook out again.")] = False) -> None:
+    """Load your memory at the start of every Codex session (installs a hook in ~/.codex/hooks.json)."""
+    from . import codex
+    from .snippets import command_for
+
+    if sys.platform == "win32":
+        typer.secho("The Codex session hook needs a POSIX shell, so it isn't available on Windows yet.",
+                    fg="red", err=True)
+        raise typer.Exit(1)
+    path = codex.hooks_path()
+    try:
+        if remove:
+            changed = codex.remove(path)
+            typer.echo(f"Removed the OpenMyMemo hook from {path}." if changed else f"No OpenMyMemo hook in {path}.")
+            return
+        plugin = codex.plugin_installed()
+        cli = None if plugin else command_for(ctx.obj["vault"].expanduser().resolve())
+        changed = codex.install(codex.hook_command(cli), path)
+    except VaultError as e:
+        typer.secho(str(e), fg="red", err=True)
+        raise typer.Exit(1) from None
+    source = "the installed OpenMyMemo plugin" if plugin else "this OpenMyMemo installation"
+    if changed:
+        typer.secho(f"Added the OpenMyMemo session hook to {path} (it runs {source}).", fg="green")
+    else:
+        typer.echo(f"The OpenMyMemo session hook in {path} is already up to date.")
+    if codex.hooks_in_config_toml():
+        typer.secho(f"{codex.codex_home() / 'config.toml'} also defines an OpenMyMemo hook; remove it there, "
+                    "or memory loads twice.", fg="yellow")
+    trust = (f'open Codex in a terminal (`codex`), type /hooks, select SessionStart and trust "{codex.STATUS_MESSAGE}". '
+             "The ChatGPT desktop app has no /hooks, but it uses the same settings, so trusting it in the terminal "
+             "covers it too.")
+    if changed:
+        typer.echo(f"\nOne step left, once: {trust} New sessions then start with your memory.")
+    else:
+        typer.echo(f"\nIf new sessions still start without your memory, it isn't trusted yet: {trust}")
 
 
 def main() -> None:
