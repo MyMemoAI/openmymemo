@@ -84,7 +84,7 @@ description: Role, company, team, responsibilities, industry
 group: doing
 ---
 
-- CTO at MyMemo; stack is FastAPI, Vue 3 and Swift ^m7f3a
+- Engineering lead at Acme; stack is FastAPI, Vue 3 and Swift ^m7f3a
 - Rewriting the agent service on the Claude Agent SDK since 2026-09 <!-- until: 2026-12 --> ^k2p9d
 
 ## Team
