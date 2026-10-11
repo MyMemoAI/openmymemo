@@ -1,8 +1,12 @@
+import shutil
+from pathlib import Path
+
 from typer.testing import CliRunner
 
 from openmymemo.cli import app
 from openmymemo.connectors import Connectors
 from openmymemo.proposals import Proposals
+from openmymemo.vault import Vault, vault_path
 
 runner = CliRunner()
 
@@ -191,3 +195,19 @@ def test_review_skip_quit_and_changed_memories(vault):
     assert "The memory has changed since this proposal" in out  # the refused undo
     assert "Waiting for you" not in out  # quit before the pending part
     assert len(props.unreviewed()) == 4 and props.pending_count() == 1
+
+
+def test_blank_or_unsubstituted_vault_means_the_default(tmp_path, monkeypatch):
+    # Claude Desktop passes its optional "Memory folder" field as OPENMYMEMO_HOME, which may arrive
+    # empty or as a placeholder it didn't substitute.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    for value in (None, "", "  ", "${user_config.vault}", "${HOME}/OpenMyMemo"):
+        assert vault_path(value) == tmp_path / "OpenMyMemo", value
+    assert vault_path("~/elsewhere") == tmp_path / "elsewhere"
+
+    for env in ("", "${user_config.vault}"):
+        out = runner.invoke(app, ["init"], env={"OPENMYMEMO_HOME": env})
+        assert out.exit_code == 0, out.output
+        assert Vault(tmp_path / "OpenMyMemo").is_initialized()
+        assert not (Path.cwd() / "${user_config.vault}").exists()
+        shutil.rmtree(tmp_path / "OpenMyMemo")

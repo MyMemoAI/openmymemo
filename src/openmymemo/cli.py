@@ -14,7 +14,7 @@ from .connectors import Connectors
 from .context import compile_context, search
 from .proposals import Proposals
 from .snippets import http_snippets, stdio_snippets
-from .vault import Vault, VaultError, default_vault_path
+from .vault import Vault, VaultError, vault_path
 
 app = typer.Typer(help="OpenMyMemo — your AI memory as a local folder you own.", no_args_is_help=True,
                   add_completion=False, pretty_exceptions_enable=False)
@@ -52,12 +52,12 @@ def _version(value: bool) -> None:
 @app.callback()
 def root(
     ctx: typer.Context,
-    vault: Annotated[Path | None, typer.Option("--vault", envvar="OPENMYMEMO_HOME",
-                                               help="Vault folder (default ~/OpenMyMemo).")] = None,
+    vault: Annotated[str | None, typer.Option("--vault", envvar="OPENMYMEMO_HOME",
+                                              help="Vault folder (default ~/OpenMyMemo).")] = None,
     version: Annotated[bool, typer.Option("--version", callback=_version, is_eager=True,
                                           help="Show the version.")] = False,
 ) -> None:
-    ctx.obj = {"vault": (vault or default_vault_path()).expanduser()}
+    ctx.obj = {"vault": vault_path(vault)}
 
 
 @app.command()

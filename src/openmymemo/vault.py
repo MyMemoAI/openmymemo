@@ -158,38 +158,47 @@ class Vault:
     @classmethod
     def create(cls, root: str | Path) -> Vault:
         vault = cls(root)
-        if vault.is_initialized():
-            raise VaultError(f"{vault.root} is already an OpenMyMemo vault")
-        vault.memories_dir.mkdir(parents=True, exist_ok=True)
-        vault.proposals_dir.mkdir(parents=True, exist_ok=True)
-        for topic in DEFAULT_TOPICS:
-            path = vault.memories_dir / f"{topic.slug}.md"
-            if not path.exists():
-                _atomic_write(path, new_topic_file(topic.title, topic.description, group=default_group_of(topic.slug),
-                                                   private=topic.slug in DEFAULT_PRIVATE))
-        _atomic_write(vault.topics_path, yaml.safe_dump(default_topics_config(), allow_unicode=True, sort_keys=False))
-        _atomic_write(vault.meta_path, json.dumps({"format": META_FORMAT, "memories": {}}, indent=1))
-        _atomic_write(vault.settings_path, yaml.safe_dump({"format": 1, **cls.DEFAULT_SETTINGS}, sort_keys=False))
-        if not vault.connectors_path.exists():
-            _atomic_write(vault.connectors_path, yaml.safe_dump({"format": 1, "connectors": []}, sort_keys=False))
-        (vault.state_dir / ".gitignore").write_text(".lock\n*.tmp\n", encoding="utf-8")
-        vault.sync()
+        with vault.lock():
+            if vault.is_initialized():
+                raise VaultError(f"{vault.root} is already an OpenMyMemo vault")
+            vault._initialize()
         return vault
 
     @classmethod
     def open_or_create(cls, root: str | Path) -> Vault:
-        """Open a vault, creating it first if the folder is missing or empty (used by plugins on first run)."""
+        """Open a vault, creating it first if the folder is missing or empty (used by plugins on first run).
+
+        Apps often start at the same moment (Claude Desktop runs two copies of the server), so the check
+        and the creation happen under the vault lock: a second app waits, then finds the vault ready.
+        """
         vault = cls(root)
         if vault.is_initialized():
             return vault
-        if vault.root.exists() and any(not p.name.startswith(".") for p in vault.root.iterdir()):
-            raise VaultError(f"{vault.root} isn't empty and isn't an OpenMyMemo vault. Choose another folder.")
-        try:
-            return cls.create(root)
-        except VaultError:
-            if vault.is_initialized():  # another app created it at the same moment
-                return cls(root)
-            raise
+        with vault.lock():  # creates .openmymemo/, which the emptiness check ignores like any dot entry
+            if vault.is_initialized():
+                return vault
+            if any(not p.name.startswith(".") for p in vault.root.iterdir()):
+                raise VaultError(f"{vault.root} isn't empty and isn't an OpenMyMemo vault. Choose another folder.")
+            vault._initialize()
+        return vault
+
+    def _initialize(self) -> None:
+        """Write a new vault's files. Callers hold the lock (on this same instance: flock isn't re-entrant)."""
+        self.memories_dir.mkdir(parents=True, exist_ok=True)
+        self.proposals_dir.mkdir(parents=True, exist_ok=True)
+        for topic in DEFAULT_TOPICS:
+            path = self.memories_dir / f"{topic.slug}.md"
+            if not path.exists():
+                _atomic_write(path, new_topic_file(topic.title, topic.description, group=default_group_of(topic.slug),
+                                                   private=topic.slug in DEFAULT_PRIVATE))
+        _atomic_write(self.meta_path, json.dumps({"format": META_FORMAT, "memories": {}}, indent=1))
+        _atomic_write(self.settings_path, yaml.safe_dump({"format": 1, **self.DEFAULT_SETTINGS}, sort_keys=False))
+        if not self.connectors_path.exists():
+            _atomic_write(self.connectors_path, yaml.safe_dump({"format": 1, "connectors": []}, sort_keys=False))
+        (self.state_dir / ".gitignore").write_text(".lock\n*.tmp\n", encoding="utf-8")
+        # Last: is_initialized() checks for this file, so an app that looks without the lock never sees half a vault.
+        _atomic_write(self.topics_path, yaml.safe_dump(default_topics_config(), allow_unicode=True, sort_keys=False))
+        self.sync()
 
     def is_initialized(self) -> bool:
         return self.topics_path.exists() and self.memories_dir.is_dir()
@@ -818,6 +827,16 @@ def _flock(fh, acquire: bool) -> None:
         fcntl.flock(fh.fileno(), fcntl.LOCK_EX if acquire else fcntl.LOCK_UN)
 
 
+def vault_path(value: str | Path | None) -> Path:
+    """The vault folder for a ``--vault`` / ``OPENMYMEMO_HOME`` value; blank means the default ~/OpenMyMemo.
+
+    App launchers hand these over from settings fields the user may leave empty, and the MCPB spec doesn't
+    say what an empty optional field becomes, so an empty string and an unsubstituted ``${…}`` placeholder
+    both count as "not set".
+    """
+    text = str(value).strip() if value is not None else ""
+    return Path(text).expanduser() if text and "${" not in text else Path.home() / "OpenMyMemo"
+
+
 def default_vault_path() -> Path:
-    env = os.environ.get("OPENMYMEMO_HOME")
-    return Path(env).expanduser() if env else Path.home() / "OpenMyMemo"
+    return vault_path(os.environ.get("OPENMYMEMO_HOME"))
