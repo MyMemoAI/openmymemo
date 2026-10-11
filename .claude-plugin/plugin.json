@@ -1,0 +1,39 @@
+{
+  "name": "openmymemo",
+  "displayName": "OpenMyMemo",
+  "version": "0.2.0",
+  "description": "Your AI memory as a local folder you own. Claude starts each session with it and writes what it learns; you see every change and can undo it.",
+  "author": {
+    "name": "MyMemo",
+    "url": "https://github.com/MyMemoAI/openmymemo"
+  },
+  "homepage": "https://github.com/MyMemoAI/openmymemo",
+  "repository": "https://github.com/MyMemoAI/openmymemo",
+  "license": "Apache-2.0",
+  "keywords": [
+    "memory",
+    "local-first",
+    "mcp",
+    "privacy"
+  ],
+  "mcpServers": {
+    "openmymemo": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "${CLAUDE_PLUGIN_ROOT}",
+        "--frozen", "--no-dev",
+        "--quiet",
+        "openmymemo",
+        "mcp",
+        "--connector",
+        "claude-code",
+        "--init",
+        "--panel-port",
+        "8787"
+      ]
+    }
+  },
+  "hooks": "./integrations/claude-code/hooks/hooks.json"
+}

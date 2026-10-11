@@ -1,0 +1,340 @@
+/** All panel copy, in one place. The panel is English only. */
+const strings: Record<string, string> = {
+  "nav.memories": "Memories",
+  "nav.changes": "Changes",
+  "nav.context": "What AI sees",
+  "nav.connectors": "Connectors",
+  "nav.activity": "Activity",
+  "nav.import": "Import & export",
+  "nav.contextShort": "AI sees",
+  "nav.more": "More",
+  "nav.sections": "Sections",
+  "app.tagline": "Your AI memory, on your own computer",
+  "app.offline": "Can't reach the local server. Check that openmymemo serve is still running.",
+  "common.save": "Save",
+  "common.cancel": "Cancel",
+  "common.close": "Close",
+  "common.copy": "Copy",
+  "common.copied": "Copied",
+  "common.delete": "Delete",
+  "common.all": "All",
+  "common.none": "None",
+  "common.never": "never",
+  "common.private": "Private",
+  "common.loading": "Loading…",
+  "common.more": "More options",
+
+  "kind.fact": "Fact",
+  "kind.preference": "Preference",
+  "kind.ongoing": "Ongoing",
+  "kind.instruction": "Instruction",
+  "kind.event": "Event",
+
+  "source.user": "Me",
+  "source.file": "File",
+  "source.import": "Imported from {name}",
+
+  "mem.topics": "Topics",
+  "mem.kinds": "Kind",
+  "mem.sources": "Source",
+  "mem.status": "Status",
+  "mem.waiting": "Waiting for you",
+  "mem.unreviewed": "New from AI",
+  "mem.reviewDue": "Due for review",
+  "mem.archived": "Archived",
+  "mem.pinned": "Pinned",
+  "mem.search": "Search memories",
+  "mem.newPlaceholder": "One statement, e.g. Give the conclusion first when answering technical questions",
+  "mem.add": "Add",
+  "mem.count": "{n}",
+  "mem.emptyTopic": "Nothing here yet.",
+  "mem.emptyTopicHint": "Write one above, or let an AI propose some.",
+  "mem.emptyAll": "No memories yet",
+  "mem.emptyAllHint": "Bring your memory home from ChatGPT or Claude, or write the first one yourself.",
+  "mem.importCta": "Import memories",
+  "mem.noMatch": "No matching memories.",
+  "mem.edit": "Edit",
+  "mem.pin": "Pin",
+  "mem.unpin": "Unpin",
+  "mem.makePrivate": "Make private",
+  "mem.makePublic": "Make visible",
+  "mem.moveTo": "Move to…",
+  "mem.archive": "Archive",
+  "mem.restore": "Restore",
+  "mem.history": "History",
+  "mem.until": "Review {date}",
+  "mem.privateTopic": "This topic is hidden from every AI by default",
+  "mem.makeTopicPrivate": "Make topic private",
+  "mem.makeTopicPublic": "Share topic with AI",
+  "mem.otherFile": "You can also edit this file in any editor: ",
+  "mem.newTopic": "New topic",
+  "mem.autoTopic": "Auto-file",
+  "mem.new": "New",
+  "mem.newTitle": "{app} added or changed this, and you haven't looked yet",
+  "mem.banner.unreviewed.one": "{who} made 1 change you haven't looked at",
+  "mem.banner.unreviewed.other": "{who} made {n} changes you haven't looked at",
+  "mem.banner.pending.one": "{who} proposed 1 change for you to decide on",
+  "mem.banner.pending.other": "{who} proposed {n} changes for you to decide on",
+  "mem.banner.andWaiting.one": "; 1 more waits for your decision",
+  "mem.banner.andWaiting.other": "; {n} more wait for your decision",
+  "mem.reviewNow": "Review",
+  "mem.sort": "Sort into topics",
+  "mem.topicSlug": "File name",
+  "mem.topicTitle": "Title",
+  "mem.topicDesc": "What goes here",
+  "mem.topicOptions": "Topic options",
+
+  "hist.title": "Version history",
+  "hist.rollback": "Restore this version",
+  "hist.op.create": "Created",
+  "hist.op.update": "Edited",
+  "hist.op.move": "Moved",
+  "hist.op.archive": "Archived",
+  "hist.op.restore": "Restored",
+  "hist.by": "by {actor}",
+
+  // The Changes page: what waits for a decision, the digest of applied changes, and past decisions.
+  "chg.tab.review": "To review",
+  "chg.tab.history": "History",
+  "chg.subtitle": "What AI apps added, changed or archived. Keep it, edit it or undo it.",
+  "chg.waiting": "Waiting for you",
+  "chg.changed": "What changed",
+  "chg.looksGood": "Looks good",
+  "chg.lookedGood.one": "Marked 1 change as seen",
+  "chg.lookedGood.other": "Marked {n} changes as seen",
+  "chg.caughtUp": "You're all caught up",
+  "chg.caughtUpHint": "When an AI app adds, changes or archives a memory, it shows up here. Keep it, edit it or undo it.",
+  "chg.today": "Today",
+  "chg.yesterday": "Yesterday",
+  "chg.count.one": "1 change",
+  "chg.count.other": "{n} changes",
+  "chg.op.add": "added",
+  "chg.op.update": "changed",
+  "chg.op.archive": "archived",
+  "chg.keep": "Keep",
+  "chg.edit": "Edit",
+  "chg.undo": "Undo",
+  "chg.undoBlock": "Undo and stop {app} writing to {topic}",
+  "chg.details": "Details",
+  "chg.hideDetails": "Hide details",
+  "chg.kept": "Kept",
+  "chg.undone": "Undone",
+  "chg.saved": "Saved your version",
+  "chg.blocked": "Undone. {app} can no longer write to {topic}",
+  "chg.changedSince": "The memory has changed since, so this can't be undone from here.",
+  "chg.openHistory": "Version history",
+  "chg.moved": "Moved from {from} to {to}",
+  "chg.hold.protected": "You wrote this memory yourself",
+  "chg.hold.private": "Private topic",
+  "chg.hold.approval": "You review every change first",
+  "chg.acceptAll": "Accept all",
+  "chg.historyEmpty": "No decisions yet",
+  "chg.historyHint": "Changes you kept, edited, undid, accepted or rejected are listed here.",
+  "chg.status.accepted": "Accepted",
+  "chg.status.edited_accepted": "Edited",
+  "chg.status.rejected": "Rejected",
+  "chg.status.expired": "Expired",
+  "chg.status.applied": "Kept",
+  "chg.status.undone": "Undone",
+  "chg.status.pending": "Waiting",
+
+  // A proposal card (waiting for a decision, or in History); also used by the Activity page.
+  "rev.wants.add": "wants to remember",
+  "rev.wants.update": "wants to change",
+  "rev.wants.archive": "wants to archive",
+  "rev.proposed.add": "proposed to remember",
+  "rev.proposed.update": "proposed to change",
+  "rev.proposed.archive": "proposed to archive",
+  "rev.convertedFromAdd": "Proposed as new, but it's close to an existing memory, so it's shown as an edit",
+  "rev.conflict": "Contradicts the existing memory",
+  "rev.why": "Why",
+  "rev.said": "Evidence",
+  "rev.accept": "Accept",
+  "rev.editAccept": "Edit and accept",
+  "rev.asNew": "Add as a new memory",
+  "rev.reject": "Reject",
+  "rev.block": "Reject and block {topic} for {app}",
+  "rev.undo": "Undo",
+  "rev.status.accepted": "Accepted",
+  "rev.status.edited_accepted": "Accepted with edits",
+  "rev.status.rejected": "Rejected",
+  "rev.status.expired": "Expired",
+  "rev.status.applied": "Applied",
+  "rev.status.undone": "Undone",
+  "rev.status.pending": "Waiting for you",
+
+  "ctx.who": "View as",
+  "ctx.default": "Default scope (everything not private)",
+  "ctx.budget": "Length limit",
+  "ctx.stats": "{chars} chars · ~{tokens} tokens · {n} memories",
+  "ctx.omitted": "{n} more didn't fit the limit; the AI can find them with search.",
+  "ctx.explain": "This is exactly what an AI receives when it calls memory_context.",
+
+  "set.approval": "Require my approval for AI changes",
+  "set.approvalOn": "Every AI change waits for you here.",
+  "set.approvalOff": "Off: AI additions apply right away and show up here. Changes to memories you wrote yourself, and private topics, always wait for you.",
+  "set.nowOn": "AI changes now wait for your approval",
+  "set.nowOff": "AI changes now apply right away",
+  "con.approvalOn": "Approval is on, so every change from these apps waits for you in Changes, except from apps set to write directly.",
+  "con.add": "Add connector",
+  "con.subtitle": "The AI apps that can read your memory, and how much each one may do.",
+  "con.apps": "Connected apps",
+  "con.seen": "seen {time}",
+  "con.neverSeen": "never seen",
+  "con.readCount": "{n} of {total} topics. Click a topic to hide or show it.",
+  "con.selectAll": "Select all",
+  "con.blockedHelp": "This app's changes to these topics are ignored. Click one to allow it again.",
+  "con.setupHelp": "Paste this into the app's MCP settings.",
+  "con.removeNamed": "Remove {name}",
+  "con.name": "Name",
+  "con.namePlaceholder": "Claude Desktop",
+  "con.kind": "Connection",
+  "con.kind.stdio": "Local process (Claude Desktop / Claude Code / Cursor / Codex)",
+  "con.kind.http": "Local HTTP with a token (needs openmymemo serve running)",
+  "con.write": "Writing",
+  "con.write.none": "Read only",
+  "con.write.propose": "Write",
+  "con.write.auto": "Write directly",
+  "con.writeFull.none": "Read only",
+  "con.writeFull.propose": "Write (changes show up in the digest; memories you wrote and private topics wait for you)",
+  "con.writeFull.auto": "Write directly (also when approval is on; private topics still wait)",
+  "con.writeHelp.none": "It can read what you share with it, and can't change anything.",
+  "con.writeHelp.propose": "Changes show up in the digest; memories you wrote and private topics wait for you.",
+  "con.writeHelp.auto": "Also when approval is on; private topics still wait.",
+  "con.read": "Can read",
+  "con.readAll": "All topics",
+  "con.includePrivate": "Include private topics",
+  "con.includePrivateOn": "On: this app can read the private topics selected above.",
+  "con.includePrivateOff": "Off: private topics stay hidden from this app, whatever is selected above.",
+  "con.blocked": "Ignore proposals about",
+  "con.lastSeen": "Last seen",
+  "con.stats": "Reads: {reads} · Proposals: {proposals}",
+  "con.config": "Setup",
+  "con.addToCursor": "Add to Cursor",
+  "con.rotate": "New token",
+  "con.remove": "Remove",
+  "con.removeConfirm": "Remove {name}? It won't be able to read your memory anymore.",
+  "con.tokenOnce": "This token is shown once. Copy it now.",
+  "con.empty": "No AI apps connected yet",
+  "con.emptyHint": "Add one, then paste its config into Claude, Cursor or any MCP app.",
+  "con.created": "Added {name}",
+  "con.seeContext": "See what it sees",
+
+  "act.empty": "No activity yet.",
+  "act.subtitle": "Who read or searched your memory, and what they proposed.",
+  "act.context": "read the memory summary ({n} memories)",
+  "act.search": "searched “{q}”, {n} hits",
+  "act.get": "read {n} memories",
+  "act.propose": "proposed to {op}",
+  "act.import": "imported {n} ({source})",
+  "act.duplicate": "(already known, ignored)",
+
+  "imp.title": "Import memories",
+  "imp.subtitle": "Bring your memories home from another AI, or hand them to one.",
+  "imp.source": "Source",
+  "imp.src.chatgpt": "ChatGPT",
+  "imp.src.claude": "Claude",
+  "imp.src.gemini": "Gemini / other",
+  "imp.src.markdown": "Markdown",
+  "imp.src.json": "JSON / Mem0",
+  "imp.help.chatgpt": "In ChatGPT open Settings → Personalization → Manage memories, select all, copy and paste below. Or ask ChatGPT to “list everything you remember about me, one per line”.",
+  "imp.help.claude": "In Claude open Settings → Capabilities → View and edit memory and copy it, or ask Claude to list its memories as “[date] – memory”.",
+  "imp.help.gemini": "Ask it to “list everything you remember about me, one per line” and paste below.",
+  "imp.help.markdown": "A Markdown list; a heading that names one of your topics files its items there.",
+  "imp.help.json": "An array of strings, or objects with content / memory fields (Mem0 exports work).",
+  "imp.paste": "Paste here",
+  "imp.preview": "Preview",
+  "imp.commit": "Import {n}",
+  "imp.into": "They go into {topic}, in this order. You can sort them into topics afterwards.",
+  "imp.duplicate": "Already have",
+  "imp.similar": "Similar: {text}",
+  "imp.done.one": "Imported 1 memory into {topic}",
+  "imp.done.other": "Imported {n} memories into {topic}",
+  "imp.doneNamed.one": "1 more went into the topic the source named.",
+  "imp.doneNamed.other": "{n} more went into the topics the source named.",
+  "imp.doneHint": "Sort them into your topics now, or leave them there; AI reads them either way.",
+  "imp.open": "Open {topic}",
+  "imp.more": "Import more",
+  "imp.nothing": "No memories found in that text.",
+
+  "sort.title": "Sort into topics",
+  "sort.explain": "A suggested topic for each memory. Only the ticked ones move; the rest stay where they are.",
+  "sort.none": "No suggestion",
+  "sort.choose": "Choose a topic…",
+  "sort.tickAll": "Tick every suggestion",
+  "sort.untickAll": "Untick all",
+  "sort.move.one": "Move 1 memory",
+  "sort.move.other": "Move {n} memories",
+  "sort.moved.one": "Moved 1 memory",
+  "sort.moved.other": "Moved {n} memories",
+  "sort.empty": "Nothing left to sort",
+  "sort.emptyHint": "Every imported memory is in one of your topics.",
+
+  "exp.title": "Export",
+  "exp.hint": "The memory folder is already a complete backup. Export here to hand memories to another AI.",
+  "exp.markdown": "Markdown",
+  "exp.claude": "Claude import format",
+  "exp.chatgpt": "Prompt for ChatGPT",
+  "exp.json": "JSON",
+  "exp.includePrivate": "Include private",
+  "exp.copy": "Copy",
+  "exp.download": "Download",
+};
+
+export function t(key: string, params: Record<string, string | number> = {}): string {
+  const text = strings[key] ?? key;
+  return text.replace(/\{(\w+)\}/g, (_, k: string) => String(params[k] ?? ""));
+}
+
+/** Pluralised copy: `${key}.one` for one, `${key}.other` otherwise; `{n}` is filled in. */
+export function tn(key: string, n: number, params: Record<string, string | number> = {}): string {
+  return t(`${key}.${n === 1 ? "one" : "other"}`, { ...params, n });
+}
+
+export function sourceLabel(source: string): string {
+  if (source === "user" || source === "file") return t(`source.${source}`);
+  const [type, name] = source.split(":");
+  if (type === "import") return t("source.import", { name: prettyName(name) });
+  return prettyName(name ?? source);
+}
+
+const NAMES: Record<string, string> = { chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini", mem0: "Mem0", json: "JSON", markdown: "Markdown", text: "Text" };
+
+export function prettyName(id: string): string {
+  return NAMES[id] ?? id;
+}
+
+/** "Claude Desktop", "Claude Desktop and Cursor", "A, B and C". */
+export function listNames(names: string[]): string {
+  return names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
+
+export function relTime(iso: string | null): string {
+  if (!iso) return t("common.never");
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (diff < 60) return rtf.format(-Math.round(diff), "second");
+  if (diff < 3600) return rtf.format(-Math.round(diff / 60), "minute");
+  if (diff < 86400) return rtf.format(-Math.round(diff / 3600), "hour");
+  if (diff < 86400 * 30) return rtf.format(-Math.round(diff / 86400), "day");
+  return new Date(iso).toLocaleDateString("en");
+}
+
+/** A local calendar day as YYYY-MM-DD, for grouping. */
+export function dayKey(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** "Today", "Yesterday" or e.g. "Mon, Oct 5" (with the year when it isn't this year). */
+export function dayLabel(key: string): string {
+  const now = new Date();
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  if (key === dayKey(now.toISOString())) return t("chg.today");
+  if (key === dayKey(yesterday.toISOString())) return t("chg.yesterday");
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("en", {
+    weekday: "short", month: "short", day: "numeric", year: y === now.getFullYear() ? undefined : "numeric",
+  });
+}

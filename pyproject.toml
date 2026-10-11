@@ -1,0 +1,58 @@
+[project]
+name = "openmymemo"
+version = "0.2.0"
+description = "Your AI memory as a local folder: any model can read it over MCP, every change needs your approval."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+authors = [{ name = "MyMemo", email = "leo@mymemo.ai" }]
+keywords = ["memory", "mcp", "llm", "claude", "chatgpt", "local-first"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Environment :: Console",
+    "Environment :: Web Environment",
+]
+dependencies = [
+    "mcp>=2.3,<3",
+    "fastapi>=0.140",
+    "uvicorn>=0.50",
+    "typer>=0.27",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+openmymemo = "openmymemo.cli:main"
+
+[project.urls]
+Repository = "https://github.com/MyMemoAI/openmymemo"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "httpx>=0.27",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/openmymemo"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["web/node_modules", "web/.vite"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]

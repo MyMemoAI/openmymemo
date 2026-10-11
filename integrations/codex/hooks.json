@@ -1,0 +1,19 @@
+{
+  "description": "Load the user's OpenMyMemo memory into each new session.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"$PLUGIN_ROOT/integrations/hooks/session-start.sh\" \"$PLUGIN_ROOT\" codex",
+            "timeout": 30,
+            "statusMessage": "Loading your OpenMyMemo memory",
+            "additionalContextLimit": 12000
+          }
+        ]
+      }
+    ]
+  }
+}

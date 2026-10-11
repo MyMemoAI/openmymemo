@@ -1,0 +1,19 @@
+{
+  "description": "Load the user's OpenMyMemo memory into each new session.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/integrations/hooks/session-start.sh", "${CLAUDE_PLUGIN_ROOT}", "claude-code"],
+            "timeout": 30,
+            "statusMessage": "Loading your OpenMyMemo memory"
+          }
+        ]
+      }
+    ]
+  }
+}

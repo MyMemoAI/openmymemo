@@ -1,0 +1,14 @@
+{
+  "name": "openmymemo",
+  "description": "OpenMyMemo: a local, user-owned AI memory for Claude Code.",
+  "owner": { "name": "MyMemo", "url": "https://github.com/MyMemoAI/openmymemo" },
+  "plugins": [
+    {
+      "name": "openmymemo",
+      "source": ".",
+      "description": "Start every session with your memory; what Claude writes shows up in a digest you can undo.",
+      "category": "productivity",
+      "tags": ["memory", "mcp", "local-first"]
+    }
+  ]
+}

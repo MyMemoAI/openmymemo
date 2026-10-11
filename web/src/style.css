@@ -1,0 +1,198 @@
+@import "tailwindcss";
+
+/*
+ * One quiet surface: a grey ground, white cards with a soft shadow instead of a border, hairline
+ * separators, the system typeface and a single blue for the one primary action on a screen.
+ * Green marks what an AI changed that the user hasn't looked at; amber marks what waits for them.
+ * Every color is a token with a dark-mode value below, so views never need `dark:` variants.
+ */
+@theme {
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --color-ground: #f5f5f7;
+  --color-surface: #ffffff;
+  --color-sunken: #fafafc;
+  --color-control: #ffffff;
+  --color-control-hover: #f2f2f4;
+  --color-hover: rgb(0 0 0 / 0.035);
+  --color-fill: rgb(0 0 0 / 0.06);
+  --color-fill-strong: rgb(0 0 0 / 0.08);
+  --color-sep: rgb(0 0 0 / 0.07);
+  --color-ring: rgb(0 0 0 / 0.05);
+  --color-line: rgb(0 0 0 / 0.1);
+  --color-overlay: rgb(0 0 0 / 0.28);
+
+  --color-ink: #1d1d1f;
+  --color-ink-2: #515154;
+  --color-muted: #6e6e73;
+  --color-faint: #86868b;
+
+  --color-accent: #0071e3;
+  --color-accent-hover: #0062c4;
+  --color-accent-soft: rgb(0 113 227 / 0.1);
+  --color-accent-ink: #0a4f9e;
+  --color-focus: rgb(0 113 227 / 0.35);
+
+  --color-wait: #f0a030;
+  --color-wait-on: #3a2200;
+  --color-wait-soft: #fff6e8;
+  --color-wait-ring: rgb(240 160 48 / 0.35);
+  --color-wait-chip: rgb(240 160 48 / 0.22);
+  --color-wait-ink: #8a4b00;
+
+  --color-fresh: #34c759;
+  --color-fresh-soft: rgb(52 199 89 / 0.18);
+  --color-fresh-ink: #1f6b33;
+  --color-plus: #1b7a3e;
+
+  --color-danger: #c0392b;
+  --color-danger-soft: rgb(192 57 43 / 0.08);
+  --color-danger-ink: #a3321f;
+
+  --color-private-soft: rgb(88 86 214 / 0.14);
+  --color-private-ink: #3e3c9e;
+
+  --color-switch-off: rgb(0 0 0 / 0.16);
+  --color-switch-on: #34c759;
+}
+
+@layer base {
+  html { color-scheme: light dark; }
+  body { @apply bg-ground font-sans text-[15px] leading-normal text-ink antialiased; }
+  button { cursor: pointer; }
+  button:disabled { cursor: default; }
+  :focus-visible { outline: 3px solid var(--color-focus); outline-offset: 1px; }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --color-ground: #000000;
+      --color-surface: #1c1c1e;
+      --color-sunken: #161618;
+      --color-control: #2c2c2e;
+      --color-control-hover: #3a3a3c;
+      --color-hover: rgb(255 255 255 / 0.04);
+      --color-fill: rgb(255 255 255 / 0.1);
+      --color-fill-strong: rgb(255 255 255 / 0.14);
+      --color-sep: rgb(255 255 255 / 0.09);
+      --color-ring: rgb(255 255 255 / 0.07);
+      --color-line: rgb(255 255 255 / 0.14);
+      --color-overlay: rgb(0 0 0 / 0.55);
+
+      --color-ink: #f5f5f7;
+      --color-ink-2: #d1d1d6;
+      --color-muted: #98989d;
+      --color-faint: #7c7c80;
+
+      --color-accent: #0a84ff;
+      --color-accent-hover: #409cff;
+      --color-accent-soft: rgb(10 132 255 / 0.2);
+      --color-accent-ink: #6cb4ff;
+      --color-focus: rgb(10 132 255 / 0.5);
+
+      --color-wait: #ff9f0a;
+      --color-wait-on: #1c1000;
+      --color-wait-soft: rgb(255 159 10 / 0.12);
+      --color-wait-ring: rgb(255 159 10 / 0.35);
+      --color-wait-chip: rgb(255 159 10 / 0.22);
+      --color-wait-ink: #ffb340;
+
+      --color-fresh: #30d158;
+      --color-fresh-soft: rgb(48 209 88 / 0.2);
+      --color-fresh-ink: #5ee07f;
+      --color-plus: #32d74b;
+
+      --color-danger: #ff6961;
+      --color-danger-soft: rgb(255 105 97 / 0.14);
+      --color-danger-ink: #ff8a84;
+
+      --color-private-soft: rgb(94 92 230 / 0.28);
+      --color-private-ink: #b4b2ff;
+
+      --color-switch-off: rgb(255 255 255 / 0.2);
+      --color-switch-on: #30d158;
+    }
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-[14px] bg-surface;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.05), 0 0 0 1px var(--color-ring);
+  }
+
+  /* Buttons: secondary by default, one primary per screen, destructive actions are plain red text. */
+  .btn {
+    @apply inline-flex min-h-9 items-center justify-center gap-1.5 rounded-[10px] bg-control px-4 text-sm font-medium whitespace-nowrap text-ink transition-colors hover:bg-control-hover disabled:opacity-50 disabled:hover:bg-control;
+    box-shadow: 0 0 0 1px var(--color-line);
+  }
+  .btn-primary { @apply bg-accent font-semibold text-white shadow-none hover:bg-accent-hover disabled:hover:bg-accent; }
+  .btn-filled { @apply bg-fill shadow-none hover:bg-fill-strong disabled:hover:bg-fill; }
+  .btn-ghost { @apply bg-transparent shadow-none hover:bg-fill disabled:hover:bg-transparent; }
+  .btn-quiet { @apply bg-transparent font-normal text-muted shadow-none hover:bg-fill hover:text-ink disabled:hover:bg-transparent; }
+  .btn-danger { @apply bg-transparent text-danger shadow-none hover:bg-danger-soft disabled:hover:bg-transparent; }
+  .btn-link { @apply min-h-8 bg-transparent px-1 text-accent shadow-none hover:bg-transparent hover:text-accent-hover; }
+  .btn-sm { @apply min-h-8 rounded-[9px] px-3 text-[13px]; }
+  .btn-icon { @apply size-8 min-h-8 px-0 text-muted; }
+  .btn-wrap { @apply text-left whitespace-normal; }
+
+  /* Inputs are filled, not outlined. */
+  .input {
+    @apply min-h-9 w-full rounded-[10px] border-0 bg-fill px-3 py-1.5 text-sm text-ink transition outline-none placeholder:text-faint focus:bg-surface;
+  }
+  .input:focus { box-shadow: 0 0 0 3px var(--color-focus); }
+  .select {
+    @apply cursor-pointer appearance-none pr-8;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238e8e93' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-position: right 0.6rem center;
+    background-repeat: no-repeat;
+    background-size: 0.85rem;
+  }
+
+  .chip { @apply inline-flex min-h-5 items-center gap-1 rounded-full bg-fill px-2 text-xs font-medium text-ink-2; }
+  .chip-fresh { @apply bg-fresh-soft font-semibold text-fresh-ink; }
+  .chip-wait { @apply bg-wait-chip text-wait-ink; }
+  .chip-private { @apply bg-private-soft text-private-ink; }
+  .chip-accent { @apply bg-accent-soft font-semibold text-accent-ink; }
+  .badge { @apply inline-flex min-h-5 items-center rounded-full bg-wait px-1.5 text-xs font-semibold text-wait-on tabular-nums; }
+  .dot { @apply inline-block size-1.5 shrink-0 rounded-full; }
+
+  .label { @apply text-xs font-semibold tracking-[0.04em] text-muted uppercase; }
+  .page-title { @apply text-[26px] leading-tight font-bold tracking-[-0.02em] sm:text-[30px]; }
+  .page-sub { @apply text-[15px] text-muted; }
+  .section-title { @apply text-[17px] font-bold tracking-[-0.01em]; }
+
+  /* Segmented control: replaces rows of toggle buttons. */
+  .seg { @apply inline-flex max-w-full flex-wrap items-center gap-0.5 rounded-[10px] bg-fill p-0.5; }
+  .seg-item { @apply inline-flex min-h-[30px] items-center gap-1.5 rounded-[8px] px-3.5 text-[13px] font-semibold whitespace-nowrap text-ink-2 transition-colors hover:text-ink; }
+  .seg-item.is-on { @apply bg-control text-ink; box-shadow: 0 1px 2px rgb(0 0 0 / 0.08); }
+
+  /* iOS-style switch; the knob moves with aria-checked. */
+  .switch { @apply relative inline-block h-[31px] w-[51px] shrink-0 rounded-full bg-switch-off p-0 transition-colors; }
+  .switch[aria-checked="true"] { @apply bg-switch-on; }
+  .switch-knob { @apply absolute top-0.5 left-0.5 size-[27px] rounded-full bg-white transition-transform; box-shadow: 0 2px 4px rgb(0 0 0 / 0.2); }
+  .switch[aria-checked="true"] .switch-knob { transform: translateX(20px); }
+
+  /* Toggle pills (a connector's readable topics). */
+  .pill { @apply inline-flex min-h-[30px] items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-colors; }
+  .pill-on { @apply bg-ink text-ground; }
+  .pill-off { @apply bg-fill text-muted line-through hover:bg-fill-strong; }
+
+  .menu { @apply absolute z-30 rounded-[12px] bg-surface mt-1 min-w-52 overflow-hidden p-1 text-sm; box-shadow: 0 10px 30px rgb(0 0 0 / 0.14), 0 0 0 1px var(--color-ring); }
+  .menu-item { @apply flex w-full items-center gap-2 rounded-[7px] px-2.5 py-1.5 text-left hover:bg-fill; }
+  .menu-sep { @apply my-1 border-t border-sep; }
+
+  /* Diff lines in proposals and the digest. */
+  .minus { @apply w-3 shrink-0 font-bold text-danger select-none; }
+  .plus { @apply w-3 shrink-0 font-bold text-plus select-none; }
+
+  .notice { @apply flex items-center gap-2.5 rounded-[12px] px-4 py-2.5 text-[13px]; }
+  .notice-wait { @apply bg-wait-soft text-wait-ink; box-shadow: 0 0 0 1px var(--color-wait-ring); }
+  .notice-private { @apply bg-private-soft text-private-ink; }
+  .notice-danger { @apply bg-danger-soft text-danger-ink; }
+
+  .avatar { @apply inline-flex shrink-0 items-center justify-center rounded-[9px] bg-fill font-bold text-ink; }
+  .avatar-on { @apply bg-ink text-ground; }
+
+  .check { @apply size-[18px] shrink-0 cursor-pointer accent-accent; }
+}

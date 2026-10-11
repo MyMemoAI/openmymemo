@@ -1,0 +1,11 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "openmymemo": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "--frozen", "--no-dev", "--quiet", "openmymemo", "mcp", "--connector", "codex", "--init", "--panel-port", "8787"],
+      "cwd": "${PLUGIN_ROOT}"
+    }
+  }
+}

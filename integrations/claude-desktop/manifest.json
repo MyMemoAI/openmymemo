@@ -1,0 +1,68 @@
+{
+  "manifest_version": "0.4",
+  "name": "openmymemo",
+  "display_name": "OpenMyMemo",
+  "version": "0.2.0",
+  "description": "Your AI memory as a local folder you own. Claude reads it and writes what it learns; you see every change and can undo it.",
+  "long_description": "OpenMyMemo keeps what AI assistants know about you in a folder of Markdown files on your own computer. Claude reads your memory at the start of a conversation and writes what it learns about you. Additions apply right away and show up in a digest in the OpenMyMemo panel (http://127.0.0.1:8787 while Claude Desktop is running), where you can undo them; changes to anything you wrote yourself, and the private health and finance topics, wait for you. Turn approval on to review every change first. The same memory works in Claude Code, Codex, Cursor and VS Code.",
+  "author": {
+    "name": "MyMemo",
+    "url": "https://github.com/MyMemoAI/openmymemo"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MyMemoAI/openmymemo"
+  },
+  "homepage": "https://github.com/MyMemoAI/openmymemo",
+  "support": "https://github.com/MyMemoAI/openmymemo/issues",
+  "icon": "icon.png",
+  "server": {
+    "type": "uv",
+    "entry_point": "src/openmymemo/__main__.py",
+    "mcp_config": {
+      "command": "uv",
+      "args": [
+        "run", "--directory", "${__dirname}", "--frozen", "--no-dev", "openmymemo",
+        "--vault", "${user_config.vault}",
+        "mcp", "--connector", "claude-desktop", "--init", "--panel-port", "${user_config.panel_port}"
+      ]
+    }
+  },
+  "tools": [
+    { "name": "memory_context", "description": "Get the user's memory as Markdown: who they are, how they want you to work, what they're doing." },
+    { "name": "memory_search", "description": "Search the user's memory by keywords." },
+    { "name": "memory_get", "description": "Fetch specific memories by id." },
+    { "name": "memory_propose", "description": "Propose adding, correcting or retiring a memory; the user reviews it." },
+    { "name": "memory_proposals", "description": "List this app's proposals and what the user decided." }
+  ],
+  "prompts": [
+    {
+      "name": "recall",
+      "description": "Load the user's memory and keep it up to date during the conversation.",
+      "text": "Before answering, call the memory_context tool from OpenMyMemo and take my memory into account. During our conversation, whenever you learn something about me that will still matter in a month, call memory_propose with a reason and my words as evidence. I'll review proposals later."
+    }
+  ],
+  "user_config": {
+    "vault": {
+      "type": "directory",
+      "title": "Memory folder",
+      "description": "Where your memories are stored. Use the same folder in every AI app to share one memory. It's created on first use.",
+      "default": "${HOME}/OpenMyMemo",
+      "required": true
+    },
+    "panel_port": {
+      "type": "number",
+      "title": "Panel port",
+      "description": "The review panel opens at http://127.0.0.1:<port> while Claude Desktop is running.",
+      "default": 8787,
+      "min": 1024,
+      "max": 65535
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": { "python": ">=3.11" }
+  },
+  "keywords": ["memory", "personal", "local-first", "privacy", "approval"],
+  "license": "Apache-2.0"
+}
