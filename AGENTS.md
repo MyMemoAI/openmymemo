@@ -54,6 +54,7 @@ cd web && pnpm install && pnpm build        # panel → src/openmymemo/static/ (
 - Topic slugs are the file names; titles come from the files.
 - All writes go through `Vault` methods, which lock, re-read from disk, write atomically and update meta and history.
 - The mcp SDK is 2.x: `from mcp.server.mcpserver import MCPServer, Context`; static resources can't take a `Context`.
-- Plugins run `uv run` from the installed copy of this repo, so anything the package needs at runtime must be inside the repo (and inside the `.mcpb` staging list in `scripts/build_mcpb.py`). Keep the version in `pyproject.toml`, both `plugin.json` files and the `.mcpb` manifest in sync.
+- Plugins run `uv run` from the installed copy of this repo, so anything the package needs at runtime must be inside the repo (and inside the `.mcpb` staging list in `scripts/build_mcpb.py`). Keep the version in `pyproject.toml`, `src/openmymemo/__init__.py`, both `plugin.json` files, the `.mcpb` manifest and `web/package.json` in sync (`tests/test_packaging.py` checks), and run `uv lock` after a bump.
+- CI (`.github/workflows/ci.yml`) runs the tests on Linux and macOS, checks that the committed panel build matches `web/`, and packs the `.mcpb`. To release: bump the version, merge, then push a tag `v<version>`; `.github/workflows/release.yml` publishes the `.mcpb`, wheel and sdist as a GitHub release.
 - Don't add a root `.mcp.json`: Claude Code would treat it as project config for everyone working on this repo. The Claude Code MCP server is declared inline in `.claude-plugin/plugin.json`.
 - Commit messages are imperative English; one topic per PR.
