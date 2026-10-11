@@ -4,6 +4,26 @@ Your AI memory as a plain folder on your own computer. See exactly what models r
 
 > v0.2. Product design and status: [docs/product-design.md](./docs/product-design.md). The folder format, for any tool that wants to read or write it: [docs/MEMORY_FORMAT.md](./docs/MEMORY_FORMAT.md).
 
+## Why I built this
+
+My OpenAI account was banned on October 2, 2026, with no warning and no explanation. I had used ChatGPT since it launched in late 2022, and its year-end recap put me in the top 1% of users. I appealed and never got a reply. Nearly four years of conversations, and everything ChatGPT had learned about me, went with the account.
+
+I had thought of that memory as mine. It wasn't. It lived on OpenAI's servers, in an account they could close at any time, and when they did, the memory went with it, with no one to ask for it back.
+
+OpenMyMemo is what I wish I'd had: my AI memory as a folder on my own computer. Any model can read it, I can see and undo every change a model makes, and no single company can take it away.
+
+— Leo
+
+## Works with
+
+| App | Status |
+| --- | --- |
+| Claude Desktop (Chat, Cowork and Code) | ✅ Extension |
+| Claude Code | ✅ Plugin |
+| Codex (the CLI, and Codex in the ChatGPT desktop app) | ✅ Plugin |
+| Cursor, VS Code | ✅ Install link from the panel |
+| ChatGPT chat (web, desktop and mobile), claude.ai on the web | ❌ Not yet. They can only connect to MCP servers on the public internet, and OpenMyMemo stays on your computer. You can still bring your ChatGPT memories over with `openmymemo import chatgpt`. |
+
 ## Principles
 
 1. Local files are the only source of truth — Markdown with YAML frontmatter you can open in any editor and keep in iCloud, git or an Obsidian vault.
@@ -54,7 +74,7 @@ While the repo is private, the Claude Code and Codex marketplace commands need G
 
 - **Local process (recommended):** Claude Desktop, Claude Code, Cursor, Codex and other stdio MCP clients. `openmymemo connector add <name>` prints a config with absolute paths to paste in. Give each app its own `--connector` so permissions and logs stay separate.
 - **Local HTTP:** `openmymemo connector add <name> --http` creates a token (shown once) for use with `openmymemo serve` at `http://127.0.0.1:8787/mcp`.
-- claude.ai and chatgpt.com (web and desktop apps) can only reach public MCP servers, so they aren't supported yet. On the OpenAI side, Codex works today.
+- ChatGPT chat (web, desktop and mobile) and claude.ai on the web can only reach MCP servers on the public internet, so they aren't supported yet. On the OpenAI side, Codex works today, including the Codex built into the ChatGPT desktop app.
 
 Tools AI apps see: `memory_context`, `memory_search`, `memory_get`, `memory_propose`, `memory_proposals`, plus the `recall` prompt.
 
