@@ -6,7 +6,7 @@ Your AI memory as a plain folder on your own computer. See exactly what models r
 
 ## Why I built this
 
-On October 2, 2026, my OpenAI account was banned, with no warning and no explanation. I appealed and never got a reply. Every conversation I'd had with ChatGPT, and everything it had learned about me, went with the account.
+I'd been a devoted ChatGPT user since 2022; its year-end recap put me in the top 1% of users. On October 2, 2026, my OpenAI account was banned, with no warning and no explanation. I appealed and never got a reply. Nearly four years of conversations, and everything ChatGPT had learned about me, went with the account.
 
 I had thought of that memory as mine. It wasn't. It lived inside someone else's account, and when the account was gone, so was the memory, with no one to ask for it back.
 
