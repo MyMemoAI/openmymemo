@@ -70,6 +70,8 @@ Each plugin uses `~/OpenMyMemo` by default (created on first use), loads your me
 
 **Then open the panel at [http://127.0.0.1:8787](http://127.0.0.1:8787)** in your browser; bookmark it. It's there whenever Claude Desktop, Claude Code or Codex is running: your memories, what AI changed (Changes), the exact text each app gets (What AI sees) and the connected apps (Connectors). Without a plugin, `openmymemo serve` starts it and opens the browser.
 
+![The Memories page of the OpenMyMemo panel: memories grouped by topic, each showing where it came from](docs/images/panel-memories.png)
+
 #### Codex
 
 You need [uv](https://docs.astral.sh/uv/). Steps 2 and 3 are needed only once: Codex doesn't run hooks that plugins ship, so OpenMyMemo adds its own session-start hook.
@@ -97,6 +99,8 @@ From your next new session on, Codex starts with your memory. The plugin also ad
 Tools AI apps see: `memory_context`, `memory_search`, `memory_get`, `memory_propose`, `memory_proposals`, plus the `recall` prompt.
 
 ## What happens when an AI writes
+
+![The Changes page: an AI's change to a memory you wrote and an addition to a private topic wait for you, with Accept, Edit and accept, and Reject](docs/images/panel-changes.png)
 
 - **An addition applies right away.** It is marked as new until you look at it: on the panel's Changes page, in `openmymemo review`, or in the one-line summary at the start of your next Claude Code or Codex session.
 - **A change to a memory you wrote, imported or approved yourself waits for you.** So does anything in a private topic (`health` and `finance` by default). AI never silently changes what you wrote.
