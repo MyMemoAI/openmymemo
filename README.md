@@ -1,6 +1,6 @@
 # OpenMyMemo
 
-Your AI memory as a plain folder on your own computer. See exactly what models remember about you; let Claude, Codex, Cursor or any MCP app read it and write to it, and see every change they make, with one click to undo. If an account gets banned, a vendor shuts down or you switch models, your memory comes with you.
+Your AI memory as a plain folder on your own computer. See exactly what models remember about you; let Claude, Codex, Cursor or any MCP app share it, so what you tell one the others know too, and see every change they make, with one click to undo. If an account gets banned, a vendor shuts down or you switch models, your memory comes with you.
 
 > v0.2. Product design and status: [docs/product-design.md](./docs/product-design.md). The folder format, for any tool that wants to read or write it: [docs/MEMORY_FORMAT.md](./docs/MEMORY_FORMAT.md).
 
@@ -56,7 +56,7 @@ More: `status`, `approval on|off` (on: every AI change waits for you), `context 
 
 ### Plugins
 
-Each plugin uses `~/OpenMyMemo` by default (created on first use), loads your memory into new sessions where the app supports it — starting with a one-line summary of what AI changed since you last looked — and serves the panel at `http://127.0.0.1:8787` while the app is running. They need [uv](https://docs.astral.sh/uv/) except where noted.
+**Install as many as you like: they all share one memory.** Every plugin uses the same `~/OpenMyMemo` folder by default (created on first use), so something you tell Claude, Codex knows in its next session, and the other way round. Each plugin loads your memory into new sessions where the app supports it — starting with a one-line summary of what AI changed since you last looked — and serves the panel at `http://127.0.0.1:8787` while the app is running. They need [uv](https://docs.astral.sh/uv/) except where noted.
 
 | App | Install |
 | --- | --- |

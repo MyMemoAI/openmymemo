@@ -22,8 +22,6 @@ from openmymemo.vault import Vault
 CHATGPT_PASTE = """Saved memories
 Prefers concise answers that lead with the conclusion, then the reasoning.
 Delete
-Is the CTO of MyMemo; the stack is FastAPI, Vue 3 and Swift.
-Delete
 Is learning Japanese and wants to watch Japanese dramas without subtitles next year.
 Delete
 Has a five-year-old daughter.
@@ -51,7 +49,7 @@ def main(path: str) -> None:
     claude = cons.ensure("claude-desktop", "Claude Desktop")
     cursor, _ = cons.create("Cursor", "http", write="auto")
     props = Proposals(v)
-    cto = next(m for m in v.memories() if "CTO" in m.content)
+    editor = next(m for m in v.memories() if "VS Code" in m.content)
     results = [
         # Applied at once, listed in the digest.
         props.propose(claude, "add", content="Is evaluating a move of the iOS app from UIKit to SwiftUI.",
@@ -65,9 +63,9 @@ def main(path: str) -> None:
                       reason="The project gained a digest", evidence="We just shipped the review digest"),
         props.propose(cursor, "add", content="Uses pnpm for all JavaScript projects.", topic="tools"),
         # Waits: the user imported this memory, so it is theirs.
-        props.propose(claude, "update", memory_id=cto.id,
-                      content="Is the CTO of MyMemo; the stack is FastAPI, Vue 3 and Swift. Also runs infrastructure.",
-                      reason="Added a responsibility", evidence="I run the infrastructure too"),
+        props.propose(claude, "update", memory_id=editor.id,
+                      content="Uses a MacBook Pro with VS Code as the main editor, and Cursor for pair programming with AI.",
+                      reason="Added an editor", evidence="I've started using Cursor when I pair with AI"),
         # Waits: Health is a private topic.
         props.propose(claude, "add", content="Allergic to peanuts.", topic="health",
                       reason="Mentioned while picking a restaurant", evidence="I'm allergic to peanuts, keep that in mind"),
