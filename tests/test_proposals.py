@@ -147,7 +147,7 @@ def test_approval_on_holds_everything(setup):
     vault.update_settings(require_approval=True)
     assert "require_approval: true" in vault.settings_path.read_text()
     ai = vault.add("tools", "Uses VS Code", **AI)
-    mine = vault.add("work", "CTO at MyMemo")
+    mine = vault.add("work", "CTO at Acme")
     results = [props.propose(claude, "add", content="Plays the piano"),
                props.propose(claude, "update", memory_id=ai.id, content="Uses VS Code and Zed"),
                props.propose(claude, "archive", memory_id=mine.id)]
@@ -201,7 +201,7 @@ def test_update_and_archive_require_readable_target(setup):
     secret = vault.add("health", "有轻度哮喘")
     with pytest.raises(VaultError):
         props.propose(claude, "update", memory_id=secret.id, content="哮喘已痊愈")
-    m = vault.add("work", "在 MyMemo 做 CTO")
+    m = vault.add("work", "在 Acme 做 CTO")
     r = props.propose(claude, "archive", memory_id=m.id, reason="user left the job")
     props.accept(r["proposal_id"])
     assert vault.get(m.id).status == "archived"

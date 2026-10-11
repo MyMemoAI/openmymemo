@@ -32,13 +32,13 @@ def test_init_creates_default_taxonomy(vault):
 
 
 def test_add_update_archive_restore_and_history(vault):
-    m = vault.add("work", "在 MyMemo 做 CTO", source="user")
+    m = vault.add("work", "在 Acme 做 CTO", source="user")
     path = vault.memories_dir / "work.md"
-    assert f"- 在 MyMemo 做 CTO ^{m.id}" in path.read_text()
+    assert f"- 在 Acme 做 CTO ^{m.id}" in path.read_text()
 
-    m2 = vault.update(m.id, content="在 MyMemo 做 CTO，兼管基础设施")
+    m2 = vault.update(m.id, content="在 Acme 做 CTO，兼管基础设施")
     assert m2.version == 2
-    assert f"- 在 MyMemo 做 CTO，兼管基础设施 ^{m.id}" in path.read_text()
+    assert f"- 在 Acme 做 CTO，兼管基础设施 ^{m.id}" in path.read_text()
 
     moved = vault.update(m.id, topic="history")
     assert moved.topic == "history"
@@ -55,7 +55,7 @@ def test_add_update_archive_restore_and_history(vault):
     assert ops == ["create", "update", "move", "archive", "restore"]
 
     vault.rollback(m.id, 1)
-    assert vault.get(m.id).content == "在 MyMemo 做 CTO"
+    assert vault.get(m.id).content == "在 Acme 做 CTO"
     assert vault.get(m.id).topic == "work"
 
 

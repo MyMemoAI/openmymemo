@@ -9,7 +9,7 @@ import yaml
 from openmymemo.mdfile import MemoryFile, new_topic_file
 from openmymemo.vault import NotFound, Vault, VaultError
 
-V1_WORK = "# Work\n> Role, company, team, responsibilities, industry\n\n- CTO at MyMemo ^m7f3a\n- Runs infra ^q1x4e\n"
+V1_WORK = "# Work\n> Role, company, team, responsibilities, industry\n\n- CTO at Acme ^m7f3a\n- Runs infra ^q1x4e\n"
 V1_HEALTH = "# Health\n> Medical history, medication\n"
 V1_VALUES = "# Values\n\n> Principles\n> and beliefs\n\nSome prose the user wrote.\n\n## Work ethic\n- Ship small ^v4lu3\n"
 
@@ -37,12 +37,12 @@ def make_v1_vault(root):
     entry = {"topic": "work", "section": None, "kind": "fact", "source": "user", "created_at": "2026-10-01T00:00:00+00:00",
              "updated_at": "2026-10-01T00:00:00+00:00", "version": 1, "status": "active"}
     (root / ".openmymemo" / "meta.json").write_text(json.dumps({"format": 1, "memories": {
-        "m7f3a": {**entry, "content": "CTO at MyMemo"},
+        "m7f3a": {**entry, "content": "CTO at Acme"},
         "q1x4e": {**entry, "content": "Runs infra", "version": 2},
         "v4lu3": {**entry, "content": "Ship small", "topic": "values", "section": "Work ethic"},
     }}), encoding="utf-8")
     history = [
-        {"at": "2026-10-01T00:00:00+00:00", "memory_id": "m7f3a", "version": 1, "op": "create", "content": "CTO at MyMemo",
+        {"at": "2026-10-01T00:00:00+00:00", "memory_id": "m7f3a", "version": 1, "op": "create", "content": "CTO at Acme",
          "topic": "work", "actor": "user"},
         {"at": "2026-10-01T00:00:00+00:00", "memory_id": "q1x4e", "version": 1, "op": "create", "content": "Runs infra",
          "topic": "work", "actor": "user"},
@@ -117,7 +117,7 @@ def test_format_1_vault_is_migrated_once(tmp_path):
     # Files: header lines became frontmatter, the body is byte for byte what it was.
     work = (root / "memories" / "work.md").read_text()
     assert work == ("---\ntype: topic\ntitle: Work\ndescription: Role, company, team, responsibilities, industry\n"
-                    "group: doing\n---\n\n- CTO at MyMemo ^m7f3a\n- Runs infra ^q1x4e\n")
+                    "group: doing\n---\n\n- CTO at Acme ^m7f3a\n- Runs infra ^q1x4e\n")
     assert (root / "memories" / "health.md").read_text().endswith("group: private\nprivate: true\n---\n")
     assert topics["health"]["private"] and not topics["work"]["private"]
     assert topics["values"]["description"] == "Principles and beliefs" and topics["values"]["sections"] == ["Work ethic"]

@@ -34,16 +34,16 @@ def test_guard_blocks_foreign_hosts_origins_and_bare_requests(vault, api):
 
 
 def test_memory_crud_over_api(vault, api):
-    r = api.post("/api/memories", headers=H, json={"topic": "work", "content": "在 MyMemo 做 CTO"})
+    r = api.post("/api/memories", headers=H, json={"topic": "work", "content": "在 Acme 做 CTO"})
     assert r.status_code == 200
     mid = r.json()["id"]
-    r = api.patch(f"/api/memories/{mid}", headers=H, json={"content": "在 MyMemo 做 CTO 和产品", "pinned": True})
+    r = api.patch(f"/api/memories/{mid}", headers=H, json={"content": "在 Acme 做 CTO 和产品", "pinned": True})
     assert r.json()["version"] == 2 and r.json()["pinned"] is True
     assert api.post(f"/api/memories/{mid}/archive", headers=H).json()["status"] == "archived"
     assert [m["id"] for m in api.get("/api/memories?status=archived", headers=H).json()] == [mid]
     api.post(f"/api/memories/{mid}/restore", headers=H)
     api.post(f"/api/memories/{mid}/rollback", headers=H, json={"version": 1})
-    assert api.get("/api/memories", headers=H).json()[0]["content"] == "在 MyMemo 做 CTO"
+    assert api.get("/api/memories", headers=H).json()[0]["content"] == "在 Acme 做 CTO"
     hist = api.get(f"/api/memories/{mid}/history", headers=H).json()
     assert [h["op"] for h in hist][::-1] == ["create", "update", "archive", "restore", "update"]
     assert api.post("/api/memories", headers=H, json={"topic": "nope", "content": "x"}).status_code == 404
@@ -52,7 +52,7 @@ def test_memory_crud_over_api(vault, api):
 
 def test_import_preview_commit_and_export(vault, api):
     items = api.post("/api/import/preview", headers=H,
-                     json={"source": "chatgpt", "text": "用户在 MyMemo 担任 CTO\n删除\n用户喜欢科幻小说"}).json()
+                     json={"source": "chatgpt", "text": "用户在 Acme 担任 CTO\n删除\n用户喜欢科幻小说"}).json()
     assert [i["topic"] for i in items] == [None, None]
     assert set(items[0]) == {"content", "topic", "kind", "created_at", "hint", "duplicate_of", "similar_to",
                              "similar_content", "include"}
@@ -61,12 +61,12 @@ def test_import_preview_commit_and_export(vault, api):
     assert len(ids) == 2 and vault.get(ids[0]).topic == "from-chatgpt" and vault.get(ids[1]).topic == "values"
     assert api.post("/api/import/commit", headers=H, json={"source": "mem0", "items": items}).status_code == 400
     r = api.get("/api/export?format=claude", headers=H)
-    assert "attachment" in r.headers["content-disposition"] and "– 用户在 MyMemo 担任 CTO" in r.text
+    assert "attachment" in r.headers["content-disposition"] and "– 用户在 Acme 担任 CTO" in r.text
 
 
 def test_sort_endpoints(vault, api):
     items = api.post("/api/import/preview", headers=H,
-                     json={"source": "gemini", "text": "Is the CTO of MyMemo\nHas a daughter\nGrows tomatoes"}).json()
+                     json={"source": "gemini", "text": "Is the CTO of Acme\nHas a daughter\nGrows tomatoes"}).json()
     ids = api.post("/api/import/commit", headers=H, json={"source": "gemini", "items": items}).json()["memory_ids"]
     state = api.get("/api/state", headers=H).json()
     assert state["groups"][-1] == {"id": "imported", "name": "Imported", "topics": ["from-gemini"]}
@@ -90,13 +90,13 @@ def test_sort_endpoints(vault, api):
 
 
 def test_connectors_and_context_preview(vault, api):
-    vault.add("work", "在 MyMemo 做 CTO")
+    vault.add("work", "在 Acme 做 CTO")
     vault.add("health", "对青霉素过敏")
     r = api.post("/api/connectors", headers=H, json={"name": "Cursor", "kind": "http"}).json()
     assert r["token"].startswith("omm_") and "Bearer omm_" in r["snippets"]["json"]
     assert "token_hash" not in r["connector"]
     ctx = api.get("/api/context?connector=cursor", headers=H).json()
-    assert "在 MyMemo 做 CTO" in ctx["text"] and "青霉素" not in ctx["text"]
+    assert "在 Acme 做 CTO" in ctx["text"] and "青霉素" not in ctx["text"]
     api.patch("/api/connectors/cursor", headers=H, json={"include_private": True, "write": "auto"})
     assert "青霉素" in api.get("/api/context?connector=cursor", headers=H).json()["text"]
     stdio = api.post("/api/connectors", headers=H, json={"name": "Claude Desktop"}).json()
@@ -134,7 +134,7 @@ def live(vault):
 
 def test_http_mcp_end_to_end_with_panel_approval(vault, live):
     vault.update_settings(require_approval=True)
-    vault.add("work", "在 MyMemo 做 CTO")
+    vault.add("work", "在 Acme 做 CTO")
     with httpx.Client(base_url=live, headers=H) as panel:
         created = panel.post("/api/connectors", json={"name": "Cursor", "kind": "http"}).json()
         token = created["token"]
@@ -153,7 +153,7 @@ def test_http_mcp_end_to_end_with_panel_approval(vault, live):
                 return ctx, prop
 
         ctx, prop = anyio.run(steps)
-        assert "在 MyMemo 做 CTO" in ctx.content[0].text
+        assert "在 Acme 做 CTO" in ctx.content[0].text
         pid = prop.structured_content["proposal_id"]
         assert prop.structured_content["status"] == "pending" and prop.structured_content["hold"] == "approval"
         assert prop.structured_content["review_url"] == f"{live}/#/changes"
@@ -238,7 +238,7 @@ def test_digest_review_undo_and_edit_over_api(vault, api):
 
 
 def test_v1_token_api_for_browser_extension(vault, api):
-    vault.add("work", "CTO at MyMemo")
+    vault.add("work", "CTO at Acme")
     token = api.post("/api/connectors", headers=H, json={"name": "Chrome", "kind": "http"}).json()["token"]
     auth = {"Authorization": f"Bearer {token}", "Origin": "chrome-extension://abcdefghijklmnop"}
 
@@ -248,13 +248,13 @@ def test_v1_token_api_for_browser_extension(vault, api):
     assert status["connector"]["id"] == "chrome" and status["require_approval"] is False
 
     ctx = api.get("/v1/context?max_chars=2000", headers=auth).json()
-    assert "CTO at MyMemo" in ctx["text"]
+    assert "CTO at Acme" in ctx["text"]
     r = api.post("/v1/propose", headers=auth, json={"op": "add", "content": "Prefers green tea"}).json()
     assert r["status"] == "applied" and r["hold"] is None and r["review_url"].endswith("/#/changes")
     r = api.post("/v1/propose", headers=auth, json={"op": "add", "content": "Takes vitamin D", "topic": "health"}).json()
     assert r["status"] == "pending" and r["hold"] == "private" and r["review_url"].endswith("/#/changes")
 
-    paste = "Saved memories\nCTO at MyMemo\nDelete\nLives in Shanghai\nDelete\nPlays the piano"
+    paste = "Saved memories\nCTO at Acme\nDelete\nLives in Shanghai\nDelete\nPlays the piano"
     out = api.post("/v1/import", headers=auth, json={"source": "chatgpt", "text": paste}).json()
     assert out["duplicate"] == 1 and out["applied"] == 2 and out["pending"] == 0
     again = api.post("/v1/import", headers=auth, json={"source": "chatgpt", "text": paste}).json()
