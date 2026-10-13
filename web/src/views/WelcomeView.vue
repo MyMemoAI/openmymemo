@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
-import { api, ApiError, type Kind } from "../api";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { api, ApiError, type Kind, type Memory } from "../api";
 import AppIcon from "../components/AppIcon.vue";
 import ConnectApps from "../components/ConnectApps.vue";
 import ImportPaste from "../components/ImportPaste.vue";
@@ -39,6 +39,9 @@ function go(s: Step) {
   const hash = s === "welcome" ? "#/welcome" : `#/welcome/${s}`;
   if (location.hash !== hash) location.hash = hash;
 }
+
+let disposed = false;
+onBeforeUnmount(() => (disposed = true));
 
 onMounted(() => {
   // A folder without the key counts as onboarded once it has a connector; write the `false` down now, so
@@ -126,9 +129,20 @@ const unsaved = computed(() => FIELDS.some((f) => ["add", "update", "archive"].i
 
 const changedMeanwhile = (e: unknown) => e instanceof ApiError && (e as ApiError).status === 409;
 
+/** Put what a save returned into the panel's copy at once, so a second save can't plan from the old one. */
+function remember(m: Memory) {
+  const i = store.memories.findIndex((x) => x.id === m.id);
+  if (i >= 0) store.memories.splice(i, 1, m);
+  else store.memories.push(m);
+}
+function forget(id: string) {
+  store.memories = store.memories.filter((x) => x.id !== id);
+}
+
 async function saveAbout() {
-  if (saving.value) return; // a second Enter, or key repeat, while the first save is on its way
+  if (saving.value) return; // a second Enter, or key repeat, while the first save or its refresh is on its way
   saving.value = true;
+  const from = location.hash; // where the person was; if they move on meanwhile, the save doesn't move them back
   let saved = 0;
   let archived = 0;
   try {
@@ -137,6 +151,7 @@ async function saveAbout() {
       const add = async (content: string) => {
         // A folder whose topic was removed still gets the memory, filed automatically.
         const m = await api.addMemory({ topic: topicsBySlug.value[f.topic] ? f.topic : undefined, content, kind: f.kind });
+        remember(m);
         savedFor[f.id] = { id: m.id, content: m.content, version: m.version };
         saved++;
       };
@@ -148,6 +163,7 @@ async function saveAbout() {
         try {
           // As the person, so it stays protected; only if it is still the version the guide saved.
           const m = await api.patchMemory(p.id, { content: p.content, expected_version: p.version });
+          remember(m);
           savedFor[f.id] = { id: m.id, content: m.content, version: m.version };
           saved++;
         } catch (e) {
@@ -157,6 +173,7 @@ async function saveAbout() {
       } else if (p.op === "archive") {
         try {
           await api.archive(p.id, p.version);
+          forget(p.id);
           archived++;
         } catch (e) {
           if (!changedMeanwhile(e)) throw e; // changed or archived by someone else: left alone
@@ -168,12 +185,15 @@ async function saveAbout() {
     toast(e instanceof Error ? e.message : String(e), "error");
     return;
   } finally {
-    saving.value = false;
-    if (saved || archived) await refresh();
+    try {
+      if (saved || archived) await refresh(); // refresh() never throws; a failed one leaves what remember() put in
+    } finally {
+      saving.value = false;
+    }
   }
   const done = [saved && tn("onb.about.saved", saved), archived && tn("onb.about.archived", archived)].filter(Boolean);
   if (done.length) toast(done.join(" · "));
-  go("done");
+  if (!disposed && location.hash === from) go("done");
 }
 
 function onFieldEnter(e: KeyboardEvent, i: number) {

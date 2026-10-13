@@ -219,6 +219,37 @@ describe("the first-run guide", () => {
     expect(visibleStep(w)).toEqual(["done"]);
   });
 
+  it("doesn't save again while the refresh after a save is still on its way", async () => {
+    let release: () => void = () => {};
+    api.memories.mockImplementationOnce(() => new Promise<Memory[]>((r) => (release = () => r([...saved]))));
+    const w = mount(WelcomeView, { props: { initialStep: "about" } });
+    await w.get('input[name="name"]').setValue("Sam");
+    await button(w, "Save and continue").trigger("click");
+    await flushPromises(); // the POST is done; the refresh isn't
+    await w.get('input[name="answers"]').trigger("keydown", { key: "Enter" }); // Enter on the last field saves
+    await flushPromises();
+    release();
+    await flushPromises();
+    expect(api.addMemory).toHaveBeenCalledTimes(1);
+    await button(w, "Back").trigger("click"); // and the plan sees the saved answer: nothing left to save
+    expect(button(w, "Next").exists()).toBe(true);
+  });
+
+  it("doesn't move the person back to the guide when they left it before a save finished", async () => {
+    let finish: () => void = () => {};
+    api.addMemory.mockImplementationOnce((body: { topic?: string; content: string }) => new Promise((r) => {
+      finish = () => r({ id: "m0", topic: body.topic ?? "identity", content: body.content, version: 1 } as Memory);
+    }));
+    const w = mount(WelcomeView, { props: { initialStep: "about" } });
+    await w.get('input[name="name"]').setValue("Sam");
+    await button(w, "Save and continue").trigger("click");
+    location.hash = "#/memories"; // went to Memories meanwhile
+    finish();
+    await flushPromises();
+    expect(location.hash).toBe("#/memories");
+    w.unmount();
+  });
+
   it("saves once when Enter is pressed again while the first save is on its way", async () => {
     let finish: () => void = () => {};
     api.addMemory.mockImplementationOnce(async (body: { topic?: string; content: string }) => {
