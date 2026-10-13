@@ -2,12 +2,13 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 import { api, type Kind } from "../api";
 import AppIcon from "../components/AppIcon.vue";
+import ConnectApps from "../components/ConnectApps.vue";
 import ImportPaste from "../components/ImportPaste.vue";
 import PageHeader from "../components/PageHeader.vue";
 import { native, shell } from "../desktop";
 import type { IconName } from "../icons";
-import { listNames, t, tn } from "../i18n";
-import { act, copy, importTopicTitle, refresh, saveSettings, store, toast, topicsBySlug, topicTitle } from "../store";
+import { t, tn } from "../i18n";
+import { act, copy, importTopicTitle, refresh, store, toast, topicsBySlug, topicTitle } from "../store";
 
 /**
  * The first-run guide (product-design.md §15.3): what OpenMyMemo is, connecting AI apps, bringing memory
@@ -42,11 +43,11 @@ function go(s: Step) {
 onMounted(() => {
   // A folder without the key counts as onboarded once it has a connector; write the `false` down now, so
   // connecting an app in step 2 doesn't end the guide early. Reopened later, the guide leaves it alone.
-  if (store.state?.settings.onboarded === false) saveSettings({ onboarded: false }).catch(() => {});
+  if (store.state?.settings.onboarded === false) api.patchSettings({ onboarded: false }).catch(() => {});
 });
 
 async function finish() {
-  if (await act(() => saveSettings({ onboarded: true }))) location.hash = "#/memories";
+  if (await act(() => api.patchSettings({ onboarded: true }))) location.hash = "#/memories";
 }
 
 const vault = computed(() => store.state?.vault ?? "");
@@ -187,15 +188,7 @@ function next() {
         <h2 tabindex="-1" class="section-title outline-none">{{ t("onb.connect.title") }}</h2>
         <p class="text-[13px] text-muted">{{ t("onb.connect.lead") }}</p>
       </div>
-      <!-- ConnectApps (workstream A) is wired in here at merge -->
-      <div class="card space-y-3 px-4.5 py-4">
-        <p class="text-sm">{{ t("onb.connect.fallback") }}</p>
-        <p v-if="store.connectors.length" class="flex items-center gap-2 text-[13px] text-muted">
-          <AppIcon name="check" :size="14" class="text-fresh" />
-          {{ t("onb.connect.connected", { names: listNames(store.connectors.map((c) => c.name)) }) }}
-        </p>
-        <a href="#/connectors" class="btn btn-sm"><AppIcon name="plug" :size="14" />{{ t("onb.connect.open") }}</a>
-      </div>
+      <ConnectApps compact />
     </section>
 
     <!-- 3. bring memory over from ChatGPT, Claude, Gemini or anything else -->
@@ -323,7 +316,7 @@ function next() {
         v-else
         type="button"
         class="btn"
-        :class="step === 'import' && !imported ? '' : 'btn-primary'"
+        :class="(step === 'import' && !imported) || (step === 'connect' && !store.connectors.length) ? '' : 'btn-primary'"
         :disabled="saving"
         @click="next"
       >

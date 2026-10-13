@@ -2,6 +2,7 @@ import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ImportItem, Memory, State, Topic } from "../api";
 import { store } from "../store";
+import ConnectApps from "../components/ConnectApps.vue";
 import WelcomeView from "./WelcomeView.vue";
 
 const topic = (slug: string, title: string): Topic => ({
@@ -42,6 +43,8 @@ const { api, saved } = vi.hoisted(() => {
       memories: vi.fn(async () => [...saved]),
       proposals: vi.fn(async () => []),
       connectors: vi.fn(async () => []),
+      // ConnectApps in step 2
+      apps: vi.fn(async () => ({ system: "darwin", apps: [], custom: [] })),
     },
   };
 });
@@ -81,7 +84,7 @@ describe("the first-run guide", () => {
       expect(visibleStep(w)).toEqual([next]);
       expect(location.hash).toBe(hash);
     }
-    expect(w.find('a[href="#/connectors"]').exists()).toBe(true); // step 2 without ConnectApps
+    expect(w.findComponent(ConnectApps).exists()).toBe(true); // step 2 lists the apps
     expect(w.text()).toContain("What do you remember about me?");
     expect(api.addMemory).not.toHaveBeenCalled(); // step 4 left empty
 

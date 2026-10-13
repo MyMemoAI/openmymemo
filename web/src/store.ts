@@ -83,10 +83,6 @@ export function importTopicTitle(source: string): string {
   return topicsBySlug.value[`from-${source}`]?.title ?? `From ${prettyName(source)}`;
 }
 
-/** Change any of the vault's settings (`api.patchSettings` is typed for the approval switch alone). */
-export function saveSettings(body: Partial<State["settings"]>) {
-  return api.patchSettings(body);
-}
 
 export function topicTitle(slug: string | null | undefined): string {
   if (!slug) return "";

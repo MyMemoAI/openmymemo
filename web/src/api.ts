@@ -255,7 +255,7 @@ export const api = {
     req<Topic>("POST", "/api/topics", body),
   patchTopic: (slug: string, body: { title?: string; description?: string; private?: boolean }) =>
     req<Topic>("PATCH", `/api/topics/${enc(slug)}`, body),
-  patchSettings: (body: { require_approval?: boolean }) => req<{ require_approval: boolean }>("PATCH", "/api/settings", body),
+  patchSettings: (body: Partial<State["settings"]>) => req<State["settings"]>("PATCH", "/api/settings", body),
   proposals: (q: { status?: ProposalStatus; unreviewed?: boolean; limit?: number } = {}) => {
     const params = new URLSearchParams();
     if (q.status) params.set("status", q.status);
