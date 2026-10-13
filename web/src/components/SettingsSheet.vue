@@ -112,9 +112,6 @@ const revealLog = () => app.value && run(() => shell.reveal(app.value!.log));
       <section class="space-y-1.5" :aria-label="t('desk.help')">
         <h3 class="label px-1">{{ t("desk.help") }}</h3>
         <div class="card divide-y divide-sep">
-          <a href="#/welcome" class="flex items-center gap-2 px-4.5 py-3 font-semibold" @click="emit('close')">
-            <span class="flex-1">{{ t("desk.welcome") }}</span><AppIcon name="chevronRight" :size="14" class="text-muted" />
-          </a>
           <button v-if="native && app" type="button" class="flex w-full items-center gap-2 px-4.5 py-3 text-left font-semibold" @click="revealLog">
             <span class="flex-1">{{ t("desk.log") }}</span><AppIcon name="file" :size="14" class="text-muted" />
           </button>

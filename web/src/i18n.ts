@@ -143,7 +143,6 @@ const strings: Record<string, string> = {
   "desk.appearance.dark": "Dark",
   "desk.aiChanges": "AI changes",
   "desk.help": "Help",
-  "desk.welcome": "Show the welcome guide",
   "desk.log": "Open the log",
   "desk.github": "OpenMyMemo on GitHub",
   "desk.advanced": "Advanced",
