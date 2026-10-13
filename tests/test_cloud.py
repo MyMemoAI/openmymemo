@@ -983,6 +983,19 @@ def test_a_long_idempotency_key_keeps_its_identity(vault, fake, clouds, queue_cl
     assert len(Proposals(vault).list(connector_id="cloud-chatgpt")) == 1
 
 
+def test_text_no_file_can_hold_is_rejected_and_the_queue_goes_on(vault, fake, clouds, queue_clock):
+    _, conn = online(vault, fake, clouds)
+    good = VECTOR["plaintext"]
+    bad = json.dumps({**good, "qid": "q-bad", "params": {"name": "memory_propose", "arguments": {
+        "op": "add", "content": "Invalid \ud800", "topic": "goals"}}}).encode()
+    assert b"\\ud800" in bad  # sealed exactly as JSON allows it
+    conn.send(item("q-bad", bad))
+    conn.send(item("q-next", {**good, "qid": "q-next", "params": {"name": "memory_propose", "arguments": {
+        "op": "add", "content": "Likes rainy mornings.", "topic": "goals"}}}))
+    assert ack(conn, "q-bad")["outcome"] == "rejected" and ack(conn, "q-next")["outcome"] == "stored"
+    assert not conn.closed.is_set() and [p.content for p in Proposals(vault).list()] == ["Likes rainy mornings."]
+
+
 def test_queued_items_are_filed_in_the_order_they_arrive(vault, fake, clouds):
     _, conn = online(vault, fake, clouds)
     good = VECTOR["plaintext"]

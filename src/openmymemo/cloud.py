@@ -653,6 +653,11 @@ def _read_queued(plaintext: bytes, qid: str) -> tuple[dict, str, dict, str | Non
     fields = {k: args[k] for k in PROPOSE_FIELDS if isinstance(args.get(k), str)}
     key = args.get("idempotency_key")
     key = key if isinstance(key, str) and key else None  # as the live path takes it, whatever its length
+    try:  # JSON allows a lone surrogate (\ud800), which no file can hold: turned down for good, never retried
+        for text in (*fields.values(), name, key or "", str(args.get("op"))):
+            text.encode("utf-8")
+    except UnicodeEncodeError:
+        return None
     return named, str(args.get("op")), fields, _queued_at(item.get("received_at")), key
 
 
