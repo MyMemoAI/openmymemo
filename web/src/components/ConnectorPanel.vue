@@ -9,7 +9,8 @@ import SnippetTabs from "./SnippetTabs.vue";
 
 /**
  * One connected app's permissions: what it may read, how it writes, the topics it may not write to, its
- * setup, a new token, and removing it. `app` is its catalog entry, or null for an app added by name.
+ * setup, a new token, and removing it. `app` is its catalog entry, or null for an app added by name or a web app
+ * using MyMemo Cloud (kind "cloud", whose setup is on the MyMemo Cloud row).
  * Removing asks whether to take OpenMyMemo out of the app's settings too; the parent does the removal.
  */
 const props = defineProps<{ connector: Connector; app: AppStatus | null }>();
@@ -20,6 +21,9 @@ const WRITE_MODES = ["none", "propose", "auto"] as const;
 const c = computed(() => props.connector);
 /** A catalog app running over stdio gets its own setup; anything else the generic snippets (and a token). */
 const ownSetup = computed(() => !!props.app && c.value.kind === "stdio");
+/** A web app through MyMemo Cloud: nothing to paste here, and no token. */
+const viaCloud = computed(() => c.value.kind === "cloud");
+const KIND_LABEL: Record<Connector["kind"], string> = { stdio: "stdio", http: "HTTP", cloud: t("cloud.name") };
 const setup = ref<AppSetup | null>(null);
 const snippets = ref<Record<string, string> | null>(null);
 const token = ref<string | null>(null);
@@ -30,6 +34,7 @@ watch(
   async ([id]) => {
     setup.value = null;
     snippets.value = null;
+    if (viaCloud.value) return;
     try {
       if (ownSetup.value) setup.value = await api.appSetup(id);
       else snippets.value = await api.snippets(id);
@@ -84,7 +89,7 @@ function confirmRemove() {
   <div class="divide-y divide-sep">
     <div class="flex flex-wrap items-center gap-x-3 gap-y-2 px-4.5 py-3">
       <div class="min-w-[200px] flex-1 text-[13px] break-words text-muted">
-        <span class="font-mono text-xs">{{ c.id }}</span> · {{ c.kind === "http" ? "HTTP" : "stdio" }}
+        <span class="font-mono text-xs">{{ c.id }}</span> · {{ KIND_LABEL[c.kind] ?? c.kind }}
         <template v-if="c.token_preview"> · <span class="font-mono text-xs">{{ c.token_preview }}</span></template>
         · {{ t("con.lastSeen") }} {{ relTime(c.last_seen) }} · {{ t("con.stats", { reads: c.reads, proposals: c.proposals }) }}
       </div>
@@ -156,7 +161,7 @@ function confirmRemove() {
       </div>
     </div>
 
-    <div>
+    <div v-if="!viaCloud">
       <div class="flex flex-wrap items-center justify-between gap-3 px-4.5 py-3.5">
         <div class="min-w-0 space-y-0.5">
           <div class="font-semibold">{{ t("con.config") }}</div>
