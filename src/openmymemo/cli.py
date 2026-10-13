@@ -461,9 +461,7 @@ def serve(ctx: typer.Context, port: int = DEFAULT_PORT,
     import threading
     import webbrowser
 
-    import uvicorn
-
-    from .web import create_app
+    from .web import serve_panel
 
     vault = _vault(ctx, init)
     url = f"http://127.0.0.1:{port}"
@@ -483,7 +481,7 @@ def serve(ctx: typer.Context, port: int = DEFAULT_PORT,
     typer.secho(f"OpenMyMemo panel: {url}   MCP: {url}/mcp", fg="green")
     if open_browser:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
-    uvicorn.run(create_app(vault, port=port), host="127.0.0.1", port=port, log_level="warning")
+    serve_panel(vault, port)
 
 
 # ---- AI apps ---------------------------------------------------------------------------------------

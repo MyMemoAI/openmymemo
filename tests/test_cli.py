@@ -216,10 +216,10 @@ def test_blank_or_unsubstituted_vault_means_the_default(tmp_path, monkeypatch):
 
 def test_serve_init_creates_a_missing_or_empty_vault_and_refuses_other_folders(tmp_path, monkeypatch):
     # The Mac app's first launch: `serve --init` on a folder that doesn't exist yet, or an empty one.
-    import uvicorn
+    from openmymemo import web
 
     served = []
-    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: served.append(kw["port"]))
+    monkeypatch.setattr(web, "serve_panel", lambda vault, port: served.append(port))
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
