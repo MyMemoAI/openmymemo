@@ -1,7 +1,9 @@
 name: Release
 
-# Push a tag named after the version (v0.2.2) to publish the Claude Desktop extension and the Python
-# package as a GitHub release. The version must already be bumped everywhere (tests/test_packaging.py).
+# Push a tag named after the version (v0.2.2) to publish the Mac app, the Claude Desktop extension and the
+# Python package as a GitHub release. The version must already be bumped everywhere (tests/test_packaging.py).
+# The release is created once every file is built, so it never lacks the disk image; if a job fails, nothing
+# is published and "Re-run failed jobs" picks up from there.
 on:
   push:
     tags: ["v*"]
@@ -10,7 +12,95 @@ permissions:
   contents: write
 
 jobs:
+  mac:
+    name: Mac app
+    # Builds OpenMyMemo-<version>-arm64.dmg. With these repository secrets the app is signed with a Developer
+    # ID and notarized; without them (a fork) it is signed ad hoc, and macOS asks once to open it (README).
+    #   APPLE_CERTIFICATE           the "Developer ID Application" certificate and its key as a .p12, base64
+    #   APPLE_CERTIFICATE_PASSWORD  the .p12's password
+    #   APPLE_SIGNING_IDENTITY      the certificate's name: "Developer ID Application: <Company> (<Team ID>)"
+    #   APPLE_API_ISSUER            notarization with an App Store Connect API key: the issuer id,
+    #   APPLE_API_KEY_ID            the key id,
+    #   APPLE_API_PRIVATE_KEY       and the text of the key's .p8 file
+    #   APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID
+    #                               optional: notarization with an Apple ID and an app-specific password,
+    #                               used only when the API key secrets are absent
+    # Tauri reads the APPLE_* variables itself (tauri-apps/tauri, crates/tauri-bundler/src/bundle/macos/sign.rs):
+    # it imports the certificate into a temporary keychain, and APPLE_SIGNING_IDENTITY overrides the ad hoc
+    # "signingIdentity": "-" in tauri.conf.json (crates/tauri-cli/src/interface/rust.rs).
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: The tag matches the version
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml | head -n 1)
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match version $version in pyproject.toml."
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - uses: astral-sh/setup-uv@v7  # stage_desktop.py bundles this uv
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: desktop
+      - name: Build the app and the disk image
+        working-directory: desktop
+        env:
+          # CI=true also makes Tauri skip the Finder scripting that lays out the disk image window.
+          CI: "true"
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # A missing secret arrives as an empty variable, which Tauri would take as set.
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_API_ISSUER \
+                      APPLE_API_KEY APPLE_API_PRIVATE_KEY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!name}" ]; then unset "$name"; fi
+          done
+          if [ -z "${APPLE_CERTIFICATE:-}" ] || [ -z "${APPLE_CERTIFICATE_PASSWORD:-}" ] || [ -z "${APPLE_SIGNING_IDENTITY:-}" ]; then
+            echo "::warning::No Developer ID certificate in the secrets: the app is signed ad hoc and not notarized."
+            unset APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_API_ISSUER APPLE_API_KEY \
+                  APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
+          elif [ -n "${APPLE_API_PRIVATE_KEY:-}" ] && [ -n "${APPLE_API_KEY:-}" ] && [ -n "${APPLE_API_ISSUER:-}" ]; then
+            # Tauri would use APPLE_ID first if it were set; the API key is the one to use.
+            unset APPLE_ID APPLE_PASSWORD
+            export APPLE_API_KEY_PATH="$RUNNER_TEMP/AuthKey_$APPLE_API_KEY.p8"
+            ( umask 077 && printf '%s\n' "$APPLE_API_PRIVATE_KEY" > "$APPLE_API_KEY_PATH" )
+          elif [ -z "${APPLE_ID:-}" ] || [ -z "${APPLE_PASSWORD:-}" ] || [ -z "${APPLE_TEAM_ID:-}" ]; then
+            echo "::warning::No notarization credentials in the secrets: the app is signed but not notarized."
+            unset APPLE_ID APPLE_PASSWORD APPLE_API_ISSUER APPLE_API_KEY
+          fi
+          unset APPLE_API_PRIVATE_KEY
+          pnpm tauri build --bundles app,dmg
+      - name: Check the signature and name the disk image
+        run: |
+          bundle=desktop/src-tauri/target/release/bundle
+          codesign --verify --deep --strict --verbose=2 "$bundle/macos/OpenMyMemo.app"
+          codesign -dv "$bundle/macos/OpenMyMemo.app" 2>&1 | grep -E '^(Authority|Signature|TeamIdentifier)=' || true
+          mkdir -p dist
+          cp "$bundle/dmg/OpenMyMemo_${VERSION}_aarch64.dmg" "dist/OpenMyMemo-${VERSION}-arm64.dmg"
+          hdiutil verify "dist/OpenMyMemo-${VERSION}-arm64.dmg"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: openmymemo-dmg
+          path: dist/*.dmg
+          if-no-files-found: error
+
   release:
+    needs: mac
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -29,9 +119,13 @@ jobs:
       - run: uv run pytest
       - run: uv run python scripts/build_mcpb.py
       - run: uv build
+      - uses: actions/download-artifact@v7
+        with:
+          name: openmymemo-dmg
+          path: dist
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/*.mcpb dist/*.whl dist/*.tar.gz \
+          gh release create "$GITHUB_REF_NAME" dist/*.dmg dist/*.mcpb dist/*.whl dist/*.tar.gz \
             --title "OpenMyMemo ${GITHUB_REF_NAME#v}" --generate-notes
