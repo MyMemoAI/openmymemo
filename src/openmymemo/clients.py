@@ -753,10 +753,7 @@ def disconnect(vault: Vault, app_id: str, env: Env | None = None) -> Result:
         where = f" ({client.plugin_where})" if client.plugin_where else ""
         result.steps.append(f"{client.name} still has {plugin}. Remove it there{where}; until then it asks for "
                             "your memory and is turned away.")
-    try:
-        Connectors(vault).remove(client.id)
-    except NotFound:
-        pass
+    Connectors(vault).revoke(client.id, client.name)  # also before its first call: it must not register then
     if result.changed:
         result.restart = True
         result.message += " " + _restart(client)

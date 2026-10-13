@@ -13,7 +13,7 @@ from typer.testing import CliRunner
 
 from openmymemo import appfiles, clients, codex
 from openmymemo.cli import app
-from openmymemo.connectors import Connectors
+from openmymemo.connectors import Connectors, Revoked
 from openmymemo.snippets import command_for, stdio_command
 from openmymemo.web import create_api
 
@@ -411,6 +411,31 @@ def test_claude_desktop_with_the_extension_is_connected_without_a_config_entry(v
     off = clients.disconnect(vault, "claude-desktop", env)
     assert off.status == "done" and any("Settings → Extensions" in s for s in off.steps)
     assert Connectors(vault).list() == []
+
+
+def test_disconnecting_an_app_before_its_first_call_still_turns_it_away(vault, env):
+    support = env.home / "Library/Application Support/Claude"
+    support.mkdir(parents=True)
+    (support / "extensions-installations.json").write_text(json.dumps(
+        {"extensions": {"local.mcpb.mymemo.openmymemo": {"id": "local.mcpb.mymemo.openmymemo",
+                                                         "manifest": {"name": "openmymemo"}}}}))
+    assert clients.app_status(vault, clients.get("claude-desktop"), env)["connected"]  # no connector yet
+    clients.disconnect(vault, "claude-desktop", env)
+    with pytest.raises(Revoked):
+        Connectors(vault).ensure("claude-desktop")
+    row = clients.app_status(vault, clients.get("claude-desktop"), env)
+    assert row["revoked"] and not row["connected"]
+    assert clients.connect(vault, "claude-desktop", env).status == "done"  # connecting grants it again
+    assert Connectors(vault).ensure("claude-desktop").name == "Claude Desktop"
+
+
+def test_disconnecting_a_pasted_config_before_its_first_call_still_turns_it_away(vault, env):
+    path = env.home / ".config/zed/settings.json"
+    path.parent.mkdir(parents=True)
+    path.write_text('// mine\n{"context_servers": {"openmymemo": {"command": "/x/omm", "args": []}}}\n')
+    clients.disconnect(vault, "zed", env)
+    with pytest.raises(Revoked):
+        Connectors(vault).ensure("zed")
 
 
 # ---- Claude Code: its own command -------------------------------------------------------------------------
