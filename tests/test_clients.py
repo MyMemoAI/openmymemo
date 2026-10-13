@@ -484,6 +484,35 @@ def test_codex_config_it_cant_change_safely_gets_the_snippet(vault, env):
     assert not (env.home / ".codex/hooks.json").exists()
 
 
+def test_codex_config_that_isnt_utf8_gets_the_snippet(vault, env):
+    config = env.home / ".codex/config.toml"
+    config.parent.mkdir()
+    config.write_bytes(b'model = "\xff"\n')
+    result = clients.connect(vault, "codex", env)
+    assert result.status == "manual" and result.snippet.startswith("[mcp_servers.openmymemo]")
+    assert clients.disconnect(vault, "codex", env).status == "manual"
+    assert config.read_bytes() == b'model = "\xff"\n'
+
+
+@pytest.mark.parametrize("broken", ["latin-1", "directory"])
+def test_a_broken_codex_hooks_file_doesnt_stop_connecting_or_disconnecting(vault, env, broken):
+    hooks = env.home / ".codex/hooks.json"
+    hooks.parent.mkdir()
+    if broken == "directory":
+        hooks.mkdir()
+    else:
+        hooks.write_bytes(b'{"hooks": {}, "note": "\xff"}')
+    result = clients.connect(vault, "codex", env)
+    assert result.status == "done" and any("session hook" in s for s in result.steps)
+    assert "openmymemo" in tomllib.loads((env.home / ".codex/config.toml").read_text())["mcp_servers"]
+    assert Connectors(vault).get("codex")  # granted, though the hook couldn't be added
+
+    off = clients.disconnect(vault, "codex", env)
+    assert off.status == "done" and any("session hook" in s for s in off.steps)
+    assert Connectors(vault).list() == []  # revoked, though the hook couldn't be checked
+    assert "mcp_servers" not in tomllib.loads((env.home / ".codex/config.toml").read_text())
+
+
 # ---- detection ---------------------------------------------------------------------------------------------
 
 

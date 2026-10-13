@@ -390,12 +390,18 @@ def _cut_toml_table(text: str) -> str:
     return result.rstrip("\n") + "\n" if result.strip() else ""
 
 
+def _read_toml_text(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except UnicodeDecodeError:
+        raise Refused(f"{path} isn't UTF-8 text, so OpenMyMemo won't change it.") from None
+
+
 def write_toml_entry(path: Path, entry: dict) -> bool:
     """Append our ``[mcp_servers.openmymemo]`` table (replacing an older one). Returns whether the file changed."""
-    try:
-        text = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        text = ""
+    text = _read_toml_text(path) or ""
     before = _parse_toml(path, text)
     current = (before.get("mcp_servers") or {}).get(ENTRY) if isinstance(before.get("mcp_servers"), dict) else None
     if current == entry:
@@ -418,9 +424,8 @@ def write_toml_entry(path: Path, entry: dict) -> bool:
 
 def remove_toml_entry(path: Path) -> bool:
     """Take exactly our table out again. Returns whether the file changed."""
-    try:
-        text = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
+    text = _read_toml_text(path)
+    if text is None:
         return False
     before = _parse_toml(path, text)
     servers = before.get("mcp_servers")
@@ -629,6 +634,15 @@ def _cli_disconnect(client: Client, env: Env) -> Result:
     return Result("done", f"Disconnected {client.name}.", changed=True)
 
 
+def _problem(path: Path, e: Exception) -> str:
+    """An error about another app's file, in plain words."""
+    if isinstance(e, UnicodeDecodeError):
+        return f"{path} isn't UTF-8 text."
+    if isinstance(e, OSError):
+        return f"{e.filename or path}: {e.strerror or e}."
+    return str(e)
+
+
 CODEX_TRUST = (f'Trust "{codex.STATUS_MESSAGE}" once: in the ChatGPT app under Settings → Coding → Hooks, or in a '
                "terminal: run `codex`, type /hooks and trust it under SessionStart. Either place covers both.")
 
@@ -639,11 +653,11 @@ def _codex_hook(vault: Vault, env: Env, result: Result, plugin: bool) -> None:
         result.steps.append("Memory at session start needs a POSIX shell, so it isn't available on Windows yet; "
                             "Codex can still read your memory when it asks for it.")
         return
+    path = env.codex_home / "hooks.json"
     try:
-        changed = codex.install(codex.hook_command(None if plugin else command_for(vault.root)),
-                                env.codex_home / "hooks.json")
-    except VaultError as e:
-        result.steps.append(f"The session hook wasn't added: {e}")
+        changed = codex.install(codex.hook_command(None if plugin else command_for(vault.root)), path)
+    except (VaultError, OSError, ValueError) as e:  # the entry is in; only memory at session start is missing
+        result.steps.append(f"The session hook wasn't added: {_problem(path, e)}")
         return
     if changed:
         result.changed = True
@@ -718,10 +732,11 @@ def disconnect(vault: Vault, app_id: str, env: Env | None = None) -> Result:
         return Result("error", f"OpenMyMemo couldn't change {client.name}'s settings: {e.strerror or e}.",
                       path=e.filename and str(e.filename))
     if client.id == "codex" and not env.windows:
+        path = env.codex_home / "hooks.json"
         try:
-            result.changed = codex.remove(env.codex_home / "hooks.json") or result.changed
-        except VaultError as e:
-            result.steps.append(f"The session hook is still there: {e}")
+            result.changed = codex.remove(path) or result.changed
+        except (VaultError, OSError, ValueError) as e:  # access is still revoked below
+            result.steps.append(f"OpenMyMemo couldn't check for its session hook: {_problem(path, e)}")
     if plugin := (client.plugin(env) if client.plugin else None):
         where = f" ({client.plugin_where})" if client.plugin_where else ""
         result.steps.append(f"{client.name} still has {plugin}. Remove it there{where}; until then it asks for "
