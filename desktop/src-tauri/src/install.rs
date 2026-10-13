@@ -105,10 +105,39 @@ pub fn quit(bundle: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Put right what a move cut short between its renames left in `target_dir` (copies under hidden names):
+/// if the app is missing, the copy that was moved aside goes back; the rest is removed. A move still running
+/// (its process is alive) is left alone.
+pub fn sweep(target_dir: &Path) {
+    let dst = target_dir.join(APP_NAME);
+    let prefix = format!(".{APP_NAME}.");
+    let Ok(entries) = fs::read_dir(target_dir) else { return };
+    let mut leftovers: Vec<(PathBuf, bool)> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let (pid, kind) = name.strip_prefix(&prefix)?.split_once('.')?;
+            let pid: i32 = pid.parse().ok()?;
+            let alive = unsafe { libc::kill(pid, 0) } == 0
+                || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM);
+            (!alive && matches!(kind, "old" | "new")).then(|| (entry.path(), kind == "old"))
+        })
+        .collect();
+    leftovers.sort_by_key(|(_, old)| !old); // the copies moved aside first
+    for (path, old) in leftovers {
+        if old && fs::symlink_metadata(&dst).is_err() {
+            let _ = fs::rename(&path, &dst);
+        } else {
+            let _ = fs::remove_dir_all(&path);
+        }
+    }
+}
+
 /// Copy `bundle` to `<target_dir>/OpenMyMemo.app` with ditto, replacing a copy that is there only when
 /// `replace` is set. The copy is made under a hidden name and renamed into place, so a failed copy leaves
 /// the folder as it was.
 pub fn copy_to(bundle: &Path, target_dir: &Path, replace: bool) -> Result<PathBuf, String> {
+    sweep(target_dir);
     let dst = target_dir.join(APP_NAME);
     let exists = fs::symlink_metadata(&dst).is_ok();
     if exists && !replace {
@@ -265,6 +294,27 @@ mod tests {
         fs::set_permissions(&locked, perms).unwrap();
         assert!(copy_to(&existing, &locked, false).is_err());
         assert!(fs::symlink_metadata(locked.join(APP_NAME)).is_err());
+    }
+
+    #[test]
+    fn a_move_cut_short_between_its_renames_is_put_right_on_the_next_one() {
+        let root = temp_dir("sweep");
+        let target = root.join("Applications");
+        // Crashed after moving the old copy aside and before renaming the new one in: no app left.
+        let old = fake_bundle(&root.join("prev"), "1.0.0");
+        fs::create_dir_all(&target).unwrap();
+        fs::rename(&old, target.join(format!(".{APP_NAME}.99999999.old"))).unwrap();
+        let new = fake_bundle(&root.join("next"), "1.1.0");
+        fs::rename(&new, target.join(format!(".{APP_NAME}.99999999.new"))).unwrap();
+        // A move this process is making right now is left alone.
+        let ours = target.join(format!(".{APP_NAME}.{}.new", std::process::id()));
+        fs::create_dir_all(&ours).unwrap();
+
+        sweep(&target);
+        assert_eq!(version_of(&target.join(APP_NAME)).as_deref(), Some("1.0.0"), "the old copy is back");
+        let mut names: Vec<_> = fs::read_dir(&target).unwrap().flatten().map(|e| e.file_name()).collect();
+        names.sort();
+        assert_eq!(names, vec![std::ffi::OsString::from(format!(".{APP_NAME}.{}.new", std::process::id())), APP_NAME.into()]);
     }
 
     #[test]

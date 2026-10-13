@@ -424,6 +424,7 @@ fn offer_move(app: &AppHandle) -> bool {
         return false;
     }
     let target_dir = Path::new("/Applications");
+    install::sweep(target_dir);
     let dst = target_dir.join(launcher::APP_NAME);
     let replace = std::fs::symlink_metadata(&dst).is_ok();
     if replace {
