@@ -259,3 +259,17 @@ class FakeService:
                 conn.closed.set()
 
         return app
+
+
+if __name__ == "__main__":
+    # Try the panel's sign-in by hand: `uv run python tests/cloud_fake.py 18765`, then start the panel with
+    # OPENMYMEMO_CLOUD_URL=http://127.0.0.1:18765 and a scratch OPENMYMEMO_CLOUD_DIR. Its consent page allows at once.
+    import sys
+
+    service = FakeService()
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 18765
+    service.base = f"http://127.0.0.1:{port}"
+    service._server = uvicorn.Server(uvicorn.Config(service.app, host="127.0.0.1", port=port, log_level="warning",
+                                                    lifespan="off"))
+    print(f"Fake MyMemo service at {service.base} (Ctrl-C to stop)", flush=True)
+    service._server.run()
