@@ -133,6 +133,8 @@ const strings: Record<string, string> = {
   "set.autostart": "Open at login",
   "set.autostartHelp": "Keeps OpenMyMemo in the menu bar, so it can tell you when an AI app changes something.",
   "set.version": "OpenMyMemo {version}",
+  "desk.advanced": "Advanced",
+  "desk.commandHelp": "The openmymemo command. Use it in other MCP apps, or in Terminal for everything the command line does. It keeps working when OpenMyMemo moves or updates.",
 
   "hist.title": "Version history",
   "hist.rollback": "Restore this version",

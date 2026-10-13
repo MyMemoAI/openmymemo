@@ -17,6 +17,8 @@ export interface AppSettings {
   vault: string;
   autostart: boolean;
   version: string;
+  /** The `openmymemo` command the app installs; AI apps' MCP configs run it. */
+  launcher: string;
 }
 
 /** Commands the Mac shell implements (desktop/src-tauri/src/main.rs). */

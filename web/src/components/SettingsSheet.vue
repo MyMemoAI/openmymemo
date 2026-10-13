@@ -2,12 +2,15 @@
 import { computed, onMounted, ref } from "vue";
 import { native, shell, type AppSettings } from "../desktop";
 import { t } from "../i18n";
-import { store, toast } from "../store";
+import { copy, store, toast } from "../store";
 import AppIcon from "./AppIcon.vue";
 import ApprovalSwitch from "./ApprovalSwitch.vue";
 import ModalDialog from "./ModalDialog.vue";
 
-/** The Mac app's settings: the memory folder, the approval switch, and opening at login. */
+/**
+ * The Mac app's settings: the memory folder, the approval switch, opening at login, and under Advanced the
+ * `openmymemo` command the app installs (desktop/src-tauri/src/launcher.rs).
+ */
 const emit = defineEmits<{ close: [] }>();
 const app = ref<AppSettings | null>(null);
 const vault = computed(() => app.value?.vault ?? store.state?.vault ?? "");
@@ -61,6 +64,19 @@ const toggleAutostart = () => run(() => shell.setAutostart(!app.value?.autostart
           <span class="switch-knob" />
         </button>
       </section>
+
+      <details v-if="native && app?.launcher" class="card px-4.5 py-3.5">
+        <summary class="cursor-default font-semibold">{{ t("desk.advanced") }}</summary>
+        <div class="space-y-2 pt-2">
+          <p class="text-[13px] text-muted">{{ t("desk.commandHelp") }}</p>
+          <div class="flex items-center gap-2">
+            <code class="min-w-0 flex-1 font-mono text-xs break-all">{{ app.launcher }}</code>
+            <button type="button" class="btn btn-sm" @click="copy(app.launcher)">
+              <AppIcon name="copy" :size="14" />{{ t("common.copy") }}
+            </button>
+          </div>
+        </div>
+      </details>
 
       <p class="text-xs text-muted">{{ t("set.version", { version: app?.version ?? store.state?.version ?? "" }) }}</p>
     </div>
