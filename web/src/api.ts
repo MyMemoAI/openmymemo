@@ -24,7 +24,7 @@ export interface State {
   topics: Topic[];
   groups: Group[];
   counts: { active: number; archived: number; pending: number; unreviewed: number; review_due: number };
-  settings: { require_approval: boolean };
+  settings: { require_approval: boolean; onboarded: boolean };
   mcp_url: string;
 }
 
