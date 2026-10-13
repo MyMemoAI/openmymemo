@@ -56,27 +56,40 @@ impl Appearance {
     }
 }
 
-fn yes() -> bool {
-    true
-}
-
 /// The app's own settings, in ~/Library/Application Support/<id>/settings.json. Keys added later have
 /// defaults, so a file from an older version (only `vault`) still loads.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 struct Settings {
-    #[serde(default = "default_vault")]
     vault: PathBuf,
-    #[serde(default)]
     appearance: Appearance,
     /// A notification when an AI app changes something or something starts waiting.
-    #[serde(default = "yes")]
     notifications: bool,
+    /// Keys this version doesn't know (a newer one wrote them), written back as they were.
+    #[serde(flatten)]
+    other: serde_json::Map<String, serde_json::Value>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { vault: default_vault(), appearance: Appearance::System, notifications: true }
+        Settings { vault: default_vault(), appearance: Appearance::System, notifications: true, other: Default::default() }
     }
+}
+
+/// Key by key: a value of the wrong type loses only that setting, never the memory folder with it.
+fn parse_settings(text: &str) -> Settings {
+    let mut settings = Settings::default();
+    let Ok(serde_json::Value::Object(mut map)) = serde_json::from_str(text) else { return settings };
+    if let Some(vault) = map.remove("vault").as_ref().and_then(|v| v.as_str()).filter(|v| !v.is_empty()) {
+        settings.vault = PathBuf::from(vault);
+    }
+    if let Some(appearance) = map.remove("appearance").and_then(|v| serde_json::from_value(v).ok()) {
+        settings.appearance = appearance;
+    }
+    if let Some(notifications) = map.remove("notifications").and_then(|v| v.as_bool()) {
+        settings.notifications = notifications;
+    }
+    settings.other = map;
+    settings
 }
 
 struct Shared {
@@ -112,7 +125,7 @@ fn dirs_home() -> PathBuf {
 }
 
 fn load_settings(path: &Path) -> Settings {
-    std::fs::read_to_string(path).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+    std::fs::read_to_string(path).map(|text| parse_settings(&text)).unwrap_or_default()
 }
 
 impl Shared {
@@ -140,14 +153,21 @@ impl Shared {
         self.vault.lock().unwrap().clone()
     }
 
-    /// Change the saved settings and write them to settings.json; nothing changes if writing fails.
+    /// Change the saved settings and write them to settings.json (a temporary file renamed over it, so a
+    /// crash never leaves half a file); nothing changes if writing fails.
     fn save(&self, change: impl FnOnce(&mut Settings)) -> Result<(), String> {
         let mut settings = self.settings.lock().unwrap();
         let mut next = settings.clone();
         change(&mut next);
         let dir = self.settings_path.parent().ok_or("No settings folder")?;
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-        std::fs::write(&self.settings_path, serde_json::to_string_pretty(&next).unwrap()).map_err(|e| e.to_string())?;
+        let tmp = dir.join(format!(".settings.json.{}.tmp", std::process::id()));
+        std::fs::write(&tmp, serde_json::to_string_pretty(&next).unwrap())
+            .and_then(|_| std::fs::rename(&tmp, &self.settings_path))
+            .map_err(|e| {
+                let _ = std::fs::remove_file(&tmp);
+                e.to_string()
+            })?;
         *settings = next;
         Ok(())
     }
@@ -829,17 +849,14 @@ mod tests {
 
     #[test]
     fn settings_from_older_versions_load_with_defaults() {
-        let old: Settings = serde_json::from_str(r#"{ "vault": "/Users/me/Memory" }"#).unwrap();
-        assert_eq!(
-            old,
-            Settings { vault: PathBuf::from("/Users/me/Memory"), appearance: Appearance::System, notifications: true }
-        );
-        let set: Settings =
-            serde_json::from_str(r#"{ "vault": "/m", "appearance": "dark", "notifications": false }"#).unwrap();
+        let old = parse_settings(r#"{ "vault": "/Users/me/Memory" }"#);
+        assert_eq!(old, Settings { vault: PathBuf::from("/Users/me/Memory"), ..Settings::default() });
+        let set = parse_settings(r#"{ "vault": "/m", "appearance": "dark", "notifications": false }"#);
         assert_eq!((set.appearance, set.notifications), (Appearance::Dark, false));
         // A value from a newer version doesn't lose the folder.
-        let newer: Settings = serde_json::from_str(r#"{ "vault": "/m", "appearance": "sepia", "zoom": 2 }"#).unwrap();
+        let newer = parse_settings(r#"{ "vault": "/m", "appearance": "sepia", "zoom": 2 }"#);
         assert_eq!((newer.vault, newer.appearance), (PathBuf::from("/m"), Appearance::System));
+        assert_eq!(parse_settings(r#"["not", "settings"]"#), Settings::default());
         assert_eq!(serde_json::to_value(Appearance::Light).unwrap(), "light");
         assert_eq!(Appearance::Dark.theme(), Some(tauri::Theme::Dark));
         assert_eq!(Appearance::System.theme(), None);
@@ -850,6 +867,27 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("broken.json"), "{ not json").unwrap();
         assert_eq!(load_settings(&root.join("broken.json")).vault, default_vault());
+    }
+
+    #[test]
+    fn a_mistyped_value_loses_only_itself_and_unknown_keys_are_kept() {
+        let root = std::env::temp_dir().join(format!("openmymemo-desktop-{}-typo", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("settings.json");
+        std::fs::write(&path, r#"{ "vault": "/Users/me/Memory", "notifications": "off", "appearance": { "x": 1 }, "zoom": 2 }"#).unwrap();
+        let loaded = load_settings(&path);
+        assert_eq!(loaded.vault, PathBuf::from("/Users/me/Memory"));
+        assert_eq!((loaded.appearance, loaded.notifications), (Appearance::System, true));
+
+        let shared = Shared::new(path.clone(), root.join("bin/openmymemo"), root.join("core.log"));
+        shared.save(|s| s.appearance = Appearance::Light).unwrap();
+        let saved: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved["vault"], "/Users/me/Memory");
+        assert_eq!(saved["appearance"], "light");
+        assert_eq!(saved["zoom"], 2, "a key from a newer version survives");
+        let names: Vec<_> = std::fs::read_dir(&root).unwrap().flatten().map(|e| e.file_name()).collect();
+        assert_eq!(names, vec![std::ffi::OsString::from("settings.json")], "no temporary file left");
     }
 
     #[test]
@@ -889,7 +927,7 @@ mod tests {
         // Recovery: an empty or new folder is accepted, saved, and the server restarts on it.
         let fresh = root.join("fresh");
         assert_eq!(use_vault(&shared, fresh.clone()), Ok(true));
-        let saved: Settings = serde_json::from_str(&std::fs::read_to_string(&shared.settings_path).unwrap()).unwrap();
+        let saved = load_settings(&shared.settings_path);
         assert_eq!(saved.vault, fresh);
         assert!(shared.restart.load(Ordering::SeqCst));
         assert_eq!(use_vault(&shared, fresh), Ok(false));
