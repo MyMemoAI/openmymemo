@@ -631,10 +631,14 @@ class Bridge:
                 self._set("stopped", self.reason if self.reason in ("unlinked", "replaced", "key") else "closed")
 
     def _forget(self) -> None:
-        """The service no longer knows this computer: delete our link (if it is still ours) and revoke the web apps."""
-        if delete_link(self.link.device_id):
-            with contextlib.suppress(VaultError, OSError):
-                revoke_web_apps(self.vault)
+        """The service no longer knows this computer: revoke the web apps and delete our link (if it is still ours).
+        In that order, so whoever sees the link gone also sees the web apps revoked."""
+        current = load_link()
+        if current is None or current.device_id != self.link.device_id:
+            return
+        with contextlib.suppress(VaultError, OSError):
+            revoke_web_apps(self.vault)
+        delete_link(self.link.device_id)
 
     async def _sleep(self, seconds: float) -> None:
         assert self._wake is not None
