@@ -1,6 +1,6 @@
 import { computed, reactive } from "vue";
 import { api, type Connector, type Memory, type Proposal, type State, type Topic } from "./api";
-import { t } from "./i18n";
+import { prettyName, t } from "./i18n";
 
 export const store = reactive({
   state: null as State | null,
@@ -77,6 +77,11 @@ export const freshTopics = computed(() => new Set(store.unreviewed.map((p) => p.
 
 /** Topics with something waiting for a decision (an amber dot in the sidebar). */
 export const waitingTopics = computed(() => new Set(store.pending.map((p) => p.topic)));
+
+/** The topic an import from `source` lands in ("From ChatGPT"), named before its first import creates it. */
+export function importTopicTitle(source: string): string {
+  return topicsBySlug.value[`from-${source}`]?.title ?? `From ${prettyName(source)}`;
+}
 
 export function topicTitle(slug: string | null | undefined): string {
   if (!slug) return "";
