@@ -558,9 +558,9 @@ The MyMemo Cloud row on the Connectors page shows: signed in as (name and masked
 3. Mobile ChatGPT and Claude apps use the same connectors; anything specific to check there?
 4. MCP elicitation for in-chat approval (§5.4) applies here too once the web apps support it.
 
-### 16.10 As built (phase 1, 2026-10-12)
+### 16.10 As built (2026-10-12)
 
-Where the sections above left a choice open, the build settled it as follows:
+Where the sections above left a choice open, the build settled it as follows (phase 1, the live relay):
 
 - **Connectors:** web apps get the connector kind `cloud` (MEMORY_FORMAT.md §5), named "ChatGPT (web)", "Claude (web)", or "… (web, unverified)" for an unverified client. A revoked one answers `revoked`; after unlinking, or after removing one by itself, it comes back only through **Allow again** on the MyMemo Cloud row — linking again doesn't re-grant it.
 - **Which process connects:** the bridge runs on a thread of the process serving the panel, starts only once that process holds the panel's port (two AI apps may start a panel for the same folder at once; only the one that gets the port connects) and closes with 1000 when the panel stops. A panel inside an AI app's MCP process closes it at interpreter exit, not when the process is killed.
@@ -571,3 +571,10 @@ Where the sections above left a choice open, the build settled it as follows:
 - **Unlinking** while MyMemo can't be reached still forgets the link here and says to remove the computer in the MyMemo account settings too.
 - **The CLI** (`openmymemo cloud link`) signs in through the running panel when one serves the folder (on `--port` or any of the Mac app's ports, 8787–8796), and otherwise through a short-lived listener on an ephemeral port. Linking again replaces the device: the service tells the old connection 4409, which stops it without touching `cloud.json` or the web apps, and the running panel connects with the new link. `openmymemo connect mymemo-cloud` does the same.
 - **The panel:** MyMemo Cloud has its own "On the web" section on the Connectors page; the first-run guide (§15.3) leaves it out.
+
+Phase 2 (the offline queue), as built:
+
+- **Idempotency:** a queued item is filed with `idempotency_key` = its queue id, which the service derives from the AI's own key when there is one; the AI's key inside the ciphertext isn't used locally. A resent item is therefore a duplicate, and a live retry of something already queued is caught by the similarity check (the service note's contract correction 5).
+- **Time:** the proposal's `created_at` is the item's `received_at`, so the 30-day expiry of a pending proposal (§5.5) counts from when the AI made it, not from when it was filed.
+- **Order and acks:** items are filed one at a time in the order they arrive and acknowledged `stored`, `duplicate` (already filed, or the memory already says it), `undecryptable` (another key, another row, a damaged ciphertext) or `rejected` (a revoked or read-only web app, a blocked topic, a malformed item). An item whose filing fails unexpectedly isn't acknowledged, so the service sends it again.
+- **The panel** shows how many changes are waiting (the service's count at connection, counted down as they are filed). The re-link warning about queued proposals (§16.4) is the consent page's, on the service side.
