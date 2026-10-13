@@ -575,6 +575,7 @@ class Bridge:
         self._send_lock = asyncio.Lock()
         self.started.set()
         attempt = 0
+        refusals = 0  # upgrades refused in a row with 401/403
         try:
             while not self._stopping:
                 current = load_link()
@@ -590,9 +591,13 @@ class Bridge:
                 code, online_for = None, 0.0
                 try:
                     code, online_for = task.result()
+                    refusals = 0
                 except Exception as e:  # noqa: BLE001 - a failed connection is ordinary; only its kind is logged
                     status = getattr(getattr(e, "response", None), "status_code", None)
-                    if status in (401, 403):  # refused before the upgrade: the device token is no longer valid
+                    refusals = refusals + 1 if status in (401, 403) else 0
+                    if refusals >= 2:
+                        # Refused before the upgrade, twice in a row: the device token is no longer valid. Once
+                        # isn't enough to delete the private key: a proxy in front of the service can say 403 too.
                         log.info("MyMemo Cloud: the service refused this computer (HTTP %s); unlinking", status)
                         self._forget()
                         return self._set("stopped", "unlinked")

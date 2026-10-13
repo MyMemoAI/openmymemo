@@ -88,7 +88,8 @@ class FakeService:
         self.unlinks: list[str | None] = []
         self.handshakes: list[dict[str, str]] = []
         self.conns: list[FakeConn] = []
-        self.refuse_upgrades = False  # every upgrade gets HTTP 403, as for a token the service no longer knows
+        self.refuse_upgrades = 0  # how many upgrades to answer with HTTP 403, as for a token the service doesn't know
+        self.choose_subprotocol = True  # False: accept without echoing the offered subprotocol
         self.close_after_hello: int | None = None  # close with this code instead of answering welcome
         self.loop: asyncio.AbstractEventLoop | None = None
         self.app = self._build()
@@ -183,10 +184,12 @@ class FakeService:
             self.handshakes.append(headers)
             # handshake.json: auth is checked before the upgrade is accepted; any Origin is refused.
             if self.refuse_upgrades or headers.get("authorization") != f"Bearer {self.token}" or "origin" in headers:
+                self.refuse_upgrades = max(0, self.refuse_upgrades - 1)
                 await ws.close(code=1008)
                 return
             offered = [p.strip() for p in headers.get("sec-websocket-protocol", "").split(",") if p.strip()]
-            await ws.accept(subprotocol=SUBPROTOCOL if SUBPROTOCOL in offered else None)
+            chosen = SUBPROTOCOL if SUBPROTOCOL in offered and self.choose_subprotocol else None
+            await ws.accept(subprotocol=chosen)
             conn = FakeConn(self, ws, headers)
             self.conns.append(conn)
             try:

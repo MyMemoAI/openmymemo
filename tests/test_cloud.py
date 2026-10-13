@@ -452,14 +452,33 @@ def test_4403_waits_for_the_plan_until_the_panel_asks(vault, fake, clouds):
     wait_until(lambda: c.status()["online"])
 
 
-def test_a_refused_handshake_means_the_token_is_gone(vault, fake, clouds):
+def test_a_handshake_refused_twice_in_a_row_means_the_token_is_gone(vault, fake, clouds):
     linked(vault, fake.base)
-    fake.refuse_upgrades = True
+    Connectors(vault).ensure("cloud-chatgpt", "ChatGPT (web)", kind="cloud")
+    fake.refuse_upgrades = 10**6
     c = Cloud(vault, 8787, FAST)
     clouds.append(c)
     c.start()
     wait_until(lambda: not c.status()["linked"])
-    assert fake.handshakes and fake.conns == [] and cloud.load_link() is None
+    assert len(fake.handshakes) == 2 and fake.conns == [] and cloud.load_link() is None
+    assert Connectors(vault).list() == []  # the web apps are revoked, as for 4401
+
+
+def test_one_refused_handshake_is_not_enough_to_forget_the_link(vault, fake, clouds):
+    linked(vault, fake.base)
+    fake.refuse_upgrades = 1  # a proxy in front of the service may say 403 once
+    c = Cloud(vault, 8787, FAST)
+    clouds.append(c)
+    c.start()
+    wait_until(lambda: c.status()["online"])
+    assert len(fake.handshakes) == 2 and cloud.load_link() is not None
+
+
+def test_a_service_that_echoes_no_subprotocol_is_fine(vault, fake, clouds):
+    fake.choose_subprotocol = False  # handshake.json names only the Authorization header
+    _, conn = online(vault, fake, clouds)
+    assert conn.headers["sec-websocket-protocol"] == cloud.SUBPROTOCOL
+    assert call(conn, fixture("bridge/call.json"))["result"]["isError"] is False
 
 
 def test_closing_says_1000(vault, fake, clouds):
