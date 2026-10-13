@@ -281,7 +281,10 @@ const chip = "chip min-h-[18px] px-[7px] text-[11px]";
         <div v-else-if="!visible.length" class="px-6 py-16 text-center">
           <p class="text-base font-semibold">{{ t("mem.emptyAll") }}</p>
           <p class="mx-auto mt-1 max-w-sm text-muted">{{ t("mem.emptyAllHint") }}</p>
-          <a href="#/import" class="btn btn-primary btn-sm mt-4">{{ t("mem.importCta") }}</a>
+          <div class="mt-4 flex flex-wrap justify-center gap-2">
+            <a href="#/import" class="btn btn-primary btn-sm">{{ t("mem.importCta") }}</a>
+            <a href="#/welcome" class="btn btn-sm">{{ t("onb.showGuide") }}</a>
+          </div>
         </div>
       </section>
 

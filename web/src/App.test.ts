@@ -52,6 +52,7 @@ describe("the home page", () => {
   it("is Memories once the guide is done, and Get started is gone", async () => {
     const w = await open("", true);
     expect(location.hash).toBe("#/memories");
+    expect(w.find('a[href="#/welcome"]').text()).toBe("Show the welcome guide"); // the empty state's link
     expect(w.find('nav a[href="#/welcome"]').exists()).toBe(false);
   });
 
