@@ -268,24 +268,30 @@ fn update_badge(app: &AppHandle, counts: &Counts) {
 // ---- moving to Applications -------------------------------------------------------------------------
 
 /// Opened from its disk image or a translocated copy, offer to move the app to Applications. Returns true
-/// when the app is quitting to reopen from there. Only when opened from the Finder (launchd is the parent):
-/// running the binary from a terminal, as in development, is left alone.
+/// when the app is quitting to reopen from there. Only when macOS opened it as an app (the Finder, the Dock,
+/// `open`), which says so in __CFBundleIdentifier: running the binary from a terminal is left alone.
 fn offer_move(app: &AppHandle) -> bool {
-    if unsafe { libc::getppid() } != 1 {
+    if std::env::var_os("__CFBundleIdentifier").map_or(true, |id| id != launcher::BUNDLE_ID) {
         return false;
     }
     let Some(bundle) = std::env::current_exe().ok().and_then(|exe| launcher::bundle_of(&exe)) else { return false };
     let Some(place) = install::transient(&bundle, install::is_read_only) else { return false };
     eprintln!("OpenMyMemo: running from {}; offering to move it to Applications", bundle.display());
+    // As sheets on the window: without a parent the dialog plugin asks the system to show the alert
+    // (CFUserNotification), which can fail without showing anything.
+    let window = main_window(app);
+    let dialog = |title: &str, message: &str| {
+        let builder = app.dialog().message(message).title(title);
+        match &window {
+            Some(w) => builder.parent(w),
+            None => builder,
+        }
+    };
     let ask = |title: &str, message: &str, ok: &str, cancel: &str| {
-        app.dialog()
-            .message(message)
-            .title(title)
-            .buttons(MessageDialogButtons::OkCancelCustom(ok.into(), cancel.into()))
-            .blocking_show()
+        dialog(title, message).buttons(MessageDialogButtons::OkCancelCustom(ok.into(), cancel.into())).blocking_show()
     };
     let tell = |title: &str, message: &str| {
-        app.dialog().message(message).title(title).kind(MessageDialogKind::Warning).blocking_show();
+        dialog(title, message).kind(MessageDialogKind::Warning).blocking_show();
     };
     if !ask(
         "Move OpenMyMemo to Applications?",
