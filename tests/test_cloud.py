@@ -11,7 +11,7 @@ import threading
 import time
 import urllib.request
 from pathlib import Path
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 import anyio
 import pytest
@@ -247,6 +247,12 @@ def test_the_callback_needs_a_state_this_process_started_recently(vault, fake, p
     url = api.post("/api/cloud/link", headers=H).json()["url"]
     back = fake.authorize(url).replace(f"iss={fake.base.replace(':', '%3A').replace('/', '%2F')}", "iss=https%3A%2F%2Fevil.example")
     assert api.get(callback_path(back)).status_code == 400
+
+    url = api.post("/api/cloud/link", headers=H).json()["url"]
+    parts = urlsplit(fake.authorize(url))
+    without_iss = {k: v for k, v in parse_qsl(parts.query) if k != "iss"}  # RFC 9207: MyMemo always sends it
+    r = api.get(f"{parts.path}?{urlencode(without_iss)}")
+    assert r.status_code == 400 and "didn" in r.text
 
     c.linker.ttl = 0.0  # ten minutes have passed
     url = api.post("/api/cloud/link", headers=H).json()["url"]

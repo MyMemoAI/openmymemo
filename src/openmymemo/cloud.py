@@ -424,10 +424,11 @@ class Linker:
             if params["error"] == "access_denied":
                 return Outcome(400, "Linking was cancelled", "Nothing was linked. You can close this tab.")
             return Outcome(400, "MyMemo didn't link this computer", f"{why[:300]}. You can close this tab.")
-        iss = (params.get("iss") or "").rstrip("/")
-        if iss and iss != p.service:
+        iss = params.get("iss") or ""
+        if iss != p.service:  # RFC 9207: MyMemo always says who answered, and it must be the server we asked
             return Outcome(400, "MyMemo didn't link this computer",
-                           "The answer came from an unexpected server, so OpenMyMemo ignored it.")
+                           "The answer came from an unexpected server, so OpenMyMemo ignored it." if iss else
+                           "The answer didn't say it came from MyMemo, so OpenMyMemo ignored it.")
         code = params.get("code") or ""
         if not code:
             return Outcome(400, "MyMemo didn't link this computer", "The answer had no code.")
