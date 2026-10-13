@@ -218,7 +218,10 @@ def read_config(client: Client, env: Env) -> dict | None:
         elif client.fmt == "yaml":
             data = yaml.safe_load(text)
         else:
-            data = json.loads(_strip_jsonc(text)) if text.strip() else {}
+            try:
+                data = json.loads(text) if text.strip() else {}
+            except ValueError:  # comments or trailing commas: the slow path, only when needed
+                data = json.loads(_strip_jsonc(text))
     except (ValueError, yaml.YAMLError):
         return None
     return data if isinstance(data, dict) else None

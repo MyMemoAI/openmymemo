@@ -142,6 +142,22 @@ def test_the_temporary_file_is_private_from_the_start_and_cleaned_up_on_failure(
     assert path.read_text() == '{"a": 1}' and sorted(p.name for p in tmp_path.iterdir()) == ["settings.json"]
 
 
+def test_plain_json_is_read_without_stripping_comments(vault, env, monkeypatch):
+    big = {"projects": {f"/p/{i}": {"history": ["x" * 200] * 5} for i in range(200)},
+           "mcpServers": {"openmymemo": {"command": "x"}}}
+    (env.home / ".claude.json").write_text(json.dumps(big))  # Claude Code's state can run to megabytes
+    path = env.home / ".config/zed/settings.json"
+    path.parent.mkdir(parents=True)
+    path.write_text('// mine\n{"context_servers": {"openmymemo": {"command": "x"}}}')
+    stripped = []
+    real = clients._strip_jsonc
+    monkeypatch.setattr(clients, "_strip_jsonc", lambda text: stripped.append(len(text)) or real(text))
+    assert clients.configured(clients.get("claude-code"), env) == {"command": "x"}
+    assert stripped == []  # the slow path only for files that need it
+    assert clients.configured(clients.get("zed"), env) == {"command": "x"}
+    assert len(stripped) == 1
+
+
 def test_jsonc_is_read_for_status():
     text = '{\n  // comment, with "quotes"\n  "a": "http://x", /* block */ "b": [1, 2,],\n}'
     assert json.loads(clients._strip_jsonc(text)) == {"a": "http://x", "b": [1, 2]}
