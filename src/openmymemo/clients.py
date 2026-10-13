@@ -155,8 +155,9 @@ class Client:
     where: str = ""  # manual: where in the app to paste the snippet
     link: Callable[[list[str]], tuple[str, str]] | None = None  # (label, url) of a one-click install link
     snippet: Callable[[list[str]], str] | None = None  # what to paste, when it isn't the config entry
-    add_args: Callable[[list[str]], list[str]] | None = None  # cli: the app's own `mcp add`
+    add_args: Callable[[list[str], dict[str, str]], list[str]] | None = None  # cli: its `mcp add` (command, env)
     remove_args: tuple[str, ...] = ()  # cli: the app's own `mcp remove`
+    restore_args: Callable[[dict], list[str]] | None = None  # cli: puts a removed entry back as it was
     plugin: Callable[[Env], str | None] | None = None  # names our plugin when it is installed there
     plugin_where: str = ""  # where the person removes that plugin
     session: bool = False  # a CLI: "start a new session" rather than "restart the app"
@@ -597,23 +598,40 @@ def _failure(proc: subprocess.CompletedProcess | None) -> str:
     return lines[-1][:300] if lines else f"it exited with code {proc.returncode}"
 
 
+def _env_of(entry: dict | None) -> dict[str, str]:
+    """The environment the person gave our server, as strings (what an app's `--env` takes)."""
+    found = next((entry[k] for k in ENV_KEYS if isinstance(entry, dict) and isinstance(entry.get(k), dict)), {})
+    return {str(k): str(v) for k, v in found.items()}
+
+
 def _cli_connect(vault: Vault, client: Client, env: Env, cmd: list[str]) -> Result:
     assert client.add_args is not None
-    command = shlex.join([client.commands[0], *client.add_args(cmd)])
     current = configured(client, env)
+    add = client.add_args(cmd, _env_of(current))
+    command = shlex.join([client.commands[0], *add])
     if current is not None and _command_of(current) == _command_of(client.entry(cmd)):
         return Result("done", f"{client.name} already has OpenMyMemo.")
     exe = find_command(client, env)
     if exe is None:
-        return _manual(vault, client, env, f"OpenMyMemo couldn't find the {client.commands[0]} command. "
-                                           "Run this in a terminal instead:")
+        return _cli_manual(vault, client, env, command, f"OpenMyMemo couldn't find the {client.commands[0]} "
+                                                        "command. Run this in a terminal instead:")
+    removed = False
     if current is not None:  # an older entry: the app's own `add` refuses to overwrite it
-        _run(exe, list(client.remove_args), env)
-    proc = _run(exe, client.add_args(cmd), env)
+        gone = _run(exe, list(client.remove_args), env)
+        removed = gone is not None and gone.returncode == 0
+    proc = _run(exe, add, env)
     if proc is None or proc.returncode != 0:
-        return _manual(vault, client, env, f"`{command}` didn't work ({_failure(proc)}). "
-                                           "Run it in a terminal instead:")
+        if removed and client.restore_args and configured(client, env) is None:
+            _run(exe, client.restore_args(current), env)  # a failed reconnect mustn't become a disconnect
+        return _cli_manual(vault, client, env, command, f"`{command}` didn't work ({_failure(proc)}). "
+                                                        "Run it in a terminal instead:")
     return Result("done", f"Added OpenMyMemo to {client.name}.", changed=True, restart=True)
+
+
+def _cli_manual(vault: Vault, client: Client, env: Env, command: str, why: str) -> Result:
+    result = _manual(vault, client, env, why)
+    result.snippet = command  # with the person's environment, which the generic snippet doesn't know
+    return result
 
 
 def _cli_disconnect(client: Client, env: Env) -> Result:
@@ -826,8 +844,11 @@ CLIENTS: list[Client] = [
     Client("claude-code", "Claude Code", "cli", docs="https://code.claude.com/docs/en/mcp",
            site="https://code.claude.com/docs/en/setup", commands=("claude",), dirs=(".claude",),
            config=lambda e: e.home / ".claude.json", entry=_typed,
-           add_args=lambda cmd: ["mcp", "add", "--scope", "user", "--transport", "stdio", ENTRY, "--", *cmd],
+           add_args=lambda cmd, env: ["mcp", "add", "--scope", "user", "--transport", "stdio",
+                                      *(f for k, v in env.items() for f in ("--env", f"{k}={v}")), ENTRY, "--", *cmd],
            remove_args=("mcp", "remove", ENTRY, "--scope", "user"),
+           restore_args=lambda entry: ["mcp", "add-json", "--scope", "user", ENTRY,
+                                       json.dumps(entry, ensure_ascii=False)],
            snippet=lambda cmd: shlex.join(["claude", "mcp", "add", "--scope", "user", "--transport", "stdio", ENTRY,
                                            "--", *cmd]),
            plugin=_claude_code_plugin, plugin_where="/plugin in Claude Code", session=True),

@@ -424,6 +424,8 @@ CLAUDE_WRITES = (
     "    data.setdefault('mcpServers', {})['openmymemo'] = {'type': 'stdio', 'command': cmd[0], 'args': cmd[1:], 'env': {}}\n"
     "if args[:2] == ['mcp', 'remove']:\n"
     "    data.get('mcpServers', {}).pop('openmymemo', None)\n"
+    "if args[:2] == ['mcp', 'add-json']:\n"
+    "    data.setdefault('mcpServers', {})[args[4]] = json.loads(args[5])\n"
     "p.write_text(json.dumps(data))\n"
 )
 
@@ -462,6 +464,31 @@ def test_claude_code_replaces_an_older_entry_and_falls_back_to_the_command(vault
     failed = clients.connect(vault, "claude-code", env)
     assert failed.status == "manual" and "something went wrong" in failed.message
     assert failed.snippet.startswith("claude mcp add --scope user --transport stdio openmymemo -- ")
+
+
+def test_claude_code_reconnect_keeps_the_servers_environment(vault, env):
+    old = {"type": "stdio", "command": "/old/omm", "args": [], "env": {"HTTPS_PROXY": "http://proxy:3128"}}
+    claude_json = env.home / ".claude.json"
+    claude_json.write_text(json.dumps({"mcpServers": {"openmymemo": old}}))
+    log = fake_cli(env, "claude", CLAUDE_WRITES)
+    assert clients.connect(vault, "claude-code", env).status == "done"
+    add = calls(log)[-1]
+    assert add[:2] == ["mcp", "add"] and add[add.index("--env") + 1] == "HTTPS_PROXY=http://proxy:3128"
+    assert add.index("--env") < add.index("openmymemo") < add.index("--")
+
+
+def test_claude_code_keeps_the_old_entry_when_the_new_one_cant_be_added(vault, env):
+    old = {"type": "stdio", "command": "/old/omm", "args": ["mcp"], "env": {"A": "1"}}
+    claude_json = env.home / ".claude.json"
+    claude_json.write_text(json.dumps({"mcpServers": {"openmymemo": old}}))
+    fails_to_add = CLAUDE_WRITES.replace("if args[:2] == ['mcp', 'add']:", "if args[:2] == ['mcp', 'add']:\n"
+                                         "    print('Error: boom', file=sys.stderr); sys.exit(1)\nif False:")
+    log = fake_cli(env, "claude", fails_to_add)
+    result = clients.connect(vault, "claude-code", env)
+    assert result.status == "manual" and "boom" in result.message
+    assert "--env A=1" in result.snippet
+    assert [c[:2] for c in calls(log)] == [["mcp", "remove"], ["mcp", "add"], ["mcp", "add-json"]]
+    assert json.loads(claude_json.read_text())["mcpServers"]["openmymemo"] == old
 
 
 def test_claude_code_without_its_command_gets_the_command_to_run(vault, env):
