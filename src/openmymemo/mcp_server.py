@@ -16,6 +16,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import ToolAnnotations
 
 from . import __version__
+from .clients import display_name
 from .connectors import Connector, Connectors, Revoked
 from .context import compile_context, search
 from .proposals import Proposals
@@ -79,7 +80,7 @@ def build_server(vault: Vault, *, stdio_connector: str | None = None, panel_url:
             raise ToolError("Missing bearer token.")
         if stdio_connector:
             try:
-                return connectors.ensure(stdio_connector)
+                return connectors.ensure(stdio_connector, display_name(stdio_connector))
             except Revoked as e:
                 raise ToolError(str(e)) from e
         raise ToolError("No connector configured for this OpenMyMemo server.")
@@ -219,7 +220,7 @@ def build_server(vault: Vault, *, stdio_connector: str | None = None, panel_url:
 
 def run_stdio(vault: Vault, connector_id: str, panel_port: int | None = None) -> None:
     try:
-        Connectors(vault).ensure(connector_id)
+        Connectors(vault).ensure(connector_id, display_name(connector_id))
     except Revoked:
         pass  # still start, so the app gets a readable "revoked" error instead of a dead server
     panel_url = None
