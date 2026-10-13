@@ -827,6 +827,8 @@ CLIENTS: list[Client] = [
            site="https://chatgpt.com/download", commands=("codex",),
            bundle_bins=("ChatGPT.app/Contents/Resources/codex-cli/bin",), dirs=(".codex",),
            config=lambda e: e.codex_home / "config.toml", fmt="toml", key=("mcp_servers",),
+           # Codex gives a server 10 s to start; the Mac app's launcher may first have to install it.
+           entry=lambda cmd: {**plain(cmd), "startup_timeout_sec": 60},
            plugin=_codex_plugin, plugin_where="Plugins in Codex", restart_as="Codex or the ChatGPT app",
            note="also the ChatGPT app"),
     # https://cursor.com/docs/mcp and https://cursor.com/docs/mcp/install-links

@@ -423,6 +423,7 @@ def test_codex_connect_appends_the_table_and_installs_the_hook(vault, env):
     assert any("/hooks" in s and "Settings → Coding → Hooks" in s for s in result.steps)
     data = tomllib.loads(config.read_text())
     assert data["mcp_servers"]["openmymemo"] == entry_for(vault, "codex") and "github" in data["mcp_servers"]
+    assert data["mcp_servers"]["openmymemo"]["startup_timeout_sec"] == 60  # room for the Mac app's first install
     hooks = json.loads((env.home / ".codex/hooks.json").read_text())
     handler = hooks["hooks"]["SessionStart"][0]["hooks"][0]
     assert codex.is_ours(handler)
