@@ -18,7 +18,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit
 
 import uvicorn
 from fastapi import FastAPI, Request, WebSocket
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 
 from openmymemo.cloud import SUBPROTOCOL, pkce_challenge, unb64u
 
@@ -127,7 +127,9 @@ class FakeService:
         """What the browser does after the person allows the link: returns the callback URL with a code."""
         parts = urlsplit(url)
         assert f"{parts.scheme}://{parts.netloc}" == self.base and parts.path == "/openmymemo/oauth/authorize"
-        params = dict(parse_qsl(parts.query))
+        return self._consent(dict(parse_qsl(parts.query)))
+
+    def _consent(self, params: dict) -> str:
         self.authorize_params.append(params)
         code = "omc_" + secrets.token_urlsafe(16)
         self.codes[code] = params
@@ -142,6 +144,10 @@ class FakeService:
 
     def _build(self) -> FastAPI:
         app = FastAPI()
+
+        @app.get("/openmymemo/oauth/authorize")
+        async def consent(request: Request):  # a real browser, for trying the panel by hand: allows at once
+            return RedirectResponse(self._consent(dict(request.query_params)), status_code=302)
 
         @app.post("/openmymemo/device/link")
         async def link(request: Request):
