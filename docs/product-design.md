@@ -478,7 +478,7 @@ When it shows: `onboarded` in `settings.yaml` (MEMORY_FORMAT.md §6.1). New fold
 
 ChatGPT on the web and claude.ai can only reach MCP servers on the public internet (§5.4), so until now nothing they learn reaches the folder. MyMemo Cloud closes that gap with a relay that a person turns on by signing in with their MyMemo account. It is an optional connector, the way §3 always anticipated MyMemo: off by default, listed in the catalog next to Claude and Cursor, with the same permissions, activity log and revocation as every other app. Nothing else in OpenMyMemo depends on it, and everything works without it.
 
-Decided by the product owner on 2026-10-12: (1) the cloud is an optional connector, and the non-negotiables in AGENTS.md change by one sentence instead of being dropped; (2) when the computer is offline, writes wait in an encrypted queue the service can't read, and reads fail (option "b"; the service never keeps a readable copy of the memory); (3) subscribers aren't billed per call for the memory tools for now.
+Decided by the product owner on 2026-10-12: (1) the cloud is an optional connector, and the non-negotiables in AGENTS.md change by one sentence instead of being dropped; (2) when the computer is offline, writes wait in an encrypted queue the service can't read, and reads fail (option "b"; the service never keeps a readable copy of the memory); (3) subscribers aren't billed per call for the memory tools for now; (4) the offline queue is for Ultra subscriptions and AppSumo tier 3 only.
 
 ### 16.1 What changes in the principles
 
@@ -508,7 +508,7 @@ claude.ai ─────┼──▶ mymemo-service  /openmymemo/mcp
 
 | | Live relay | Offline queue |
 | --- | --- | --- |
-| Who | Every paid tier (Pro, Ultra, AppSumo) | Ultra (open question 5: today every AppSumo or Oncely code holder resolves to Ultra) |
+| Who | Every paid tier (Pro, Ultra, AppSumo and Oncely) | Ultra subscriptions and AppSumo tier 3 only; AppSumo and Oncely tiers 1–2 get live relay |
 | Computer online | Every call is relayed and answered by the computer within 20 s; nothing is stored | Same |
 | Computer offline: reads (`memory_context`, `memory_search`, `memory_get`, `memory_proposals`) | Fail with a plain message: "OpenMyMemo isn't running on your computer right now" | Fail the same way (decision 2) |
 | Computer offline: `memory_propose` | Fails the same way | Accepted: the service encrypts it to the computer's public key on arrival and queues the ciphertext; the AI gets `status: "queued"` and is told the person will see it when their computer is back |
@@ -557,4 +557,3 @@ The MyMemo Cloud row on the Connectors page shows: signed in as, online or offli
 2. Should a web app's connector default to fewer topics than local apps (e.g. only "How I work" and "Who I am") until the person widens it?
 3. Mobile ChatGPT and Claude apps use the same connectors; anything specific to check there?
 4. MCP elicitation for in-chat approval (§5.4) applies here too once the web apps support it.
-5. AppSumo and Oncely: any code holder resolves to Ultra in mymemo-service today (`vip_lvl >= 2`), so they would all get the offline queue. Is that intended, or only AppSumo tier 3?
