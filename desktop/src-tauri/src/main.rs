@@ -225,19 +225,21 @@ fn splash_status(app: &AppHandle, status: &str, detail: &str, kind: &str) {
 
 #[tauri::command]
 fn reveal_path(path: String) -> Result<(), String> {
-    let path = PathBuf::from(path);
-    let mut cmd = std::process::Command::new("/usr/bin/open");
-    if path.is_dir() {
-        cmd.arg(&path);
-    } else if path.exists() {
-        cmd.arg("-R").arg(&path);
-    } else if let Some(folder) = path.parent().filter(|p| p.is_dir()) {
-        // A file not written yet, such as the log before the app has started a server: its folder.
-        cmd.arg(folder);
-    } else {
-        return Err(format!("{} doesn't exist yet.", path.display()));
+    let shown = to_reveal(Path::new(&path))?;
+    std::process::Command::new("/usr/bin/open").arg("-R").arg(shown).status().map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// What `open -R` selects in the Finder for `path`: the item itself, or for a file not written yet (the log
+/// before the app has started a server) its folder. Always -R, which shows and never opens, so a path that
+/// is an app or a document can't be launched from the panel.
+fn to_reveal(path: &Path) -> Result<PathBuf, String> {
+    if path.exists() {
+        return Ok(path.to_path_buf());
     }
-    cmd.status().map(|_| ()).map_err(|e| e.to_string())
+    match path.parent().filter(|p| p.is_dir()) {
+        Some(folder) => Ok(folder.to_path_buf()),
+        None => Err(format!("{} doesn't exist yet.", path.display())),
+    }
 }
 
 #[derive(Serialize)]
@@ -806,6 +808,17 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reveals_without_opening() {
+        let root = std::env::temp_dir().join(format!("openmymemo-desktop-{}-reveal", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let app = root.join("Tools/Some.app");
+        std::fs::create_dir_all(app.join("Contents")).unwrap();
+        assert_eq!(to_reveal(&app), Ok(app.clone()), "an app is selected, not launched");
+        assert_eq!(to_reveal(&root.join("Logs/core.log")), Err(format!("{} doesn't exist yet.", root.join("Logs/core.log").display())));
+        assert_eq!(to_reveal(&root.join("Tools/core.log")), Ok(root.join("Tools")));
+    }
 
     #[test]
     fn links_load_open_outside_or_are_blocked() {
