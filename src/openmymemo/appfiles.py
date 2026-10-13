@@ -43,7 +43,23 @@ def replace(path: Path, text: str) -> None:
 
 
 def backup(path: Path) -> None:
-    """Keep the file as it was before OpenMyMemo first changed it, once: ``<file>.openmymemo-backup``."""
+    """Keep the file as it was before OpenMyMemo first changed it, once: ``<file>.openmymemo-backup``.
+
+    Written private to a temporary file and renamed into place only when complete, so the copy of a file
+    holding API keys is never readable by others, and a copy cut short is never taken for the backup."""
     copy = path.with_name(path.name + BACKUP_SUFFIX)
-    if path.exists() and not copy.exists():
-        shutil.copy2(path.resolve(), copy)
+    if not path.exists() or copy.exists():
+        return
+    source = path.resolve()
+    tmp = copy.with_name(f".{copy.name}.{secrets.token_hex(4)}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as f, open(source, "rb") as src:
+            shutil.copyfileobj(src, f)
+            f.flush()
+            os.fsync(f.fileno())
+        shutil.copystat(source, tmp)  # the original's own permissions and times, now that it is all there
+        os.replace(tmp, copy)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise

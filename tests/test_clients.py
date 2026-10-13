@@ -69,6 +69,28 @@ def test_openmymemo_command_overrides_the_cli_when_it_exists(tmp_path, monkeypat
 # ---- JSON writers ----------------------------------------------------------------------------------------
 
 
+def test_a_backup_is_private_while_written_and_never_left_half_done(tmp_path, monkeypatch):
+    path = tmp_path / "mcp.json"
+    path.write_text('{"key": "secret"}')
+    path.chmod(0o600)
+    modes = []
+    real = appfiles.shutil.copyfileobj
+
+    def copy_then_fail(src, dst):
+        modes.append(stat.S_IMODE(os.fstat(dst.fileno()).st_mode))
+        real(src, dst)
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(appfiles.shutil, "copyfileobj", copy_then_fail)
+    with pytest.raises(OSError):
+        appfiles.backup(path)
+    assert modes == [0o600] and list(tmp_path.iterdir()) == [path]  # no backup, no temporary file
+    monkeypatch.setattr(appfiles.shutil, "copyfileobj", real)
+    appfiles.backup(path)
+    copy = tmp_path / "mcp.json.openmymemo-backup"
+    assert copy.read_text() == '{"key": "secret"}' and stat.S_IMODE(copy.stat().st_mode) == 0o600
+
+
 def test_json_writer_changes_only_our_entry_keeps_a_backup_once_and_round_trips(tmp_path):
     path = tmp_path / "mcp.json"
     original = {"theme": "dark", "mcpServers": {"other": {"command": "x"}}}
