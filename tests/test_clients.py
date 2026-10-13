@@ -199,6 +199,17 @@ def test_toml_into_a_new_file(tmp_path):
     assert clients.remove_toml_entry(path) is True and path.read_text() == ""
 
 
+def test_toml_keeps_comments_after_our_table_at_the_end_of_the_file(tmp_path):
+    path = tmp_path / "config.toml"
+    tail = '# [profiles.work]\n# model = "o4"\n'
+    path.write_text('model = "gpt-5"\n\n[mcp_servers.openmymemo]\ncommand = "old"\n' + tail)
+    assert clients.write_toml_entry(path, {"command": "new"}) is True  # replaces our table
+    assert tail in path.read_text()
+    assert tomllib.loads(path.read_text())["mcp_servers"]["openmymemo"] == {"command": "new"}
+    assert clients.remove_toml_entry(path) is True
+    assert path.read_text() == 'model = "gpt-5"\n\n' + tail
+
+
 # ---- connecting apps that keep a JSON config ----------------------------------------------------------------
 
 FILE_APPS = [c.id for c in clients.CLIENTS if c.method == "file" and c.fmt != "toml"]

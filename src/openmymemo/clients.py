@@ -376,11 +376,12 @@ def _cut_toml_table(text: str) -> str:
         end = i + 1
         while end < len(lines) and (not _ANY_TABLE.match(lines[end]) or _OUR_TABLE.match(lines[end])):
             end += 1
-        if end < len(lines):  # comments right above the next table belong to it; blank lines go with ours
-            k = end
-            while k > i + 1 and (not lines[k - 1].strip() or lines[k - 1].lstrip().startswith("#")):
-                k -= 1
-            end = next((j for j in range(k, end) if lines[j].strip()), end)
+        # Comments after our last key belong to what follows (the next table, or notes at the end of the file);
+        # the blank lines before them go with our table.
+        k = end
+        while k > i + 1 and (not lines[k - 1].strip() or lines[k - 1].lstrip().startswith("#")):
+            k -= 1
+        end = next((j for j in range(k, end) if lines[j].strip()), end)
         while out and not out[-1].strip() and (end >= len(lines) or not lines[end].strip()):
             out.pop()  # don't leave a double blank line where the table was
         i = end
