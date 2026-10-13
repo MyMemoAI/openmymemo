@@ -415,6 +415,9 @@ class Linker:
         outcome.used = True
         if outcome.link is None:
             self.error = outcome.message
+        else:  # linked: any other sign-in still open in a browser tab is stale now
+            with self._lock:
+                self._pending.clear()
         return outcome
 
     def _exchange(self, p: PendingLink, params: Mapping[str, str],

@@ -201,6 +201,7 @@ def test_linking_from_the_panel_writes_cloud_json_and_connects(vault, fake, pane
     assert params["resource"] == f"{fake.base}/openmymemo/bridge" and params["code_challenge_method"] == "S256"
     assert params["device_name"] and len(params["device_name"]) <= 64
     assert api.get("/api/cloud", headers=H).json()["pending"] is True
+    stale = api.post("/api/cloud/link", headers=H).json()["url"]  # a second Sign in, left open in another tab
 
     back = callback_path(fake.authorize(url))
     r = api.get(back)  # a browser navigation: no X-OpenMyMemo header
@@ -229,6 +230,9 @@ def test_linking_from_the_panel_writes_cloud_json_and_connects(vault, fake, pane
     # The same callback again (a replay) does nothing.
     again = api.get(back)
     assert again.status_code == 400 and "valid anymore" in again.text
+    assert len(fake.link_requests) == 1 and cloud.load_link() == link
+    # So does the other tab's sign-in: linking made it stale.
+    assert api.get(callback_path(fake.authorize(stale))).status_code == 400
     assert len(fake.link_requests) == 1 and cloud.load_link() == link
 
 
