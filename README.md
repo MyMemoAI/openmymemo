@@ -19,49 +19,47 @@ OpenMyMemo is what I wish I'd had: my AI memory as a folder on my own computer. 
 
 — Leo
 
-## Works with
+## Get started
 
-| App | Status |
-| --- | --- |
-| Claude Desktop (Chat, Cowork and Code) | ✅ Extension |
-| Claude Code | ✅ Plugin |
-| Codex (the CLI, and Codex in the ChatGPT desktop app) | ✅ Plugin |
-| Cursor, VS Code | ✅ Install link from the panel |
-| ChatGPT chat (web, desktop and mobile), claude.ai on the web | ❌ Not yet. They can only connect to MCP servers on the public internet, and OpenMyMemo stays on your computer. You can still bring your ChatGPT memories over with `openmymemo import chatgpt`. |
+There are two ways in. Both use the same memory folder, the same panel and the same core, so you can switch or use both.
 
-## Principles
+### The Mac app
 
-1. Local files are the only source of truth — Markdown with YAML frontmatter you can open in any editor and keep in iCloud, git or an Obsidian vault.
-2. AI writes; you see everything and can undo. Additions land right away and show up in a digest. Changes to what you wrote yourself, and anything in a private topic, wait for you. One switch makes every change wait.
-3. What you see is what it gets — the panel shows the exact text an AI receives, and who read what.
-4. Zero dependencies — no database, Docker, account, API key or telemetry.
-5. Open protocols and open conventions — standard MCP, Markdown + frontmatter (an [Open Knowledge Format](https://github.com/GoogleCloudPlatform/open-knowledge-format) bundle), Obsidian block ids, open import and export formats, no vendor lock-in.
+For everyone: no terminal, no config files, no Python to install.
 
-## Install
+1. Download `OpenMyMemo-<version>-arm64.dmg` from the [latest release](https://github.com/MyMemoAI/openmymemo/releases/latest) (a Mac with Apple silicon, macOS 12 or later).
+2. Open it and drag OpenMyMemo to Applications. (Opened straight from the disk image, it offers to move itself there.)
+3. Open OpenMyMemo from Applications. Release builds are signed and notarized and open like any app. A build without a Developer ID signature (one you built, or a fork's) needs one extra step the first time: on macOS 15 and later, try to open it, then go to System Settings → Privacy & Security and click **Open Anyway**; on earlier versions, right-click the app and choose **Open**.
+4. The first start downloads Python and the libraries OpenMyMemo runs on, about 25 MB and usually under a minute, into `~/Library/Application Support/ai.mymemo.openmymemo/`. It happens once; after that the app starts in a couple of seconds, also offline.
+5. A short guide connects the AI apps on your Mac with one click each and brings over the memory ChatGPT, Claude or Gemini already have. Your memories live in `~/OpenMyMemo`.
 
-**Mac app** (no terminal needed): build `OpenMyMemo.app` as described under [Mac app](#mac-app), drag it to Applications and open it. It shows the panel in its own window, puts the number of changes to review in the menu bar, and notifies you when an AI app changes something. It uses the same folder and the same panel as everything below.
+The app shows the panel in its own window, puts the number of changes to review in the menu bar, and notifies you when an AI app changes something. To update, download the new disk image and drag it to Applications again; your memory folder isn't touched.
 
-**Command line:** requires [uv](https://docs.astral.sh/uv/). Not on PyPI yet, so install from the repo:
+The app also installs an `openmymemo` command, which the AI apps it connects run (Settings → Advanced shows where). It is the full command line below, so you can use it in Terminal too.
+
+### The command line
+
+For developers, and anyone who prefers a terminal. Nothing is fenced in: everything the app does is a command, and the folder format ([docs/MEMORY_FORMAT.md](./docs/MEMORY_FORMAT.md)) is the interface. Requires [uv](https://docs.astral.sh/uv/). Not on PyPI yet, so install from the repo:
 
 ```bash
 git clone https://github.com/MyMemoAI/openmymemo.git
 uv tool install ./openmymemo
 ```
 
-## Use it
-
 ```bash
 openmymemo init                              # create ~/OpenMyMemo with 14 default topics
+openmymemo apps                              # the AI apps on this computer, and which are connected
+openmymemo connect cursor                    # connect one: claude-desktop, claude-code, codex, cursor, vscode, …
+openmymemo disconnect cursor                 # remove its OpenMyMemo entry and revoke its access
 openmymemo import chatgpt                    # paste ChatGPT's "Manage memories" page; it lands in "From ChatGPT"
 openmymemo sort                              # file imported memories into topics, one suggestion at a time
-openmymemo connector add "Claude Desktop"    # prints config for Claude Desktop / Claude Code / Cursor / Codex
 openmymemo serve                             # open the panel at http://127.0.0.1:8787
 openmymemo review                            # what AI changed since you last looked: keep, edit or undo
 ```
 
-More: `status`, `approval on|off` (on: every AI change waits for you), `context --connector <id>` (what an AI actually receives), `export --format claude|chatgpt|markdown|json`, `search`, `add`, `connector list|config|rotate|remove`, `setup codex` (load your memory at the start of every Codex session). Use `--vault` or `OPENMYMEMO_HOME` to put the folder elsewhere.
+`connect` edits only the app's own MCP config (keeping a backup) or runs the app's own `mcp add` command, and tells you to restart the app; where it can't do that safely it prints the config to paste. More: `status`, `approval on|off` (on: every AI change waits for you), `context --connector <id>` (what an AI actually receives), `export --format claude|chatgpt|markdown|json`, `search`, `add`, `connector add|list|config|rotate|remove` (configs by hand), `setup codex` (load your memory at the start of every Codex session). Use `--vault` or `OPENMYMEMO_HOME` to put the folder elsewhere.
 
-### Plugins
+#### Plugins
 
 **Install as many as you like: they all share one memory.** Every plugin uses the same `~/OpenMyMemo` folder by default (created on first use), so something you tell Claude, Codex knows in its next session, and the other way round. Each plugin loads your memory into new sessions where the app supports it — starting with a one-line summary of what AI changed since you last looked — and serves the panel at `http://127.0.0.1:8787` while the app is running. They need [uv](https://docs.astral.sh/uv/) except where noted.
 
@@ -77,7 +75,7 @@ More: `status`, `approval on|off` (on: every AI change waits for you), `context 
 
 **Then open the panel at [http://127.0.0.1:8787](http://127.0.0.1:8787)** in your browser (the page pictured at the top); bookmark it. It's there whenever Claude Desktop, Claude Code or Codex is running: your memories, what AI changed (Changes), the exact text each app gets (What AI sees) and the connected apps (Connectors). Without a plugin, `openmymemo serve` starts it and opens the browser.
 
-#### Codex
+##### Codex
 
 You need [uv](https://docs.astral.sh/uv/). Steps 2 and 3 are needed only once: Codex doesn't run hooks that plugins ship, so OpenMyMemo adds its own session-start hook.
 
@@ -95,13 +93,31 @@ You need [uv](https://docs.astral.sh/uv/). Steps 2 and 3 are needed only once: C
 
 From your next new session on, Codex starts with your memory. The plugin also adds the `memory`, `remember` and `codex-setup` skills.
 
-### Connecting AI apps by hand
+#### Connecting AI apps by hand
 
 - **Local process (recommended):** Claude Desktop, Claude Code, Cursor, Codex and other stdio MCP clients. `openmymemo connector add <name>` prints a config with absolute paths to paste in. Give each app its own `--connector` so permissions and logs stay separate.
 - **Local HTTP:** `openmymemo connector add <name> --http` creates a token (shown once) for use with `openmymemo serve` at `http://127.0.0.1:8787/mcp`.
 - ChatGPT chat (web, desktop and mobile) and claude.ai on the web can only reach MCP servers on the public internet, so they aren't supported yet. On the OpenAI side, Codex works today, including the Codex built into the ChatGPT desktop app.
 
 Tools AI apps see: `memory_context`, `memory_search`, `memory_get`, `memory_propose`, `memory_proposals`, plus the `recall` prompt.
+
+## Works with
+
+| App | Status |
+| --- | --- |
+| Claude Desktop (Chat, Cowork and Code) | ✅ Extension |
+| Claude Code | ✅ Plugin |
+| Codex (the CLI, and Codex in the ChatGPT desktop app) | ✅ Plugin |
+| Cursor, VS Code and other MCP apps | ✅ One click in the app, `openmymemo connect`, or a config to paste |
+| ChatGPT chat (web, desktop and mobile), claude.ai on the web | ❌ Not yet. They can only connect to MCP servers on the public internet, and OpenMyMemo stays on your computer. You can still bring your ChatGPT memories over with `openmymemo import chatgpt`. |
+
+## Principles
+
+1. Local files are the only source of truth — Markdown with YAML frontmatter you can open in any editor and keep in iCloud, git or an Obsidian vault.
+2. AI writes; you see everything and can undo. Additions land right away and show up in a digest. Changes to what you wrote yourself, and anything in a private topic, wait for you. One switch makes every change wait.
+3. What you see is what it gets — the panel shows the exact text an AI receives, and who read what.
+4. Zero dependencies — no database, Docker, account, API key or telemetry.
+5. Open protocols and open conventions — standard MCP, Markdown + frontmatter (an [Open Knowledge Format](https://github.com/GoogleCloudPlatform/open-knowledge-format) bundle), Obsidian block ids, open import and export formats, no vendor lock-in.
 
 ## What happens when an AI writes
 
@@ -156,10 +172,10 @@ Panel development: run `openmymemo serve --no-open`, then `pnpm dev` in `web/` (
 cd web && pnpm build                   # the panel the app shows
 cd desktop && pnpm install
 pnpm tauri dev                         # run it; OPENMYMEMO_HOME=/tmp/omm-demo to use another folder
-pnpm tauri build --bundles app,dmg     # → desktop/src-tauri/target/release/bundle/
+CI=true pnpm tauri build --bundles app,dmg  # → desktop/src-tauri/target/release/bundle/
 ```
 
-Builds are signed ad hoc and not notarized yet: the first time, right-click the app and choose Open. The server's log is in `~/Library/Logs/ai.mymemo.openmymemo/core.log`.
+Local builds are signed ad hoc, so macOS asks once before opening them (see [The Mac app](#the-mac-app)); the release workflow signs and notarizes when the Apple Developer secrets are set (`.github/workflows/release.yml` lists them). `CI=true` makes Tauri skip the Finder scripting that lays out the disk image window, which otherwise asks for permission to control Finder. On every start the app writes the `openmymemo` launcher AI apps run to `~/Library/Application Support/ai.mymemo.openmymemo/bin/`; it keeps working when the app is moved. The server's log is in `~/Library/Logs/ai.mymemo.openmymemo/core.log`.
 
 ## Relationship to MyMemo
 
