@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuBuilder, MenuItem, MenuItemBuilder, SubmenuBuilder};
 use tauri::tray::{TrayIcon, TrayIconBuilder};
-use tauri::webview::DownloadEvent;
+use tauri::webview::{DownloadEvent, NewWindowResponse};
 use tauri::{AppHandle, LogicalPosition, Manager, RunEvent, TitleBarStyle, Url, WebviewUrl, WebviewWindow, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
@@ -493,21 +493,64 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
 
 // ---- the window -------------------------------------------------------------------------------------
 
-/// Only the setup page and the panel load in the window; any other link opens in the browser.
-fn allow_navigation(shared: &Shared, url: &Url) -> bool {
-    let splash = shared.splash_url.lock().unwrap().as_ref().map(|u| u.origin());
-    if splash.map_or(true, |o| o == url.origin()) {
-        return true;
+/// The install links of the AI apps the Connectors page knows (clients.py), which macOS hands to those apps.
+const APP_SCHEMES: [&str; 7] = ["cursor", "vscode", "vscode-insiders", "lmstudio", "kiro", "trae", "cherrystudio"];
+
+#[derive(Debug, PartialEq)]
+enum Link {
+    /// Load in the window: the setup page, or the panel on its current port.
+    Load,
+    /// Hand to macOS: web and mail links, and the AI apps' install links.
+    Open,
+    /// Everything else, such as file:, data: and javascript: URLs.
+    Block,
+}
+
+/// Links that may leave the app, to the browser, Mail or an AI app.
+fn opens_outside(url: &Url) -> bool {
+    matches!(url.scheme(), "http" | "https" | "mailto") || APP_SCHEMES.contains(&url.scheme())
+}
+
+/// Where a link the window navigates to goes. `splash` is the setup page's address and `port` the panel's.
+/// The setup page is matched by scheme, host and port: tauri:// isn't a special scheme to the url crate,
+/// so each of its URLs has its own opaque origin and origins never compare equal.
+fn link(url: &Url, splash: Option<&Url>, port: u16) -> Link {
+    let same_place = |a: &Url| {
+        a.scheme() == url.scheme() && a.host_str() == url.host_str() && a.port_or_known_default() == url.port_or_known_default()
+    };
+    if splash.map_or(true, same_place) || url.scheme() == "about" {
+        return Link::Load;
     }
-    match url.scheme() {
-        "about" => true,
-        "http" if url.host_str() == Some("127.0.0.1") && url.port() == Some(shared.port.load(Ordering::SeqCst)) => true,
-        "http" | "https" | "mailto" => {
-            let _ = std::process::Command::new("/usr/bin/open").arg(url.as_str()).status();
+    if url.scheme() == "http" && url.host_str() == Some("127.0.0.1") && url.port() == Some(port) {
+        return Link::Load;
+    }
+    if opens_outside(url) { Link::Open } else { Link::Block }
+}
+
+fn open_outside(url: &Url) {
+    let _ = std::process::Command::new("/usr/bin/open").arg(url.as_str()).stdin(std::process::Stdio::null()).spawn();
+}
+
+/// Only the setup page and the panel load in the window; links out open in the browser or the AI app.
+fn allow_navigation(shared: &Shared, url: &Url) -> bool {
+    let splash = shared.splash_url.lock().unwrap().clone();
+    match link(url, splash.as_ref(), shared.port.load(Ordering::SeqCst)) {
+        Link::Load => true,
+        Link::Open => {
+            open_outside(url);
             false
         }
-        _ => false,
+        Link::Block => false,
     }
+}
+
+/// window.open and target="_blank" never open a second window (WebKit asks on_navigation first for a
+/// target="_blank" link, and only window.open, or a link that loads in the window, gets here).
+fn on_new_window(url: &Url) -> NewWindowResponse<tauri::Wry> {
+    if opens_outside(url) {
+        open_outside(url);
+    }
+    NewWindowResponse::Deny
 }
 
 fn build_window(app: &AppHandle, visible: bool) -> tauri::Result<WebviewWindow> {
@@ -523,6 +566,7 @@ fn build_window(app: &AppHandle, visible: bool) -> tauri::Result<WebviewWindow> 
         .traffic_light_position(LogicalPosition::new(20.0, 28.0))
         .visible(visible)
         .on_navigation(move |url| allow_navigation(&shared, url))
+        .on_new_window(|url, _| on_new_window(&url))
         // Export → Download: saved to ~/Downloads under the suggested name, then shown in Finder.
         .on_download(|_, event| {
             if let DownloadEvent::Finished { path: Some(path), success: true, .. } = event {
@@ -639,6 +683,46 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn links_load_open_outside_or_are_blocked() {
+        let splash = Url::parse("tauri://localhost/index.html").unwrap();
+        let at = |url: &str| link(&Url::parse(url).unwrap(), Some(&splash), 8787);
+        assert_eq!(at("tauri://localhost/index.html"), Link::Load, "back to the setup page");
+        assert_eq!(at("tauri://localhost/"), Link::Load);
+        assert_eq!(at("about:blank"), Link::Load);
+        assert_eq!(at("http://127.0.0.1:8787/?desktop=1#/connectors"), Link::Load);
+        // Another local server, the web, mail, and the AI apps' install links leave the app.
+        assert_eq!(at("http://127.0.0.1:8790/"), Link::Open);
+        assert_eq!(at("https://docs.cursor.com/context/mcp"), Link::Open);
+        assert_eq!(at("mailto:security@mymemo.ai"), Link::Open);
+        for install in [
+            "cursor://anysphere.cursor-deeplink/mcp/install?name=openmymemo&config=e30=",
+            "vscode:mcp/install?%7B%22name%22%3A%22openmymemo%22%7D",
+            "vscode-insiders:mcp/install?%7B%7D",
+            "lmstudio://add_mcp?name=openmymemo&config=e30=",
+            "kiro://kiro.mcp/add?name=openmymemo&config=%7B%7D",
+            "trae://trae.ai-ide/mcp-import?source=openmymemo&config=e30=",
+            "cherrystudio://mcp/install?servers=e30=",
+        ] {
+            assert_eq!(at(install), Link::Open, "{install}");
+        }
+        for blocked in [
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "data:text/html,<p>hi</p>",
+            "ftp://example.com/",
+            "tauri://elsewhere/index.html",
+            "x-unknown-app://do-something",
+            "ms-settings:privacy",
+        ] {
+            assert_eq!(at(blocked), Link::Block, "{blocked}");
+        }
+        // New windows open nothing in the app; only links that may leave it are handed to macOS.
+        assert!(opens_outside(&Url::parse("https://github.com/MyMemoAI/openmymemo").unwrap()));
+        assert!(!opens_outside(&Url::parse("about:blank").unwrap()));
+        assert!(!opens_outside(&Url::parse("file:///Users").unwrap()));
+    }
 
     #[test]
     fn an_unusable_folder_is_refused_and_the_working_one_kept() {
