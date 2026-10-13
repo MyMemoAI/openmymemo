@@ -868,8 +868,10 @@ CLIENTS: list[Client] = [
     Client("claude-code", "Claude Code", "cli", docs="https://code.claude.com/docs/en/mcp",
            site="https://code.claude.com/docs/en/setup", commands=("claude",), dirs=(".claude",),
            config=lambda e: e.home / ".claude.json", entry=_typed,
-           add_args=lambda cmd, env: ["mcp", "add", "--scope", "user", "--transport", "stdio",
-                                      *(f for k, v in env.items() for f in ("--env", f"{k}={v}")), ENTRY, "--", *cmd],
+           # `--env` takes any number of values, so an option must follow them before the server's name.
+           add_args=lambda cmd, env: ["mcp", "add", "--scope", "user",
+                                      *(f for k, v in env.items() for f in ("--env", f"{k}={v}")),
+                                      "--transport", "stdio", ENTRY, "--", *cmd],
            remove_args=("mcp", "remove", ENTRY, "--scope", "user"),
            restore_args=lambda entry: ["mcp", "add-json", "--scope", "user", ENTRY,
                                        json.dumps(entry, ensure_ascii=False)],
