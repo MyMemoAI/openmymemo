@@ -352,6 +352,9 @@ const strings: Record<string, string> = {
   "cloud.allow": "Allow again",
   "cloud.allowed": "Allowed {name} again",
   "cloud.loadError": "Couldn't load MyMemo Cloud's status.",
+  "cloud.queued.one": "1 change from the web, made while this computer was offline, is waiting in MyMemo Cloud.",
+  "cloud.queued.other": "{n} changes from the web, made while this computer was offline, are waiting in MyMemo Cloud.",
+  "cloud.queuedHint": "They're kept encrypted for this computer and filed when it connects; you'll find them in Changes.",
 
   "act.empty": "No activity yet.",
   "act.subtitle": "Who read or searched your memory, and what they proposed.",
