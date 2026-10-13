@@ -13,7 +13,9 @@ Each connector has a read scope (topics, private or not), a write mode and topic
 Every change that applies stays undoable for as long as it is the memory's latest version.
 
 stdio connectors are identified by ``openmymemo mcp --connector <id>``; HTTP connectors by a bearer
-token. Only the SHA-256 of a token is stored.
+token. Only the SHA-256 of a token is stored. ``cloud`` connectors (``cloud-chatgpt``, ``cloud-claude``, …) are
+web apps that reach the folder through MyMemo Cloud (``cloud.py``); like stdio apps they have no token and are
+created on first use.
 
 Removing a connector leaves a ``revoked`` tombstone. A stdio app keeps launching ``openmymemo mcp
 --connector <id>`` after the user removes it, and without the tombstone its next call would quietly
@@ -31,6 +33,7 @@ import yaml
 from .vault import NotFound, Vault, VaultError, _atomic_write, now_iso, slugify
 
 WRITE_MODES = ("none", "propose", "auto")
+KINDS = ("stdio", "http", "cloud")
 
 
 class Revoked(VaultError):
@@ -41,7 +44,7 @@ class Revoked(VaultError):
 class Connector:
     id: str
     name: str
-    kind: str = "stdio"  # stdio | http
+    kind: str = "stdio"  # stdio | http | cloud
     read_topics: list[str] | str = "all"
     include_private: bool = False
     write: str = "propose"
@@ -120,8 +123,8 @@ class Connectors:
 
     def create(self, name: str, kind: str = "stdio", *, connector_id: str | None = None, write: str = "propose",
                read_topics: list[str] | str = "all", include_private: bool = False) -> tuple[Connector, str | None]:
-        if kind not in ("stdio", "http"):
-            raise VaultError("kind must be stdio or http")
+        if kind not in KINDS:
+            raise VaultError("kind must be stdio, http or cloud")
         if write not in WRITE_MODES:
             raise VaultError(f"write must be one of {', '.join(WRITE_MODES)}")
         with self.vault.lock():
@@ -138,14 +141,26 @@ class Connectors:
             self._save(items)
         return c, token
 
-    def ensure(self, connector_id: str, name: str | None = None) -> Connector:
-        """Get a stdio connector, creating it with default permissions on first use (never after revocation)."""
-        for c in self._load():
-            if c.id == connector_id:
-                if c.revoked_at:
-                    raise Revoked("The user revoked this app's access in OpenMyMemo.")
-                return c
-        c, _ = self.create(name or connector_id, "stdio", connector_id=connector_id)
+    def ensure(self, connector_id: str, name: str | None = None, kind: str = "stdio") -> Connector:
+        """Get a connector without a token, creating it with default permissions on first use (never after
+        revocation)."""
+
+        def existing() -> Connector | None:
+            for c in self._load():
+                if c.id == connector_id:
+                    if c.revoked_at:
+                        raise Revoked("The user revoked this app's access in OpenMyMemo.")
+                    return c
+            return None
+
+        c = existing()
+        if c is None:
+            try:
+                c, _ = self.create(name or connector_id, kind, connector_id=connector_id)
+            except VaultError:
+                c = existing()  # a concurrent first call created it
+                if c is None:
+                    raise
         return c
 
     def update(self, connector_id: str, **changes) -> Connector:
@@ -180,6 +195,8 @@ class Connectors:
             c = next((x for x in items if x.id == connector_id and not x.revoked_at), None)
             if c is None:
                 raise NotFound(f"No connector {connector_id}")
+            if c.kind == "cloud":
+                raise VaultError("A MyMemo Cloud app signs in with your MyMemo account; it has no token")
             token = self._new_token(c)
             if c.kind == "stdio":
                 c.kind = "http"
