@@ -384,13 +384,13 @@ def test_claude_code_replaces_an_older_entry_and_falls_back_to_the_command(vault
     (env.home / ".claude.json").write_text("{}")
     failed = clients.connect(vault, "claude-code", env)
     assert failed.status == "manual" and "something went wrong" in failed.message
-    assert failed.snippet.startswith("claude mcp add --scope user openmymemo -- ")
+    assert failed.snippet.startswith("claude mcp add --scope user --transport stdio openmymemo -- ")
 
 
 def test_claude_code_without_its_command_gets_the_command_to_run(vault, env):
     result = clients.connect(vault, "claude-code", env)
     assert result.status == "manual" and "couldn't find the claude command" in result.message
-    assert result.snippet == "claude mcp add --scope user openmymemo -- " + " ".join(
+    assert result.snippet == "claude mcp add --scope user --transport stdio openmymemo -- " + " ".join(
         __import__("shlex").quote(a) for a in stdio_command(vault.root, "claude-code"))
     assert not (env.home / ".claude.json").exists()  # never written by OpenMyMemo
 

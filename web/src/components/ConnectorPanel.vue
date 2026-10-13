@@ -24,8 +24,9 @@ const setup = ref<AppSetup | null>(null);
 const snippets = ref<Record<string, string> | null>(null);
 const token = ref<string | null>(null);
 
+// Primitives, so the panel's 4-second refresh (a new connector object each time) doesn't refetch this.
 watch(
-  () => [c.value.id, c.value.kind] as const,
+  [() => c.value.id, () => c.value.kind],
   async ([id]) => {
     setup.value = null;
     snippets.value = null;

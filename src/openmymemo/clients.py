@@ -817,7 +817,8 @@ CLIENTS: list[Client] = [
            config=lambda e: e.home / ".claude.json", entry=_typed,
            add_args=lambda cmd: ["mcp", "add", "--scope", "user", "--transport", "stdio", ENTRY, "--", *cmd],
            remove_args=("mcp", "remove", ENTRY, "--scope", "user"),
-           snippet=lambda cmd: shlex.join(["claude", "mcp", "add", "--scope", "user", ENTRY, "--", *cmd]),
+           snippet=lambda cmd: shlex.join(["claude", "mcp", "add", "--scope", "user", "--transport", "stdio", ENTRY,
+                                           "--", *cmd]),
            plugin=_claude_code_plugin, plugin_where="/plugin in Claude Code", session=True),
     # https://learn.chatgpt.com/docs/extend/mcp?surface=cli and /docs/config-file/config-reference:
     # [mcp_servers.<name>] in $CODEX_HOME/config.toml, shared by the Codex CLI, the IDE extension and the
