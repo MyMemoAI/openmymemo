@@ -91,6 +91,7 @@ class FakeService:
         self.handshakes: list[dict[str, str]] = []
         self.conns: list[FakeConn] = []
         self.refuse_upgrades = 0  # how many upgrades to answer with HTTP 403 even for a device it knows
+        self.busy: tuple[int, str] | None = None  # (status, Retry-After) for every upgrade: 429 or 503
         self.device_known = True  # False once unlinked: its token gets 401 invalid_token, its upgrades 403
         self.waf = False  # a firewall in front of the service: an HTML 403 for every request
         self.device_redirect = False  # GET /openmymemo/device redirects to a page that says invalid_token
@@ -225,6 +226,9 @@ class FakeService:
             self.loop = asyncio.get_running_loop()
             headers = {k.lower(): v for k, v in ws.headers.items()}
             self.handshakes.append(headers)
+            if self.busy:  # handshake.json: 429 or 503, with Retry-After, before the upgrade
+                await ws.send_denial_response(Response(status_code=self.busy[0], headers={"Retry-After": self.busy[1]}))
+                return
             # handshake.json: auth is checked before the upgrade is accepted; any Origin is refused.
             if (self.refuse_upgrades or self.waf or not self.device_known or "origin" in headers
                     or headers.get("authorization") != f"Bearer {self.token}"):

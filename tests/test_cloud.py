@@ -637,6 +637,32 @@ def test_a_refusal_mymemo_doesnt_confirm_keeps_the_link(why, vault, fake, clouds
     wait_until(lambda: c.status()["online"])
 
 
+@pytest.mark.parametrize("status", [429, 503])
+def test_a_busy_service_is_given_the_time_it_asks_for(status, vault, fake, clouds):
+    linked(vault, fake.base)
+    fake.busy = (status, "1")
+    c = Cloud(vault, 8787, FAST)
+    clouds.append(c)
+    c.start()
+    wait_until(lambda: fake.handshakes)
+    first = time.monotonic()
+    wait_until(lambda: len(fake.handshakes) >= 2)
+    assert time.monotonic() - first >= 0.85  # FAST alone backs off in milliseconds
+    assert cloud.load_link() is not None and c.status()["reason"] == "offline"  # never taken as a refusal
+    fake.busy = None
+    c.reconnect()
+    wait_until(lambda: c.status()["online"])
+
+
+def test_retry_after_reads_seconds_and_caps_them():
+    class R:
+        def __init__(self, v):
+            self.headers = {"Retry-After": v} if v is not None else {}
+    assert [cloud.retry_after(R(v)) for v in ("2", "0", "-5", "86400", "Wed, 21 Oct 2026 07:28:00 GMT", None)] == \
+        [2.0, 0.0, 0.0, cloud.RETRY_AFTER_CAP, 0.0, 0.0]
+    assert cloud.retry_after(None) == 0.0
+
+
 def test_mymemo_must_say_invalid_token_itself():
     unreachable = Link(service="http://127.0.0.1:9", device_id="d", device_token="omd_x", private_key="", key_id="",
                        vault="/nowhere")

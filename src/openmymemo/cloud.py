@@ -558,6 +558,19 @@ def unlink() -> str:
 # ---- the bridge ------------------------------------------------------------------------------------------------
 
 
+RETRY_AFTER_CAP = 300.0  # seconds: a Retry-After longer than this is taken as this
+
+
+def retry_after(response) -> float:
+    """Seconds from a refused handshake's ``Retry-After`` (delta-seconds only), 0 when it has none."""
+    headers = getattr(response, "headers", None)
+    value = headers.get("Retry-After") if headers is not None else None
+    try:
+        return min(max(float(value), 0.0), RETRY_AFTER_CAP) if value is not None else 0.0
+    except ValueError:
+        return 0.0
+
+
 def backoff_delay(attempt: int, base: float = 1.0, cap: float = 60.0, rand: Callable[[], float] = random.random) -> float:
     """Exponential backoff with full jitter: uniform in [0, min(cap, base·2^attempt)]."""
     return rand() * min(cap, base * 2 ** min(attempt, 32))
@@ -671,12 +684,14 @@ class Bridge:
                 await asyncio.wait({task})
                 if task.cancelled() or self._stopping:
                     break
-                code, online_for, refused = None, 0.0, False
+                code, online_for, refused, wait = None, 0.0, False, 0.0
                 try:
                     code, online_for = task.result()
                 except Exception as e:  # noqa: BLE001 - a failed connection is ordinary; only its kind is logged
                     status = getattr(getattr(e, "response", None), "status_code", None)
                     refused = status in (401, 403)  # turned away before the upgrade
+                    if status in (429, 503):  # busy (two handshakes already waiting) or a passing failure
+                        wait = retry_after(getattr(e, "response", None))
                     log.info("MyMemo Cloud: couldn't connect (%s%s)", type(e).__name__, f" {status}" if status else "")
                 self.close_code = code
                 if online_for >= self.timing.reset_after:
@@ -706,7 +721,7 @@ class Bridge:
                              else random.uniform(0, self.timing.restart_jitter))
                     attempt = 0
                 else:
-                    delay = backoff_delay(attempt, self.timing.backoff_base, self.timing.backoff_cap)
+                    delay = max(wait, backoff_delay(attempt, self.timing.backoff_base, self.timing.backoff_cap))
                     attempt += 1
                 self._set("waiting", "offline")
                 await self._sleep(delay)
