@@ -518,7 +518,9 @@ fn build_window(app: &AppHandle, visible: bool) -> tauri::Result<WebviewWindow> 
         .min_inner_size(900.0, 560.0)
         .title_bar_style(TitleBarStyle::Overlay)
         .hidden_title(true)
-        .traffic_light_position(LogicalPosition::new(20.0, 20.0))
+        // tao sizes the title bar to the buttons' height + y and keeps their bottom offset, so y = 28 puts
+        // their centre at 26 pt, the middle of the 52 pt toolbar and sidebar strip.
+        .traffic_light_position(LogicalPosition::new(20.0, 28.0))
         .visible(visible)
         .on_navigation(move |url| allow_navigation(&shared, url))
         // Export → Download: saved to ~/Downloads under the suggested name, then shown in Finder.
