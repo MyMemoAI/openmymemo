@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
-from openmymemo import clients, codex
+from openmymemo import appfiles, clients, codex
 from openmymemo.cli import app
 from openmymemo.connectors import Connectors
 from openmymemo.snippets import command_for, stdio_command
@@ -132,13 +132,13 @@ def test_the_temporary_file_is_private_from_the_start_and_cleaned_up_on_failure(
     path.write_text("{}")
     path.chmod(0o600)
     monkeypatch.setattr(os, "chmod", lambda *a, **k: None)  # what the temporary file is born with is what counts
-    clients._replace(path, '{"a": 1}')
+    appfiles.replace(path, '{"a": 1}')
     assert stat.S_IMODE(path.stat().st_mode) == 0o600 and path.read_text() == '{"a": 1}'
     with pytest.raises(UnicodeEncodeError):
-        clients._replace(path, "\ud800")  # can't be written as UTF-8
+        appfiles.replace(path, "\ud800")  # can't be written as UTF-8
     monkeypatch.setattr(os, "fsync", lambda fd: (_ for _ in ()).throw(OSError(28, "No space left on device")))
     with pytest.raises(OSError):
-        clients._replace(path, '{"b": 2}')
+        appfiles.replace(path, '{"b": 2}')
     assert path.read_text() == '{"a": 1}' and sorted(p.name for p in tmp_path.iterdir()) == ["settings.json"]
 
 
@@ -476,6 +476,24 @@ def test_codex_connect_appends_the_table_and_installs_the_hook(vault, env):
     assert off.status == "done" and off.changed
     assert config.read_text() == CODEX_CONFIG
     assert json.loads((env.home / ".codex/hooks.json").read_text())["hooks"] == {}
+
+
+def test_codex_hooks_file_is_written_like_any_other_apps_file(vault, env, tmp_path):
+    real = tmp_path / "dotfiles/hooks.json"
+    real.parent.mkdir()
+    original = {"hooks": {"PreToolUse": [{"matcher": "shell", "hooks": [{"type": "command", "command": "x"}]}]}}
+    real.write_text(json.dumps(original))
+    real.chmod(0o600)
+    hooks = env.home / ".codex/hooks.json"
+    hooks.parent.mkdir()
+    hooks.symlink_to(real)
+
+    clients.connect(vault, "codex", env)
+    assert hooks.is_symlink() and codex.is_ours(json.loads(real.read_text())["hooks"]["SessionStart"][0]["hooks"][0])
+    assert stat.S_IMODE(real.stat().st_mode) == 0o600
+    assert json.loads((env.home / ".codex/hooks.json.openmymemo-backup").read_text()) == original
+    clients.disconnect(vault, "codex", env)
+    assert hooks.is_symlink() and json.loads(real.read_text())["hooks"] == original["hooks"]
 
 
 def test_codex_with_the_plugin_only_gets_the_hook(vault, env):

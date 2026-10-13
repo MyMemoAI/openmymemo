@@ -24,7 +24,6 @@ import glob
 import json
 import os
 import re
-import secrets
 import shlex
 import shutil
 import subprocess
@@ -38,12 +37,13 @@ from urllib.parse import quote
 import yaml
 
 from . import codex
+from .appfiles import backup as _backup
+from .appfiles import replace as _replace
 from .connectors import Connectors
 from .snippets import command_for, cursor_link, stdio_command
 from .vault import NotFound, Vault, VaultError
 
 ENTRY = "openmymemo"  # the name of our server in every app's config
-BACKUP_SUFFIX = ".openmymemo-backup"
 CLI_TIMEOUT = 30  # seconds for an app's own `mcp add` / `mcp remove`
 
 # Where command-line tools usually live. An app opened from the Finder (the Mac app's server) has no shell PATH.
@@ -244,39 +244,6 @@ def _indent(text: str) -> int | str:
             ws = line[: len(line) - len(body)]
             return "\t" if ws.startswith("\t") else len(ws)
     return 2
-
-
-def _replace(path: Path, text: str) -> None:
-    """Atomically replace a config file, keeping its permissions; a symlink keeps pointing at the real file."""
-    target = path.resolve() if path.is_symlink() else path
-    target.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        mode = target.stat().st_mode & 0o777
-    except FileNotFoundError:
-        mode = None
-    data = text.encode("utf-8")
-    tmp = target.with_name(f".{target.name}.{secrets.token_hex(4)}.tmp")
-    # Born with the file's own permissions (private for a new file): a config holding API keys is never
-    # readable by others, not even for a moment.
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600 if mode is None else mode)
-    try:
-        with os.fdopen(fd, "wb") as f:
-            if mode is not None and hasattr(os, "fchmod"):
-                os.fchmod(f.fileno(), mode)  # exactly, whatever the umask
-            f.write(data)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, target)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
-
-
-def _backup(path: Path) -> None:
-    """Keep the file as it was before OpenMyMemo first changed it, once."""
-    backup = path.with_name(path.name + BACKUP_SUFFIX)
-    if path.exists() and not backup.exists():
-        shutil.copy2(path.resolve(), backup)
 
 
 def _load_json(path: Path) -> tuple[dict, str]:

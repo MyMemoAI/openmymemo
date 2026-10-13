@@ -36,6 +36,7 @@ python3 scripts/stage_desktop.py && (cd desktop/src-tauri && cargo test)  # Mac 
 | `src/openmymemo/textutil.py` | Similarity, search scoring, rule-based classification |
 | `src/openmymemo/connectors.py` | Connector permissions, tokens, revocation tombstones |
 | `src/openmymemo/clients.py` | The catalog of AI apps (product-design.md §15.1): detection, status, one-click connect and disconnect by editing an app's MCP config (JSON or Codex TOML) or running its `mcp add`, and the manual snippets |
+| `src/openmymemo/appfiles.py` | Writing other apps' files (their MCP configs, Codex's `hooks.json`): atomic, permissions kept from the first byte, through symlinks, with a one-time `<file>.openmymemo-backup` |
 | `src/openmymemo/proposals.py` | Proposal lifecycle, dedupe, auto-apply and undo |
 | `src/openmymemo/context.py` | Compiles what an AI sees, MEMORY.md, log.md, search |
 | `src/openmymemo/transfer.py` | Import (ChatGPT / Claude / Markdown / JSON) and export |

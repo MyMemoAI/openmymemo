@@ -15,7 +15,8 @@ import shlex
 import tomllib
 from pathlib import Path
 
-from .vault import VaultError, _atomic_write
+from .appfiles import backup, replace
+from .vault import VaultError
 
 STATUS_MESSAGE = "Loading your OpenMyMemo memory"
 MATCHER = "startup|clear|compact"
@@ -79,7 +80,8 @@ def _load(path: Path) -> dict:
 def _save(path: Path, before: dict, after: dict) -> bool:
     if after == before:
         return False  # an unchanged file keeps its trust
-    _atomic_write(path, json.dumps(after, indent=2, ensure_ascii=False) + "\n")
+    backup(path)
+    replace(path, json.dumps(after, indent=2, ensure_ascii=False) + "\n")
     return True
 
 
