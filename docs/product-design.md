@@ -490,8 +490,8 @@ Decided by the product owner on 2026-10-12: (1) the cloud is an optional connect
 
 ```
 ChatGPT (web) ─┐   remote MCP + OAuth (MyMemo account)
-claude.ai ─────┼──▶ mymemo-service  /openmymemo/mcp
-               │        │  routes the call to the person's linked computer (Redis across pods)
+claude.ai ─────┼──▶ MyMemo service  /openmymemo/mcp
+               │        │  routes the call to the person's linked computer
                │        ▼
                │    bridge connection (WebSocket, opened by the computer; no inbound port)
                │        │
@@ -499,7 +499,7 @@ claude.ai ─────┼──▶ mymemo-service  /openmymemo/mcp
                          (the process that serves the panel)
 ```
 
-- **The web side** (mymemo-service): one remote MCP endpoint for everyone, `/openmymemo/mcp`, Streamable HTTP. OAuth 2.1 with PKCE (S256) identifies the MyMemo member: Protected Resource Metadata (RFC 9728) on the endpoint, authorization server metadata with RFC 9207 `iss`, and Client ID Metadata Documents, which both claude.ai and ChatGPT prefer, with Dynamic Client Registration only as a fallback (it is deprecated in the 2026-07-28 MCP authorization spec). Clients and redirect URIs are allow-listed at first. The person signs in to MyMemo through the existing Auth0 login and consents once per app on a page in mymemo-web; the service itself has no browser session. The tools and their schemas are exactly the local ones (§5.4): `memory_context`, `memory_search`, `memory_get`, `memory_propose`, `memory_proposals`, so skills and prompts carry over. `initialize` and `tools/list` must answer while the computer is offline: the computer sends its tool descriptors when it connects (a cloud variant that mentions `queued` and leaves out the panel's localhost link), and the service keeps those descriptors — never memory.
+- **The web side** (the MyMemo service, closed source): one remote MCP endpoint for everyone, `/openmymemo/mcp`, Streamable HTTP. OAuth 2.1 with PKCE (S256) identifies the MyMemo member: Protected Resource Metadata (RFC 9728) on the endpoint, authorization server metadata with RFC 9207 `iss`, and Client ID Metadata Documents, which both claude.ai and ChatGPT prefer, with Dynamic Client Registration only as a fallback (it is deprecated in the 2026-07-28 MCP authorization spec). Clients and redirect URIs are allow-listed at first. The person signs in with their MyMemo account and consents once per app on a page in the MyMemo web app; the service itself has no browser session. The tools and their schemas are exactly the local ones (§5.4): `memory_context`, `memory_search`, `memory_get`, `memory_propose`, `memory_proposals`, so skills and prompts carry over. `initialize` and `tools/list` must answer while the computer is offline: the computer sends its tool descriptors when it connects (a cloud variant that mentions `queued` and leaves out the panel's localhost link), and the service keeps those descriptors — never memory.
 - **The local side** (OpenMyMemo): the bridge runs in the process that serves the panel for the folder (`openmymemo serve`, the Mac app's server, or a plugin's MCP process serving the panel; one per folder, §14). It keeps one outbound WebSocket to the service, answers relayed tool calls by running the same code the stdio and HTTP MCP use, and reconnects with backoff.
 - **Identity of web apps locally:** each OAuth client becomes its own local connector — `cloud-chatgpt`, `cloud-claude`, or `cloud-<slug>` for others, derived from the verified client id URL or redirect host, never from the name a client claims — shown as "ChatGPT (web)", "Claude (web)", …, created on first use with the defaults (all topics except private ones, `write: propose`). Read scope, writing mode, blocked topics, "what AI sees" and revocation work as for any app. A revoked connector answers every relayed call with "revoked", and the service passes that on.
 - **Writes** always become proposals locally and follow the connector's writing mode exactly as for a local app (§5.5): with the default `write: propose`, additions apply and show up in the digest while changes to memories the person wrote wait; with `write: auto`, those changes apply too and stay undoable; anything private always waits. The cloud never applies anything itself.
@@ -547,8 +547,8 @@ The MyMemo Cloud row on the Connectors page shows: signed in as, online or offli
 ### 16.8 Built where
 
 - **OpenMyMemo** (this repo): `src/openmymemo/cloud.py` (link state, the WebSocket bridge, relayed calls through the existing tool code, queue draining), the callback route and `/api/cloud/*` in `web.py`, `openmymemo cloud …` in `cli.py`, the catalog entry and panel row, tests against a fake service. It adds two dependencies: `websockets` (the standard library has no WebSocket client) and `cryptography>=48` declared directly (HPKE; it is already installed through `mcp`).
-- **mymemo-service:** the OAuth authorization server for MCP clients, `/openmymemo/mcp`, device linking, the bridge endpoint with presence and routing across pods, the encrypted queue, entitlements and limits. Detailed in its design note (`docs/design-notes/openmymemo-cloud-bridge-2026-10-12.md` in that repo), including the prerequisites (WebSocket support in its uvicorn, public paths, WAF rules, secrets, `LOGURU_DIAGNOSE=NO`).
-- **mymemo-web:** the consent page for the OAuth flow and a MyMemo Cloud section in account settings (linked computer, unlink, queued count).
+- **The MyMemo service** (closed source): the OAuth authorization server for MCP clients, `/openmymemo/mcp`, device linking, the bridge endpoint, the encrypted queue, entitlements and limits. This repo depends only on the wire protocol, pinned by the fixtures in `tests/fixtures/cloud/`.
+- **The MyMemo web app** (closed source): the consent page for the OAuth flow and a MyMemo Cloud section in account settings (linked computer, unlink, queued count).
 - **Order:** the service's OAuth and endpoint with live relay, and the local bridge (phase 1); the offline queue (phase 2); the ChatGPT app directory listing (later).
 
 ### 16.9 Open questions
