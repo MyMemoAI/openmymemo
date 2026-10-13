@@ -4,6 +4,7 @@ Every test has its own HOME, OPENMYMEMO_CLOUD_DIR and a local OPENMYMEMO_CLOUD_U
 reaches MyMemo or touches this computer's real cloud.json.
 """
 
+import inspect
 import json
 import os
 import stat
@@ -157,7 +158,7 @@ def test_hello_carries_the_cloud_variant_of_this_installations_tools(vault):
     # Only memory_propose differs from the local tools: it mentions "queued", which only the cloud returns.
     local = {t.name: t for t in anyio.run(build_server(vault).list_tools)}
     for tool in ours["tools"]:
-        description = local[tool["name"]].description
+        description = inspect.cleandoc(local[tool["name"]].description)
         assert (tool["description"] != description) == (tool["name"] == "memory_propose")
     assert '"queued"' in next(t for t in ours["tools"] if t["name"] == "memory_propose")["description"]
 

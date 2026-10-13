@@ -31,6 +31,7 @@ import base64
 import contextlib
 import hashlib
 import html
+import inspect
 import ipaddress
 import json
 import logging
@@ -626,7 +627,11 @@ class Bridge:
     # -- what the service is told --
 
     async def tools(self) -> list[dict]:
-        return [t.model_dump(by_alias=True, exclude_none=True, mode="json") for t in await self._server.list_tools()]
+        tools = [t.model_dump(by_alias=True, exclude_none=True, mode="json") for t in await self._server.list_tools()]
+        for t in tools:  # docstrings: Python 3.13 strips their indentation, older ones don't; the service sees one
+            if isinstance(t.get("description"), str):
+                t["description"] = inspect.cleandoc(t["description"])
+        return tools
 
     async def hello(self) -> dict:
         from .mcp_server import INSTRUCTIONS
