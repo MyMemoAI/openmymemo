@@ -113,11 +113,12 @@ exec "$app/Contents/MacOS/uv" run --project "$core" {uv_args} openmymemo "$@"
         )
     }
 
-    /// Write the launcher if it changed: to a temporary file next to it, then renamed into place, so an AI
-    /// app starting it at that moment runs either the old or the new one, never half of one.
+    /// Write the launcher if it changed or isn't executable: to a temporary file next to it, then renamed
+    /// into place, so an AI app starting it at that moment runs either the old or the new one, never half.
     pub fn write(&self) -> Result<(), String> {
         let text = self.script();
-        if fs::read_to_string(self.path).is_ok_and(|old| old == text) {
+        let executable = fs::metadata(self.path).is_ok_and(|m| m.permissions().mode() & 0o777 == 0o755);
+        if executable && fs::read_to_string(self.path).is_ok_and(|old| old == text) {
             return Ok(());
         }
         let dir = self.path.parent().ok_or("The launcher has no folder")?;
@@ -291,6 +292,17 @@ mod tests {
         let out = s.run(&["mcp"]);
         assert!(stdout(&out).starts_with(&format!("uv from {}/", app.display())), "{}", stdout(&out));
         assert!(stdout(&out).contains(&format!("env={} ", build_env(&s.support, &app).display())), "{}", stdout(&out));
+    }
+
+    #[test]
+    fn a_launcher_that_lost_its_exec_bit_is_written_again() {
+        let s = Setup::new("mode");
+        s.install_venv(true);
+        s.run(&[]);
+        fs::set_permissions(&s.launcher, fs::Permissions::from_mode(0o644)).unwrap();
+        let out = s.run(&["--version"]);
+        assert!(out.status.success(), "{out:?}");
+        assert_eq!(fs::metadata(&s.launcher).unwrap().permissions().mode() & 0o777, 0o755);
     }
 
     #[test]
