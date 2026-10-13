@@ -80,8 +80,8 @@ const line = computed<{ text: string; tone: Tone }>(() => {
   else if (c.reason === "replaced") state = { key: "replaced", tone: "wait" };
   else if (c.reason === "key") state = { key: "key", tone: "danger" };
   else if (c.reason === "unlinked") state = { key: "unlinked", tone: "muted" };
+  else if (c.reason === "offline") state = { key: "offline", tone: "wait" }; // also while it tries again
   else if (c.state === "connecting") state = { key: "connecting", tone: "wait" };
-  else if (c.reason === "offline") state = { key: "offline", tone: "wait" };
   else state = { key: "stopped", tone: "muted" };
   const last = c.online && c.last_call_at ? t("cloud.lastCall", { time: relTime(c.last_call_at) }) : "";
   return { text: [t(`cloud.state.${state.key}`), who, last].filter(Boolean).join(" · "), tone: state.tone };
