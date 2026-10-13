@@ -32,15 +32,61 @@ use crate::core::{Core, Counts, Paths, Proposal};
 
 const HIDDEN_ARG: &str = "--hidden";
 
-/// The app's own settings, in ~/Library/Application Support/<id>/settings.json.
-#[derive(Clone, Serialize, Deserialize)]
+/// Light or dark, or as macOS is set.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Appearance {
+    Light,
+    Dark,
+    /// Also what an unknown value (from a newer version) reads as.
+    #[default]
+    #[serde(other)]
+    System,
+}
+
+impl Appearance {
+    /// The app's appearance: windows, the panel in them (WebKit's prefers-color-scheme follows the window),
+    /// sheets and menus. None follows the system.
+    fn theme(self) -> Option<tauri::Theme> {
+        match self {
+            Appearance::System => None,
+            Appearance::Light => Some(tauri::Theme::Light),
+            Appearance::Dark => Some(tauri::Theme::Dark),
+        }
+    }
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// The app's own settings, in ~/Library/Application Support/<id>/settings.json. Keys added later have
+/// defaults, so a file from an older version (only `vault`) still loads.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 struct Settings {
+    #[serde(default = "default_vault")]
     vault: PathBuf,
+    #[serde(default)]
+    appearance: Appearance,
+    /// A notification when an AI app changes something or something starts waiting.
+    #[serde(default = "yes")]
+    notifications: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings { vault: default_vault(), appearance: Appearance::System, notifications: true }
+    }
 }
 
 struct Shared {
+    /// As saved in settings.json.
     settings: Mutex<Settings>,
     settings_path: PathBuf,
+    /// The memory folder in use: the saved one, or OPENMYMEMO_HOME (as for the CLI) in development.
+    vault: Mutex<PathBuf>,
+    /// ~/Library/Logs/<id>/core.log, which Settings → Help reveals.
+    log: PathBuf,
     /// The port the window's panel comes from; 0 while the setup page shows.
     port: AtomicU16,
     /// Set when the memory folder changed: the monitor restarts the server on the new folder.
@@ -65,15 +111,46 @@ fn dirs_home() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
 }
 
-/// OPENMYMEMO_HOME (as for the CLI) overrides the saved folder, for development.
-fn load_settings(path: &PathBuf) -> Settings {
-    if let Some(home) = std::env::var_os("OPENMYMEMO_HOME").filter(|v| !v.is_empty()) {
-        return Settings { vault: PathBuf::from(home) };
+fn load_settings(path: &Path) -> Settings {
+    std::fs::read_to_string(path).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+}
+
+impl Shared {
+    fn new(settings_path: PathBuf, launcher: PathBuf, log: PathBuf) -> Self {
+        let settings = load_settings(&settings_path);
+        // OPENMYMEMO_HOME (as for the CLI) overrides the saved folder, for development; it isn't saved.
+        let vault = std::env::var_os("OPENMYMEMO_HOME").filter(|v| !v.is_empty()).map(PathBuf::from);
+        Shared {
+            vault: Mutex::new(vault.unwrap_or_else(|| settings.vault.clone())),
+            settings: Mutex::new(settings),
+            settings_path,
+            log,
+            port: AtomicU16::new(0),
+            restart: AtomicBool::new(false),
+            retry: AtomicBool::new(false),
+            launcher,
+            last_status: Mutex::new(String::new()),
+            splash_url: Mutex::new(None),
+            tray: Mutex::new(None),
+            review_item: Mutex::new(None),
+        }
     }
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or(Settings { vault: default_vault() })
+
+    fn vault(&self) -> PathBuf {
+        self.vault.lock().unwrap().clone()
+    }
+
+    /// Change the saved settings and write them to settings.json; nothing changes if writing fails.
+    fn save(&self, change: impl FnOnce(&mut Settings)) -> Result<(), String> {
+        let mut settings = self.settings.lock().unwrap();
+        let mut next = settings.clone();
+        change(&mut next);
+        let dir = self.settings_path.parent().ok_or("No settings folder")?;
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        std::fs::write(&self.settings_path, serde_json::to_string_pretty(&next).unwrap()).map_err(|e| e.to_string())?;
+        *settings = next;
+        Ok(())
+    }
 }
 
 fn main_window(app: &AppHandle) -> Option<WebviewWindow> {
@@ -132,8 +209,13 @@ fn reveal_path(path: String) -> Result<(), String> {
     let mut cmd = std::process::Command::new("/usr/bin/open");
     if path.is_dir() {
         cmd.arg(&path);
-    } else {
+    } else if path.exists() {
         cmd.arg("-R").arg(&path);
+    } else if let Some(folder) = path.parent().filter(|p| p.is_dir()) {
+        // A file not written yet, such as the log before the app has started a server: its folder.
+        cmd.arg(folder);
+    } else {
+        return Err(format!("{} doesn't exist yet.", path.display()));
     }
     cmd.status().map(|_| ()).map_err(|e| e.to_string())
 }
@@ -142,19 +224,39 @@ fn reveal_path(path: String) -> Result<(), String> {
 struct AppSettings {
     vault: PathBuf,
     autostart: bool,
+    appearance: Appearance,
+    notifications: bool,
     version: String,
     /// The `openmymemo` command for terminals and other MCP apps.
     launcher: PathBuf,
+    /// The server's log.
+    log: PathBuf,
 }
 
 #[tauri::command]
 fn app_settings(app: AppHandle, shared: tauri::State<Arc<Shared>>) -> AppSettings {
+    let settings = shared.settings.lock().unwrap().clone();
     AppSettings {
-        vault: shared.settings.lock().unwrap().vault.clone(),
+        vault: shared.vault(),
         autostart: app.autolaunch().is_enabled().unwrap_or(false),
+        appearance: settings.appearance,
+        notifications: settings.notifications,
         version: app.package_info().version.to_string(),
         launcher: shared.launcher.clone(),
+        log: shared.log.clone(),
     }
+}
+
+#[tauri::command]
+fn set_appearance(app: AppHandle, shared: tauri::State<Arc<Shared>>, appearance: Appearance) -> Result<(), String> {
+    shared.save(|s| s.appearance = appearance)?;
+    app.set_theme(appearance.theme());
+    Ok(())
+}
+
+#[tauri::command]
+fn set_notifications(shared: tauri::State<Arc<Shared>>, enabled: bool) -> Result<(), String> {
+    shared.save(|s| s.notifications = enabled)
 }
 
 /// Retry on the setup page: start again now (the monitor otherwise backs off up to a minute).
@@ -172,7 +274,7 @@ fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
 #[tauri::command]
 async fn choose_vault(app: AppHandle) -> Result<(), String> {
     let shared = app.state::<Arc<Shared>>().inner().clone();
-    let current = shared.settings.lock().unwrap().vault.clone();
+    let current = shared.vault();
     let picked = app
         .dialog()
         .file()
@@ -186,15 +288,12 @@ async fn choose_vault(app: AppHandle) -> Result<(), String> {
 /// Switch to `picked`, unless the server would refuse it: then nothing is saved, and the current folder
 /// and its server stay. Returns whether anything changed.
 fn use_vault(shared: &Shared, picked: PathBuf) -> Result<bool, String> {
-    if picked == shared.settings.lock().unwrap().vault {
+    if picked == shared.vault() {
         return Ok(false);
     }
     core::check_folder(&picked)?;
-    let settings = Settings { vault: picked };
-    let dir = shared.settings_path.parent().ok_or("No settings folder")?;
-    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    std::fs::write(&shared.settings_path, serde_json::to_string_pretty(&settings).unwrap()).map_err(|e| e.to_string())?;
-    *shared.settings.lock().unwrap() = settings;
+    shared.save(|s| s.vault = picked.clone())?;
+    *shared.vault.lock().unwrap() = picked;
     shared.restart.store(true, Ordering::SeqCst);
     Ok(true)
 }
@@ -225,7 +324,8 @@ fn notify_new(app: &AppHandle, port: u16, seen: &mut HashSet<String>, first: boo
     let new_applied: Vec<&Proposal> = applied.iter().filter(|p| !seen.contains(&p.id)).collect();
     let new_waiting: Vec<&Proposal> = waiting.iter().filter(|p| !seen.contains(&p.id)).collect();
     seen.extend(applied.iter().chain(waiting.iter()).map(|p| p.id.clone()));
-    if first || (new_applied.is_empty() && new_waiting.is_empty()) {
+    let wanted = app.state::<Arc<Shared>>().settings.lock().unwrap().notifications;
+    if first || !wanted || (new_applied.is_empty() && new_waiting.is_empty()) {
         return;
     }
     let mut names: Vec<String> = Vec::new();
@@ -340,14 +440,13 @@ fn monitor(app: AppHandle, paths: Paths) {
         return;
     }
     let shared = app.state::<Arc<Shared>>().inner().clone();
-    let vault = shared.settings.lock().unwrap().vault.clone();
-    let mut core = Core::new(vault, paths, core::PORTS);
+    let mut core = Core::new(shared.vault(), paths, core::PORTS);
     let mut last_counts: Option<Counts> = None;
     let mut seen: HashSet<String> = HashSet::new();
     let mut failures: u32 = 0;
     loop {
         if shared.restart.swap(false, Ordering::SeqCst) {
-            core.set_vault(shared.settings.lock().unwrap().vault.clone());
+            core.set_vault(shared.vault());
             failures = 0;
             shared.port.store(0, Ordering::SeqCst);
             last_counts = None;
@@ -555,8 +654,11 @@ fn on_new_window(url: &Url) -> NewWindowResponse<tauri::Wry> {
 
 fn build_window(app: &AppHandle, visible: bool) -> tauri::Result<WebviewWindow> {
     let shared = app.state::<Arc<Shared>>().inner().clone();
+    let theme = shared.settings.lock().unwrap().appearance.theme();
     let window = tauri::WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         .title("OpenMyMemo")
+        // Applied as the window is created, before it shows, so a chosen appearance doesn't flash.
+        .theme(theme)
         .inner_size(1280.0, 860.0)
         .min_inner_size(900.0, 560.0)
         .title_bar_style(TitleBarStyle::Overlay)
@@ -628,7 +730,15 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec![HIDDEN_ARG])))
-        .invoke_handler(tauri::generate_handler![reveal_path, app_settings, set_autostart, choose_vault, retry_start])
+        .invoke_handler(tauri::generate_handler![
+            reveal_path,
+            app_settings,
+            set_autostart,
+            set_appearance,
+            set_notifications,
+            choose_vault,
+            retry_start
+        ])
         .menu(|app| app_menu(app))
         .on_menu_event(|app, event| on_menu(app, event.id().as_ref()))
         .setup(|app| {
@@ -650,18 +760,10 @@ fn main() {
             };
             write_launcher(&handle, &paths, launcher::bundle_of(&exe).as_deref());
 
-            let shared = Arc::new(Shared {
-                settings: Mutex::new(load_settings(&settings_path)),
-                settings_path,
-                port: AtomicU16::new(0),
-                restart: AtomicBool::new(false),
-                retry: AtomicBool::new(false),
-                launcher: paths.launcher.clone(),
-                last_status: Mutex::new(String::new()),
-                splash_url: Mutex::new(None),
-                tray: Mutex::new(None),
-                review_item: Mutex::new(None),
-            });
+            let shared = Arc::new(Shared::new(settings_path, paths.launcher.clone(), paths.log.clone()));
+            // The whole app: menus, the menu-bar item's menu and dialogs too (the window also gets it as
+            // it is created, build_window).
+            handle.set_theme(shared.settings.lock().unwrap().appearance.theme());
             app.manage(shared);
 
             let hidden = std::env::args().any(|a| a == HIDDEN_ARG);
@@ -725,6 +827,49 @@ mod tests {
     }
 
     #[test]
+    fn settings_from_older_versions_load_with_defaults() {
+        let old: Settings = serde_json::from_str(r#"{ "vault": "/Users/me/Memory" }"#).unwrap();
+        assert_eq!(
+            old,
+            Settings { vault: PathBuf::from("/Users/me/Memory"), appearance: Appearance::System, notifications: true }
+        );
+        let set: Settings =
+            serde_json::from_str(r#"{ "vault": "/m", "appearance": "dark", "notifications": false }"#).unwrap();
+        assert_eq!((set.appearance, set.notifications), (Appearance::Dark, false));
+        // A value from a newer version doesn't lose the folder.
+        let newer: Settings = serde_json::from_str(r#"{ "vault": "/m", "appearance": "sepia", "zoom": 2 }"#).unwrap();
+        assert_eq!((newer.vault, newer.appearance), (PathBuf::from("/m"), Appearance::System));
+        assert_eq!(serde_json::to_value(Appearance::Light).unwrap(), "light");
+        assert_eq!(Appearance::Dark.theme(), Some(tauri::Theme::Dark));
+        assert_eq!(Appearance::System.theme(), None);
+
+        let root = std::env::temp_dir().join(format!("openmymemo-desktop-{}-settings", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(load_settings(&root.join("missing.json")), Settings::default());
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("broken.json"), "{ not json").unwrap();
+        assert_eq!(load_settings(&root.join("broken.json")).vault, default_vault());
+    }
+
+    #[test]
+    fn saving_a_setting_keeps_the_others_and_never_saves_a_development_folder() {
+        let root = std::env::temp_dir().join(format!("openmymemo-desktop-{}-save", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("settings.json");
+        std::fs::write(&path, r#"{ "vault": "/Users/me/Memory" }"#).unwrap();
+        let shared = Shared::new(path.clone(), root.join("bin/openmymemo"), root.join("core.log"));
+        // As OPENMYMEMO_HOME does.
+        *shared.vault.lock().unwrap() = root.join("dev-vault");
+
+        shared.save(|s| s.appearance = Appearance::Dark).unwrap();
+        shared.save(|s| s.notifications = false).unwrap();
+        let saved: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved, serde_json::json!({ "vault": "/Users/me/Memory", "appearance": "dark", "notifications": false }));
+        assert_eq!(shared.vault(), root.join("dev-vault"));
+    }
+
+    #[test]
     fn an_unusable_folder_is_refused_and_the_working_one_kept() {
         let root = std::env::temp_dir().join(format!("openmymemo-desktop-{}-choose", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -732,22 +877,12 @@ mod tests {
         let busy = root.join("busy");
         std::fs::create_dir_all(&busy).unwrap();
         std::fs::write(busy.join("notes.txt"), "mine").unwrap();
-        let shared = Shared {
-            settings: Mutex::new(Settings { vault: current.clone() }),
-            settings_path: root.join("support/settings.json"),
-            port: AtomicU16::new(8787),
-            restart: AtomicBool::new(false),
-            retry: AtomicBool::new(false),
-            launcher: root.join("support/bin/openmymemo"),
-            last_status: Mutex::new(String::new()),
-            splash_url: Mutex::new(None),
-            tray: Mutex::new(None),
-            review_item: Mutex::new(None),
-        };
+        let shared = Shared::new(root.join("support/settings.json"), root.join("bin/openmymemo"), root.join("core.log"));
+        *shared.vault.lock().unwrap() = current.clone();
 
         let err = use_vault(&shared, busy).unwrap_err();
         assert!(err.contains("isn't empty"), "{err}");
-        assert_eq!(shared.settings.lock().unwrap().vault, current);
+        assert_eq!(shared.vault(), current);
         assert!(!shared.settings_path.exists() && !shared.restart.load(Ordering::SeqCst));
 
         // Recovery: an empty or new folder is accepted, saved, and the server restarts on it.

@@ -9,6 +9,8 @@
     "allow-reveal-path",
     "allow-app-settings",
     "allow-set-autostart",
+    "allow-set-appearance",
+    "allow-set-notifications",
     "allow-choose-vault",
     "allow-retry-start"
   ]
