@@ -77,6 +77,7 @@ const line = computed<{ text: string; tone: Tone }>(() => {
   let state: { key: string; tone: Tone };
   if (c.online) state = { key: "online", tone: "fresh" };
   else if (c.reason === "plan") state = { key: "plan", tone: "danger" };
+  else if (c.reason === "refused") state = { key: "refused", tone: "danger" };
   else if (c.reason === "replaced") state = { key: "replaced", tone: "wait" };
   else if (c.reason === "key") state = { key: "key", tone: "danger" };
   else if (c.reason === "unlinked") state = { key: "unlinked", tone: "muted" };
@@ -92,7 +93,7 @@ const fix = computed<"tryAgain" | "useHere" | "relink" | null>(() => {
   const c = s.value;
   if (!c?.linked) return null;
   if (!c.this_folder || c.reason === "key") return "relink";
-  if (c.reason === "plan") return "tryAgain";
+  if (c.reason === "plan" || c.reason === "refused") return "tryAgain";
   if (c.reason === "replaced") return "useHere";
   return null;
 });

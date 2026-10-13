@@ -218,7 +218,8 @@ export interface CloudStatus {
   linked_at: string | null;
   state: "connecting" | "online" | "waiting" | "stopped";
   /**
-   * offline (reconnecting) · plan (the plan doesn't include it; checked hourly) · replaced (another OpenMyMemo took
+   * offline (reconnecting) · refused (turned away, but MyMemo didn't say the link is gone; retrying) · plan (the
+   * plan doesn't include it; checked hourly) · replaced (another OpenMyMemo took
    * over) · key (link again) · unlinked · closed · folder (linked to another folder) · not_running.
    */
   reason: string | null;

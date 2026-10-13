@@ -266,8 +266,13 @@ def _loopback(url: str) -> bool:
         return False
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+        return None  # the 3xx itself comes back as the answer
+
+
 def _request(method: str, url: str, *, token: str | None = None, body: dict | None = None,
-             timeout: float = 20.0) -> tuple[int, Any]:
+             timeout: float = 20.0, follow_redirects: bool = True) -> tuple[int, Any]:
     data = json.dumps(body).encode() if body is not None else None
     headers = {"Accept": "application/json", "User-Agent": f"OpenMyMemo/{__version__}"}
     if data is not None:
@@ -276,7 +281,10 @@ def _request(method: str, url: str, *, token: str | None = None, body: dict | No
         headers["Authorization"] = f"Bearer {token}"
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
     # A local service (tests, development) is never reached through a proxy.
-    opener = urllib.request.build_opener(*([urllib.request.ProxyHandler({})] if _loopback(url) else []))
+    handlers: list[urllib.request.BaseHandler] = [urllib.request.ProxyHandler({})] if _loopback(url) else []
+    if not follow_redirects:
+        handlers.append(_NoRedirect())
+    opener = urllib.request.build_opener(*handlers)
     try:
         with opener.open(req, timeout=timeout) as resp:
             status, raw = resp.status, resp.read()
@@ -289,6 +297,19 @@ def _request(method: str, url: str, *, token: str | None = None, body: dict | No
     except ValueError:
         payload = None
     return status, payload
+
+
+def device_gone(link: Link) -> bool:
+    """Whether MyMemo itself says it no longer knows this device, which is the only reason to delete ``cloud.json``
+    (private key included) and revoke the web apps: ``GET /openmymemo/device`` with the device token answering
+    exactly HTTP 401 ``{"error": "invalid_token"}``, with no redirect followed. Anything else (a 403 or an HTML page
+    from a proxy or firewall in front of the service, a redirect, no network, a 200) keeps the link."""
+    try:
+        status, data = _request("GET", f"{link.service}/openmymemo/device", token=link.device_token,
+                                follow_redirects=False)
+    except CloudError:
+        return False
+    return status == 401 and isinstance(data, dict) and data.get("error") == "invalid_token"
 
 
 def _service_message(payload: Any, status: int) -> str:
@@ -526,7 +547,7 @@ class Bridge:
         self.link = link
         self.timing = timing or Timing()
         self.state = "connecting"  # connecting | online | waiting | stopped
-        self.reason: str | None = None  # offline | plan | replaced | unlinked | key | closed
+        self.reason: str | None = None  # offline | refused | plan | replaced | unlinked | key | closed
         self.close_code: int | None = None
         self.welcome: dict | None = None
         self.queued: int | None = None
@@ -575,39 +596,39 @@ class Bridge:
         self._send_lock = asyncio.Lock()
         self.started.set()
         attempt = 0
-        refusals = 0  # upgrades refused in a row with 401/403
         try:
             while not self._stopping:
                 current = load_link()
                 if current is None or current.device_id != self.link.device_id:
                     return self._set("stopped", "unlinked")
                 self.link = current
-                self._set("connecting", self.reason if self.reason in ("offline", "plan") else None)
+                self._set("connecting", self.reason if self.reason in ("offline", "refused", "plan") else None)
                 self._bye_ms = None
                 self._session_task = task = asyncio.create_task(self._session())
                 await asyncio.wait({task})
                 if task.cancelled() or self._stopping:
                     break
-                code, online_for = None, 0.0
+                code, online_for, refused = None, 0.0, False
                 try:
                     code, online_for = task.result()
-                    refusals = 0
                 except Exception as e:  # noqa: BLE001 - a failed connection is ordinary; only its kind is logged
                     status = getattr(getattr(e, "response", None), "status_code", None)
-                    refusals = refusals + 1 if status in (401, 403) else 0
-                    if refusals >= 2:
-                        # Refused before the upgrade, twice in a row: the device token is no longer valid. Once
-                        # isn't enough to delete the private key: a proxy in front of the service can say 403 too.
-                        log.info("MyMemo Cloud: the service refused this computer (HTTP %s); unlinking", status)
-                        self._forget()
-                        return self._set("stopped", "unlinked")
+                    refused = status in (401, 403)  # turned away before the upgrade
                     log.info("MyMemo Cloud: couldn't connect (%s%s)", type(e).__name__, f" {status}" if status else "")
                 self.close_code = code
                 if online_for >= self.timing.reset_after:
                     attempt = 0
-                if code == 4401:
-                    self._forget()
-                    return self._set("stopped", "unlinked")
+                if refused or code == 4401:
+                    # Only MyMemo's own word that the device is gone deletes the link; a refusal can also come from
+                    # a firewall or proxy in front of it, or from the bridge being switched off for a while.
+                    if await asyncio.to_thread(device_gone, self.link):
+                        log.info("MyMemo Cloud: MyMemo no longer knows this computer; unlinking")
+                        self._forget()
+                        return self._set("stopped", "unlinked")
+                    self._set("waiting", "refused")
+                    await self._sleep(backoff_delay(attempt, self.timing.backoff_base, self.timing.backoff_cap))
+                    attempt += 1
+                    continue
                 if code == 4409:
                     return self._set("stopped", "replaced")
                 if code == 4410:

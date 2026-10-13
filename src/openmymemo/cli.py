@@ -673,6 +673,7 @@ BRIDGE_STATES = {
     "online": "online",
     "connecting": "connecting…",
     "offline": "offline, reconnecting",
+    "refused": "turned away by MyMemo (it didn't say the link is gone), trying again",
     "plan": "paused: your MyMemo plan doesn't include MyMemo Cloud (it checks again every hour)",
     "replaced": "stopped: another OpenMyMemo took over this link",
     "key": "stopped: run `openmymemo cloud link` again",

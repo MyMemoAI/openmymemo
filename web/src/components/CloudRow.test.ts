@@ -136,6 +136,13 @@ describe("CloudRow", () => {
     expect(button(plan, "Try again")).toBeTruthy();
     plan.unmount();
 
+    api.cloud.mockResolvedValue(linked({ online: false, state: "waiting", reason: "refused" }));
+    const refused = mountRow();
+    await flushPromises();
+    expect(refused.text()).toContain("MyMemo turned the connection away; trying again");
+    expect(button(refused, "Try again")).toBeTruthy();
+    refused.unmount();
+
     api.cloud.mockResolvedValue(linked({ this_folder: false, folder: "/Users/sam/Old", online: false }));
     const moved = mountRow();
     await flushPromises();

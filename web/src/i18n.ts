@@ -319,6 +319,7 @@ const strings: Record<string, string> = {
   "cloud.state.connecting": "Connecting…",
   "cloud.state.offline": "Offline — reconnecting",
   "cloud.state.plan": "Your MyMemo plan doesn't include MyMemo Cloud",
+  "cloud.state.refused": "MyMemo turned the connection away; trying again",
   "cloud.state.replaced": "Another OpenMyMemo on this computer took over",
   "cloud.state.key": "Sign in again to link this computer",
   "cloud.state.unlinked": "Unlinked",

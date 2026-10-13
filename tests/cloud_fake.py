@@ -18,7 +18,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit
 
 import uvicorn
 from fastapi import FastAPI, Request, WebSocket
-from fastapi.responses import JSONResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from openmymemo.cloud import SUBPROTOCOL, pkce_challenge, unb64u
 
@@ -88,7 +88,11 @@ class FakeService:
         self.unlinks: list[str | None] = []
         self.handshakes: list[dict[str, str]] = []
         self.conns: list[FakeConn] = []
-        self.refuse_upgrades = 0  # how many upgrades to answer with HTTP 403, as for a token the service doesn't know
+        self.refuse_upgrades = 0  # how many upgrades to answer with HTTP 403 even for a device it knows
+        self.device_known = True  # False once unlinked: its token gets 401 invalid_token, its upgrades 403
+        self.waf = False  # a firewall in front of the service: an HTML 403 for every request
+        self.device_redirect = False  # GET /openmymemo/device redirects to a page that says invalid_token
+        self.device_checks: list[str | None] = []  # the Authorization header of each GET /openmymemo/device
         self.choose_subprotocol = True  # False: accept without echoing the offered subprotocol
         self.close_after_hello: int | None = None  # close with this code instead of answering welcome
         self.loop: asyncio.AbstractEventLoop | None = None
@@ -145,6 +149,29 @@ class FakeService:
 
     def _build(self) -> FastAPI:
         app = FastAPI()
+        invalid = {"WWW-Authenticate": 'Bearer error="invalid_token"'}
+
+        @app.middleware("http")
+        async def firewall(request: Request, call_next):
+            if self.waf:
+                return HTMLResponse("<html><body>Sorry, you have been blocked</body></html>", status_code=403)
+            return await call_next(request)
+
+        @app.get("/openmymemo/device")
+        async def device(request: Request):  # what the service answers (mymemo-service routers/openmymemo.py)
+            auth = request.headers.get("authorization")
+            self.device_checks.append(auth)
+            if self.device_redirect:
+                return RedirectResponse("/elsewhere/device", status_code=302)
+            if auth != f"Bearer {self.token}" or not self.device_known:
+                return JSONResponse({"error": "invalid_token"}, status_code=401, headers=invalid)
+            return JSONResponse({"member": self.link_response["member"], "plan": self.link_response["plan"],
+                                 "online": any(not c.closed.is_set() for c in self.conns), "queued": 0,
+                                 "last_call_at": None, "clients": []})
+
+        @app.get("/elsewhere/device")
+        async def elsewhere():
+            return JSONResponse({"error": "invalid_token"}, status_code=401, headers=invalid)
 
         @app.get("/openmymemo/oauth/authorize")
         async def consent(request: Request):  # a real browser, for trying the panel by hand: allows at once
@@ -167,8 +194,9 @@ class FakeService:
         async def unlink(request: Request):
             auth = request.headers.get("authorization")
             self.unlinks.append(auth)
-            if auth != f"Bearer {self.token}":
-                return Response(status_code=401)
+            if auth != f"Bearer {self.token}" or not self.device_known:
+                return JSONResponse({"error": "invalid_token"}, status_code=401, headers=invalid)
+            self.device_known = False
             for conn in self.conns:
                 if not conn.closed.is_set():
                     try:
@@ -183,7 +211,8 @@ class FakeService:
             headers = {k.lower(): v for k, v in ws.headers.items()}
             self.handshakes.append(headers)
             # handshake.json: auth is checked before the upgrade is accepted; any Origin is refused.
-            if self.refuse_upgrades or headers.get("authorization") != f"Bearer {self.token}" or "origin" in headers:
+            if (self.refuse_upgrades or self.waf or not self.device_known or "origin" in headers
+                    or headers.get("authorization") != f"Bearer {self.token}"):
                 self.refuse_upgrades = max(0, self.refuse_upgrades - 1)
                 await ws.close(code=1008)
                 return

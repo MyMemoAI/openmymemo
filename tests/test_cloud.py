@@ -449,6 +449,7 @@ def test_a_service_restart_reconnects_after_retry_after_ms(vault, fake, clouds):
 def test_4401_means_unlinked_elsewhere(vault, fake, clouds):
     c, conn = online(vault, fake, clouds)
     call(conn, fixture("bridge/call.json"))
+    fake.device_known = False  # unlinked on the website
     conn.close(4401, "unlinked")
     wait_until(lambda: c.status()["linked"] is False)
     assert cloud.load_link() is None and Connectors(vault).list() == []  # web apps kept as revoked tombstones
@@ -487,26 +488,49 @@ def test_4403_waits_for_the_plan_until_the_panel_asks(vault, fake, clouds):
     wait_until(lambda: c.status()["online"])
 
 
-def test_a_handshake_refused_twice_in_a_row_means_the_token_is_gone(vault, fake, clouds):
+def test_a_refused_handshake_unlinks_only_when_mymemo_says_the_device_is_gone(vault, fake, clouds):
     linked(vault, fake.base)
     Connectors(vault).ensure("cloud-chatgpt", "ChatGPT (web)", kind="cloud")
-    fake.refuse_upgrades = 10**6
+    fake.device_known = False  # unlinked on the website while this computer was off
     c = Cloud(vault, 8787, FAST)
     clouds.append(c)
     c.start()
     wait_until(lambda: not c.status()["linked"])
-    assert len(fake.handshakes) == 2 and fake.conns == [] and cloud.load_link() is None
-    assert Connectors(vault).list() == []  # the web apps are revoked, as for 4401
+    assert len(fake.handshakes) == 1 and fake.device_checks == [f"Bearer {fake.token}"]
+    assert cloud.load_link() is None and Connectors(vault).list() == []  # the web apps are revoked, as for 4401
 
 
-def test_one_refused_handshake_is_not_enough_to_forget_the_link(vault, fake, clouds):
+@pytest.mark.parametrize("why", ["live", "firewall", "redirect"])
+def test_a_refusal_mymemo_doesnt_confirm_keeps_the_link(why, vault, fake, clouds):
     linked(vault, fake.base)
-    fake.refuse_upgrades = 1  # a proxy in front of the service may say 403 once
+    Connectors(vault).ensure("cloud-chatgpt", "ChatGPT (web)", kind="cloud")
+    fake.refuse_upgrades = 10**6  # live: the device exists but the upgrade is turned away (a deploy, a flag)
+    fake.waf = why == "firewall"  # an HTML 403 for everything, the device check included
+    fake.device_redirect = why == "redirect"  # the check is redirected to a page that says invalid_token
     c = Cloud(vault, 8787, FAST)
     clouds.append(c)
     c.start()
+    wait_until(lambda: c.status()["reason"] == "refused" and len(fake.handshakes) >= 3)
+    assert cloud.load_link() is not None and [x.id for x in Connectors(vault).list()] == ["cloud-chatgpt"]
+    assert c.status()["linked"] and not c.status()["online"]
+    fake.refuse_upgrades, fake.waf = 0, False
+    c.reconnect()  # the panel's "Try again"
     wait_until(lambda: c.status()["online"])
-    assert len(fake.handshakes) == 2 and cloud.load_link() is not None
+
+
+def test_mymemo_must_say_invalid_token_itself():
+    unreachable = Link(service="http://127.0.0.1:9", device_id="d", device_token="omd_x", private_key="", key_id="",
+                       vault="/nowhere")
+    assert cloud.device_gone(unreachable) is False
+
+
+def test_4401_without_mymemo_confirming_keeps_the_link(vault, fake, clouds):
+    c, conn = online(vault, fake, clouds)
+    call(conn, fixture("bridge/call.json"))
+    conn.close(4401, "unlinked")  # but GET /openmymemo/device still knows this computer
+    wait_until(lambda: c.status()["reason"] == "refused" or c.status()["online"])
+    assert cloud.load_link() is not None and [x.id for x in Connectors(vault).list()] == ["cloud-chatgpt"]
+    fake.connection(1)
 
 
 def test_a_service_that_echoes_no_subprotocol_is_fine(vault, fake, clouds):
