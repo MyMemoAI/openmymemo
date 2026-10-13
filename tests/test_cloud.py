@@ -781,7 +781,8 @@ def test_queued_proposals_are_filed_as_their_web_app_with_their_time_and_acknowl
     assert ack(conn, qid) == fixture("bridge/ack.json")  # {"type": "ack", "qid": …, "outcome": "stored"}
     p = Proposals(vault).list(connector_id="cloud-chatgpt")[0]
     assert (p.connector_name, p.op, p.content) == ("ChatGPT (web)", "add", "Is training for a half marathon in March.")
-    assert p.created_at == "2026-10-12T21:04:05+00:00" and p.idempotency_key == qid  # not the AI's "chatgpt-41aa"
+    assert p.created_at == "2026-10-12T21:04:05+00:00" and p.queue_id == qid
+    assert p.idempotency_key == VECTOR["plaintext"]["params"]["arguments"]["idempotency_key"]  # the AI's own
     assert p.reason == "Mentioned while planning a week" and p.status == "applied"
     assert Connectors(vault).get("cloud-chatgpt").kind == "cloud"
     assert c.status()["queued"] == 0
@@ -826,6 +827,38 @@ def test_queued_items_that_cant_be_opened_or_filed(vault, fake, clouds):
     conn.send(item("q-revoked", {**good, "qid": "q-revoked"}))
     assert ack(conn, "q-revoked")["outcome"] == "rejected"
     assert Proposals(vault).list() == [] and Connectors(vault).list() == []
+    refused = [a for a in vault.activity() if a.get("result") == "rejected"]
+    assert refused[0]["queue_id"] == "q-revoked" and refused[0]["connector"] == "cloud-chatgpt"
+
+
+def test_a_queued_write_retried_live_is_one_proposal_and_traceable(vault, fake, clouds, queue_clock):
+    _, conn = online(vault, fake, clouds)
+    good = VECTOR["plaintext"]
+    args = {"op": "add", "content": "Keeps bees on the roof.", "topic": "goals", "idempotency_key": "ai-k1"}
+    conn.send(item("q-k1", {**good, "qid": "q-k1", "params": {"name": "memory_propose", "arguments": args}}))
+    assert ack(conn, "q-k1")["outcome"] == "stored"
+    filed = Proposals(vault).list(connector_id="cloud-chatgpt")
+    assert len(filed) == 1 and filed[0].queue_id == "q-k1" and filed[0].idempotency_key == "ai-k1"
+
+    relayed = {**fixture("bridge/call.json"), "client": {"slug": "chatgpt", "name": "ChatGPT", "verified": True}}
+    # ChatGPT retries the same call live once the computer is back: the same proposal, not a second one.
+    again = call(conn, {**relayed, "id": "c-retry", "params": {"name": "memory_propose", "arguments": args}})
+    assert again["result"]["structuredContent"]["proposal_id"] == filed[0].id
+    assert len(Proposals(vault).list(connector_id="cloud-chatgpt")) == 1
+    # memory_proposals matches the queued receipt to the proposal.
+    rows = call(conn, {**relayed, "id": "c-list", "params": {"name": "memory_proposals", "arguments": {}}})
+    rows = rows["result"]["structuredContent"]["proposals"]
+    assert [(r["proposal_id"], r["queue_id"]) for r in rows] == [(filed[0].id, "q-k1")]
+
+    # An item without a key of its own is filed under the queue id, so a replay is a duplicate.
+    plain = {"op": "add", "content": "Likes rainy mornings.", "topic": "goals"}
+    frame = item("q-plain", {**good, "qid": "q-plain", "params": {"name": "memory_propose", "arguments": plain}})
+    conn.send(frame)
+    assert ack(conn, "q-plain")["outcome"] == "stored"
+    conn.frames.clear()
+    conn.send(frame)
+    assert ack(conn, "q-plain")["outcome"] == "duplicate"
+    assert next(p for p in Proposals(vault).list() if p.queue_id == "q-plain").idempotency_key == "q-plain"
 
 
 def test_queued_items_are_filed_in_the_order_they_arrive(vault, fake, clouds):

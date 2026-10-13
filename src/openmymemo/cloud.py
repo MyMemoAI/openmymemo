@@ -21,8 +21,9 @@ tool calls the service relays from web apps, by running the same tool code as th
   ``tests/fixtures/cloud/bridge/close_codes.json``.
 * **The offline queue:** while this computer was offline, the service sealed web apps' ``memory_propose`` calls
   to its X25519 key (HPKE, RFC 9180). They arrive as ``item`` frames after connecting, in order; each is opened,
-  filed through ``proposals.py`` as its web app with the time it was made and ``idempotency_key = qid`` (so a
-  replay is a duplicate), and acknowledged: stored, duplicate, undecryptable or rejected.
+  filed through ``proposals.py`` as its web app with the time it was made, its ``queue_id`` and the AI's own
+  ``idempotency_key`` (the qid when it sent none), so a replay or a live retry is a duplicate, and acknowledged:
+  stored, duplicate, undecryptable or rejected (recorded in the activity log, never retried).
 
 The service never sees anything at rest in readable form, and nothing here logs tool arguments or results.
 """
@@ -617,8 +618,9 @@ def _queued_at(value: Any) -> str | None:
     return min(max(datetime.fromisoformat(parsed), now - QUEUE_MAX_AGE), now).isoformat(timespec="seconds")
 
 
-def _read_queued(plaintext: bytes, qid: str) -> tuple[dict, str, dict, str | None] | None:
-    """A queued ``memory_propose``: (client, op, the proposal's fields, when it was made); None if it isn't one."""
+def _read_queued(plaintext: bytes, qid: str) -> tuple[dict, str, dict, str | None, str | None] | None:
+    """A queued ``memory_propose``: (client, op, the proposal's fields, when it was made, the AI's own
+    idempotency key); None if it isn't one."""
     item = json.loads(plaintext)
     client = item.get("client") if isinstance(item, dict) else None
     params = item.get("params") if isinstance(item, dict) else None
@@ -631,7 +633,9 @@ def _read_queued(plaintext: bytes, qid: str) -> tuple[dict, str, dict, str | Non
     name = VERIFIED_WEB_APPS.get(slug) or (client["name"] if isinstance(client.get("name"), str) else slug)
     named = {"slug": slug, "name": name, "verified": slug in VERIFIED_WEB_APPS}
     fields = {k: args[k] for k in PROPOSE_FIELDS if isinstance(args.get(k), str)}
-    return named, str(args.get("op")), fields, _queued_at(item.get("received_at"))
+    key = args.get("idempotency_key")
+    key = key if isinstance(key, str) and 0 < len(key) <= 200 else None
+    return named, str(args.get("op")), fields, _queued_at(item.get("received_at")), key
 
 
 # ---- the bridge ------------------------------------------------------------------------------------------------
@@ -978,13 +982,15 @@ class Bridge:
             queued = None
         if queued is None:
             return "rejected"
-        client, op, fields, made_at = queued
+        client, op, fields, made_at, key = queued
         try:
             out = Proposals(self.vault).propose(
                 self._connector(client), op, **fields,
-                idempotency_key=qid,  # not the AI's own key: the queue id is what a replay carries
-                created_at=made_at)
+                # The AI's own key, so retrying the same call live once the computer is back is a duplicate;
+                # without one, the queue id, which a replayed item carries again.
+                idempotency_key=key or qid, created_at=made_at, queue_id=qid)
         except VaultError:  # revoked, read-only, a blocked topic, a bad proposal
+            self._refused(client, op, qid)
             return "rejected"
         return "duplicate" if out.get("deduplicated") or out.get("status") == "duplicate" else "stored"
 
@@ -1006,6 +1012,16 @@ class Bridge:
                 log.warning("MyMemo Cloud: a relayed call failed (%s)", type(e).__name__)
                 frame = _error(call_id, "internal", "OpenMyMemo couldn't answer this call.")
         await self._send(ws, frame)
+
+    def _refused(self, client: Mapping[str, Any], op: str, qid: str) -> None:
+        """Record a queued write turned down here, as its web app, or as MyMemo Cloud when that id belongs to an
+        app of the person's own."""
+        from .clients import CLOUD
+
+        cid = CLOUD_PREFIX + str(client["slug"])
+        known = next((c for c in Connectors(self.vault)._load() if c.id == cid), None)
+        who = cid if known is None or known.kind == "cloud" else CLOUD
+        self.vault.log_activity(who, "propose", op=op, queue_id=qid, result="rejected")
 
     def _connector(self, client: Mapping[str, Any]) -> Connector:
         cid = CLOUD_PREFIX + str(client["slug"])
