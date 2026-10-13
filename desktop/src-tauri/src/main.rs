@@ -5,9 +5,11 @@
 //! keeps the server running, follows its port, puts the number of changes to review next to the
 //! menu-bar icon, and notifies when an AI app changes something or something starts waiting.
 //! Closing the window keeps the app in the menu bar; it quits from the menu. On every start it writes the
-//! `openmymemo` launcher AI apps run (launcher.rs).
+//! `openmymemo` launcher AI apps run (launcher.rs), and opened from its disk image it offers to move itself
+//! to Applications (install.rs).
 
 mod core;
+mod install;
 mod launcher;
 
 use std::collections::HashSet;
@@ -23,7 +25,7 @@ use tauri::tray::{TrayIcon, TrayIconBuilder};
 use tauri::webview::DownloadEvent;
 use tauri::{AppHandle, LogicalPosition, Manager, RunEvent, TitleBarStyle, Url, WebviewUrl, WebviewWindow, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
-use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_notification::NotificationExt;
 
 use crate::core::{Core, Counts, Paths, Proposal};
@@ -263,7 +265,74 @@ fn update_badge(app: &AppHandle, counts: &Counts) {
     }
 }
 
+// ---- moving to Applications -------------------------------------------------------------------------
+
+/// Opened from its disk image or a translocated copy, offer to move the app to Applications. Returns true
+/// when the app is quitting to reopen from there. Only when opened from the Finder (launchd is the parent):
+/// running the binary from a terminal, as in development, is left alone.
+fn offer_move(app: &AppHandle) -> bool {
+    if unsafe { libc::getppid() } != 1 {
+        return false;
+    }
+    let Some(bundle) = std::env::current_exe().ok().and_then(|exe| launcher::bundle_of(&exe)) else { return false };
+    let Some(place) = install::transient(&bundle, install::is_read_only) else { return false };
+    eprintln!("OpenMyMemo: running from {}; offering to move it to Applications", bundle.display());
+    let ask = |title: &str, message: &str, ok: &str, cancel: &str| {
+        app.dialog()
+            .message(message)
+            .title(title)
+            .buttons(MessageDialogButtons::OkCancelCustom(ok.into(), cancel.into()))
+            .blocking_show()
+    };
+    let tell = |title: &str, message: &str| {
+        app.dialog().message(message).title(title).kind(MessageDialogKind::Warning).blocking_show();
+    };
+    if !ask(
+        "Move OpenMyMemo to Applications?",
+        "OpenMyMemo is running from its disk image. Move it to your Applications folder so it keeps working, and your AI apps can find it, after the disk image is gone.",
+        "Move to Applications",
+        "Not now",
+    ) {
+        return false;
+    }
+    let target_dir = Path::new("/Applications");
+    let dst = target_dir.join(launcher::APP_NAME);
+    let replace = std::fs::symlink_metadata(&dst).is_ok();
+    if replace {
+        let theirs = install::version_of(&dst).map(|v| format!(" {v}")).unwrap_or_default();
+        let ours = app.package_info().version.to_string();
+        if !ask(
+            "Replace OpenMyMemo in Applications?",
+            &format!("Applications already has OpenMyMemo{theirs}. Replace it with this copy ({ours})? If it is running, it quits first. Your memory folder isn't touched."),
+            "Replace",
+            "Cancel",
+        ) {
+            return false;
+        }
+    }
+    let volume = match &place {
+        install::Transient::DiskImage(volume) if install::is_disk_image(volume) => Some(volume.as_path()),
+        _ => None,
+    };
+    let moved = (if replace { install::quit(&dst) } else { Ok(()) })
+        .and_then(|_| install::copy_to(&bundle, target_dir, replace))
+        .and_then(|dst| install::relaunch_after_exit(&dst, volume));
+    match moved {
+        Ok(()) => {
+            app.exit(0);
+            true
+        }
+        Err(e) => {
+            tell("OpenMyMemo couldn't be moved", &format!("{e}\n\nYou can drag OpenMyMemo to Applications in the Finder instead."));
+            false
+        }
+    }
+}
+
 fn monitor(app: AppHandle, paths: Paths) {
+    if offer_move(&app) {
+        return;
+    }
     let shared = app.state::<Arc<Shared>>().inner().clone();
     let vault = shared.settings.lock().unwrap().vault.clone();
     let mut core = Core::new(vault, paths, core::PORTS);
