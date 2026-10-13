@@ -699,7 +699,7 @@ fn write_launcher(app: &AppHandle, paths: &Paths, bundle: Option<&Path>) {
     let file = launcher::Launcher {
         version: &version,
         path: &paths.launcher,
-        venv: &paths.venv(),
+        support: &paths.support,
         uv_env: &uv_env,
         uv_args: &core::UV_ARGS,
         app: bundle,

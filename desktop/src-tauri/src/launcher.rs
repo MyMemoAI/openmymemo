@@ -4,11 +4,13 @@
 //! and hands its path to the server as OPENMYMEMO_COMMAND, so the MCP configs the panel writes point here,
 //! never into the app bundle, which the person may move, replace or run from its disk image.
 //!
-//! The app installs the package non-editable into its own environment (core.rs), so the usual case needs
-//! nothing from the bundle: the launcher runs that environment's `openmymemo`. Until the first start has
-//! installed it, the launcher finds the app and lets the bundled uv install it; uv locks the environment
-//! and its Python downloads, so a launcher started while the app is still setting up waits for that setup
-//! instead of installing alongside it. The launcher never writes to stdout itself: that is the MCP stream.
+//! The app installs the package non-editable into an environment per build and marks it ready last
+//! (core.rs), so the usual case needs nothing from the bundle: the launcher runs the current environment's
+//! `openmymemo`. Without a ready environment (the first start is still downloading Python, or an install
+//! was interrupted) it finds the app and lets the bundled uv install or finish that build's environment;
+//! uv locks the environment and its Python downloads, so a launcher started while the app is still
+//! setting up waits for that setup instead of installing alongside it. The launcher never writes to
+//! stdout itself: that is the MCP stream.
 
 use std::ffi::OsString;
 use std::fs;
@@ -31,8 +33,8 @@ pub struct Launcher<'a> {
     pub version: &'a str,
     /// Where the launcher lives; it passes this on as OPENMYMEMO_COMMAND to the servers it starts.
     pub path: &'a Path,
-    /// The app's environment, which the launcher runs when it is installed.
-    pub venv: &'a Path,
+    /// Application Support/<id>: `venv`, the link to the current environment, and `venvs/`, one per build.
+    pub support: &'a Path,
     /// The variables uv runs with (core::uv_env), the same as for the app's own setup.
     pub uv_env: &'a [(&'static str, OsString)],
     /// The uv arguments that select the environment (core::UV_ARGS).
@@ -61,15 +63,18 @@ impl Launcher<'_> {
 # AI apps run it as their MCP server, so it never prints to stdout itself: stdout is the MCP stream.
 unset PYTHONHOME PYTHONPATH VIRTUAL_ENV
 export OPENMYMEMO_COMMAND={path}
-venv={venv}
+support={support}
+venv="$support/venv"
 
-# The app installs OpenMyMemo into its own environment, which keeps working wherever the app is.
-if [ -x "$venv/bin/python" ] && [ -x "$venv/bin/openmymemo" ]; then
+# The app's current environment, once complete (the app marks it ready last). The package in it isn't
+# linked to the app, so this works wherever the app is, and whether or not it runs.
+if [ -f "$venv/.openmymemo-ready" ] && [ -x "$venv/bin/openmymemo" ]; then
   exec "$venv/bin/openmymemo" "$@"
 fi
 
-# Not installed yet (the first start may still be downloading Python): find the app and let its uv
-# install it. uv locks the environment, so this waits for a setup that is already under way.
+# Not installed yet (the first start may still be downloading Python), or an install was interrupted: find
+# the app and let its uv install or finish that build's environment, as the app does (core.rs). uv locks
+# it, so this waits for a setup that is already under way.
 usable() {{ [ -x "$1/Contents/MacOS/uv" ] && [ -f "$1/Contents/Resources/core/pyproject.toml" ]; }}
 transient() {{ case "$1" in (/Volumes/*|*/AppTranslocation/*) return 0 ;; esac; return 1; }}
 recorded={app}
@@ -89,12 +94,16 @@ if [ -z "$app" ]; then
   echo "OpenMyMemo isn't set up on this Mac: open the OpenMyMemo app once (https://github.com/MyMemoAI/openmymemo/releases), then try again." >&2
   exit 1
 fi
-export {uv_env}
-exec "$app/Contents/MacOS/uv" run --project "$app/Contents/Resources/core" {uv_args} openmymemo "$@"
+# The build's own environment folder: its version and pyproject.toml's modification time (core.rs build_env).
+core="$app/Contents/Resources/core"
+version=$(sed -n 's/^version = "\([^"]*\)".*/\1/p' "$core/pyproject.toml" | head -n 1)
+stamp=$(/usr/bin/stat -f %m "$core/pyproject.toml")
+export UV_PROJECT_ENVIRONMENT="$support/venvs/${{version:-0}}-$stamp" {uv_env}
+exec "$app/Contents/MacOS/uv" run --project "$core" {uv_args} openmymemo "$@"
 "#,
             version = self.version,
             path = quote(self.path),
-            venv = quote(self.venv),
+            support = quote(self.support),
             app = self.app.map(quote).unwrap_or_else(|| "''".into()),
             search = search.join(" "),
             mdfind = quote(self.mdfind),
@@ -154,14 +163,21 @@ mod tests {
             r#"printf 'uv from %s:' "$0"; printf ' [%s]' "$@"; printf '\nenv=%s cmd=%s\n' "$UV_PROJECT_ENVIRONMENT" "$OPENMYMEMO_COMMAND""#,
         );
         fs::create_dir_all(path.join("Contents/Resources/core")).unwrap();
-        fs::write(path.join("Contents/Resources/core/pyproject.toml"), "").unwrap();
+        fs::write(path.join("Contents/Resources/core/pyproject.toml"), "[project]\nname = \"openmymemo\"\nversion = \"1.2.3\"\n").unwrap();
         path.to_path_buf()
+    }
+
+    /// The environment folder the app gives the build in `app` (core.rs build_env).
+    fn build_env(support: &Path, app: &Path) -> PathBuf {
+        let modified = fs::metadata(app.join("Contents/Resources/core/pyproject.toml")).unwrap().modified().unwrap();
+        let stamp = modified.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        support.join(format!("venvs/1.2.3-{stamp}"))
     }
 
     struct Setup {
         root: PathBuf,
         launcher: PathBuf,
-        venv: PathBuf,
+        support: PathBuf,
         recorded: Option<PathBuf>,
         search: Vec<PathBuf>,
         /// What the stand-in Spotlight finds, one path per line.
@@ -173,7 +189,7 @@ mod tests {
             let root = temp_dir(name);
             Setup {
                 launcher: root.join("Application Support/bin/openmymemo"),
-                venv: root.join("Application Support/venv"),
+                support: root.join("Application Support"),
                 recorded: None,
                 search: vec![root.join("Applications/OpenMyMemo.app"), root.join("home/Applications/OpenMyMemo.app")],
                 spotlight: String::new(),
@@ -181,22 +197,28 @@ mod tests {
             }
         }
 
-        fn install_venv(&self) {
-            script(&self.venv.join("bin/python"), "exit 0");
+        /// An environment with entry points, made current; `ready` as the app marks a finished install.
+        fn install_venv(&self, ready: bool) {
+            let env = self.support.join("venvs/1.0.0-1");
+            script(&env.join("bin/python"), "exit 0");
             script(
-                &self.venv.join("bin/openmymemo"),
+                &env.join("bin/openmymemo"),
                 r#"printf 'venv:'; printf ' [%s]' "$@"; printf '\ncmd=%s pythonpath=%s\n' "$OPENMYMEMO_COMMAND" "${PYTHONPATH-unset}""#,
             );
+            if ready {
+                fs::write(env.join(".openmymemo-ready"), "1.0.0\n").unwrap();
+            }
+            std::os::unix::fs::symlink("venvs/1.0.0-1", self.support.join("venv")).unwrap();
         }
 
         fn run(&self, args: &[&str]) -> Output {
             let mdfind = self.root.join("mdfind");
             script(&mdfind, &format!("cat <<'EOF'\n{}EOF", self.spotlight));
-            let uv_env = [("UV_PROJECT_ENVIRONMENT", self.venv.clone().into_os_string())];
+            let uv_env = [("UV_PYTHON", OsString::from("3.12"))];
             let launcher = Launcher {
                 version: "9.9.9",
                 path: &self.launcher,
-                venv: &self.venv,
+                support: &self.support,
                 uv_env: &uv_env,
                 uv_args: &["--frozen", "--no-editable"],
                 app: self.recorded.as_deref(),
@@ -227,7 +249,7 @@ mod tests {
     #[test]
     fn runs_the_installed_environment_without_the_app() {
         let s = Setup::new("venv");
-        s.install_venv();
+        s.install_venv(true);
         let out = s.run(&["--vault", "/My Memory/it's here", "mcp", "--connector", "cursor"]);
         assert!(out.status.success());
         assert_eq!(
@@ -254,10 +276,21 @@ mod tests {
                 "uv from {}/Contents/MacOS/uv: [run] [--project] [{}/Contents/Resources/core] [--frozen] [--no-editable] [openmymemo] [mcp]\nenv={} cmd={}\n",
                 recorded.display(),
                 recorded.display(),
-                s.venv.display(),
+                build_env(&s.support, recorded).display(),
                 s.launcher.display()
             )
         );
+    }
+
+    #[test]
+    fn an_interrupted_install_is_finished_by_uv_rather_than_run() {
+        // Entry points, but no marker: some of the dependencies may be missing.
+        let s = Setup::new("interrupted");
+        s.install_venv(false);
+        let app = fake_app(&s.search[0]);
+        let out = s.run(&["mcp"]);
+        assert!(stdout(&out).starts_with(&format!("uv from {}/", app.display())), "{}", stdout(&out));
+        assert!(stdout(&out).contains(&format!("env={} ", build_env(&s.support, &app).display())), "{}", stdout(&out));
     }
 
     #[test]
@@ -303,7 +336,7 @@ mod tests {
     #[test]
     fn is_only_rewritten_when_it_changes() {
         let s = Setup::new("rewrite");
-        s.install_venv();
+        s.install_venv(true);
         s.run(&[]);
         let first = fs::metadata(&s.launcher).unwrap().modified().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(20));
