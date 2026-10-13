@@ -44,7 +44,7 @@ python3 scripts/stage_desktop.py && (cd desktop/src-tauri && cargo test)  # Mac 
 | `src/openmymemo/codex.py` | Codex session hook: merges it into `~/.codex/hooks.json` and takes it out again (Codex doesn't run plugin hooks) |
 | `web/` | Vue 3 + Tailwind v4 panel source; all copy lives in `web/src/i18n.ts` |
 | `web/src/desktop.ts` | The Mac layout switch (`?desktop=1`), the shell's commands and shortcuts; `MemoriesDesktopView`, `MemoryInspector`, `DesktopSidebar`, `DesktopToolbar` are its screens; `memorySaves.ts` queues the inspector's saves per memory. `PageHeader` becomes the window toolbar there |
-| `desktop/` | Mac app (Tauri 2, product-design.md §14): `src-tauri/src/core.rs` finds or starts the server for the folder, `main.rs` has the window, menus, menu-bar item and notifications; `scripts/stage_desktop.py` stages the core and `uv` before each build |
+| `desktop/` | Mac app (Tauri 2, product-design.md §14, §15.2): `src-tauri/src/core.rs` installs the core (non-editable) and finds or starts the server for the folder, `launcher.rs` writes the `openmymemo` launcher AI apps run, `install.rs` moves the app from the disk image to Applications, `main.rs` has the window, menus, menu-bar item, notifications, settings and link handling; `scripts/stage_desktop.py` stages the core and `uv` before each build |
 | `.claude-plugin/` | Claude Code plugin manifest and marketplace (the repo root is the plugin) |
 | `plugin.json`, `mcp.json`, `.agents/plugins/` | Codex plugin (Agent Plugins format) and its marketplace |
 | `skills/` | Skills shared by the Claude Code and Codex plugins |

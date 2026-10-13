@@ -68,8 +68,8 @@ openmymemo review                            # what AI changed since you last lo
 | **Claude Desktop** | Download `openmymemo-<version>.mcpb` from the [latest release](https://github.com/MyMemoAI/openmymemo/releases/latest) (or build it with `uv run python scripts/build_mcpb.py`), then double-click it (or Settings → Extensions). Nothing to fill in: leave the memory folder empty to use `~/OpenMyMemo`. Then quit Claude Desktop and open it again. Claude Desktop installs Python and the dependencies itself; no uv needed. |
 | **Claude Code** | `/plugin marketplace add MyMemoAI/openmymemo`, then `/plugin install openmymemo@openmymemo`, then restart Claude Code. Adds `/openmymemo:memory` and `/openmymemo:remember`. |
 | **Codex** | Three steps, see [Codex](#codex) below. |
-| **Cursor** | Panel → Connectors → Setup → **Add to Cursor**. |
-| **VS Code** | Panel → Connectors → Setup → VS Code, then run the `code --add-mcp …` command. |
+| **Cursor** | Panel → Connectors → **Connect**, or `openmymemo connect cursor`. |
+| **VS Code** | Panel → Connectors → **Connect**, or `openmymemo connect vscode`. |
 
 **After installing, quit the app completely and open it again** so it loads OpenMyMemo. The first launch downloads Python and the dependencies (about 5 seconds on a fast connection; Codex gives MCP servers 10). If an app then says the OpenMyMemo server failed to start, restart it once more.
 
@@ -95,7 +95,7 @@ From your next new session on, Codex starts with your memory. The plugin also ad
 
 #### Connecting AI apps by hand
 
-- **Local process (recommended):** Claude Desktop, Claude Code, Cursor, Codex and other stdio MCP clients. `openmymemo connector add <name>` prints a config with absolute paths to paste in. Give each app its own `--connector` so permissions and logs stay separate.
+- **Local process (recommended):** Claude Desktop, Claude Code, Cursor, Codex and other stdio MCP clients. `openmymemo connect <app>` writes the app's config for you (`openmymemo apps` lists them); for anything else, `openmymemo connector add <name>` prints a config with absolute paths to paste in. Give each app its own `--connector` so permissions and logs stay separate.
 - **Local HTTP:** `openmymemo connector add <name> --http` creates a token (shown once) for use with `openmymemo serve` at `http://127.0.0.1:8787/mcp`.
 - ChatGPT chat (web, desktop and mobile) and claude.ai on the web can only reach MCP servers on the public internet, so they aren't supported yet. On the OpenAI side, Codex works today, including the Codex built into the ChatGPT desktop app.
 
