@@ -114,9 +114,37 @@ def test_cloud_json_is_private_from_the_first_byte_and_written_atomically(vault)
     data = json.loads(path.read_text())
     assert {"service", "device_id", "device_token", "private_key", "key_id", "vault", "member", "plan"} <= set(data)
     assert cloud.load_link() == link
-    assert [p.name for p in path.parent.iterdir()] == ["cloud.json"]  # no temporary file left behind
+    assert sorted(p.name for p in path.parent.iterdir()) == [".cloud.lock", "cloud.json"]  # no temporary file left
     assert not cloud.delete_link("another-device") and path.exists()  # a newer link is never deleted by mistake
     assert cloud.delete_link(link.device_id) and not path.exists()
+
+
+@pytest.mark.parametrize("change", ["delete", "update"])
+def test_changes_to_cloud_json_wait_for_each_other(change, vault, monkeypatch):
+    """The bridge's compare-and-delete (or update) and another process saving a new link don't interleave: without
+    the lock, the new link would land between the check and the write and be deleted or overwritten."""
+    import dataclasses
+
+    old = linked(vault, "http://127.0.0.1:9")
+    new = dataclasses.replace(old, device_id="new-device", device_token="omd_new")
+    real = cloud.load_link
+    saver: list[threading.Thread] = []
+
+    def slow_load():
+        current = real()
+        if not saver:
+            saver.append(threading.Thread(target=cloud.save_link, args=(new,)))
+            saver[0].start()
+            saver[0].join(0.3)  # gives a concurrent save every chance to slip in here
+        return current
+
+    monkeypatch.setattr(cloud, "load_link", slow_load)
+    if change == "delete":
+        assert cloud.delete_link(old.device_id)
+    else:
+        cloud._update_link(old.device_id, plan={"tier": "pro", "live": True, "queue": False})
+    saver[0].join(5)
+    assert real() == new
 
 
 def test_hello_carries_the_cloud_variant_of_this_installations_tools(vault):

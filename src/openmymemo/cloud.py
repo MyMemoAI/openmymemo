@@ -167,33 +167,52 @@ def _write_private(path: Path, text: str) -> None:
         raise
 
 
+@contextlib.contextmanager
+def _link_lock():
+    """One change to ``cloud.json`` at a time, across threads and processes (the panel's bridge and the CLI may
+    both change it): flock on ``.cloud.lock`` next to it, msvcrt's lock on Windows."""
+    from .vault import _flock
+
+    folder = cloud_dir()
+    folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with open(folder / ".cloud.lock", "a+") as fh:
+        _flock(fh, True)
+        try:
+            yield
+        finally:
+            _flock(fh, False)
+
+
 def save_link(link: Link) -> None:
-    _write_private(link_path(), link.to_json())
+    with _link_lock():
+        _write_private(link_path(), link.to_json())
 
 
 def delete_link(device_id: str | None = None) -> bool:
     """Delete ``cloud.json``; with `device_id`, only while it still belongs to that device (a newer link stays)."""
     path = link_path()
-    if device_id is not None:
-        current = load_link()
-        if current is None or current.device_id != device_id:
+    with _link_lock():
+        if device_id is not None:
+            current = load_link()
+            if current is None or current.device_id != device_id:
+                return False
+        try:
+            path.unlink()
+            return True
+        except FileNotFoundError:
             return False
-    try:
-        path.unlink()
-        return True
-    except FileNotFoundError:
-        return False
 
 
 def _update_link(device_id: str, **changes: Any) -> None:
-    current = load_link()
-    if current is None or current.device_id != device_id:
-        return
-    if all(getattr(current, k) == v for k, v in changes.items()):
-        return
-    for k, v in changes.items():
-        setattr(current, k, v)
-    save_link(current)
+    with _link_lock():
+        current = load_link()
+        if current is None or current.device_id != device_id:
+            return
+        if all(getattr(current, k) == v for k, v in changes.items()):
+            return
+        for k, v in changes.items():
+            setattr(current, k, v)
+        _write_private(link_path(), current.to_json())
 
 
 # ---- keys and PKCE -----------------------------------------------------------------------------------------
