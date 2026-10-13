@@ -4,12 +4,14 @@
 //! `http://127.0.0.1:<port>/?desktop=1`, which switches the panel to its Mac layout. A monitor thread
 //! keeps the server running, follows its port, puts the number of changes to review next to the
 //! menu-bar icon, and notifies when an AI app changes something or something starts waiting.
-//! Closing the window keeps the app in the menu bar; it quits from the menu.
+//! Closing the window keeps the app in the menu bar; it quits from the menu. On every start it writes the
+//! `openmymemo` launcher AI apps run (launcher.rs).
 
 mod core;
+mod launcher;
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -41,6 +43,12 @@ struct Shared {
     port: AtomicU16,
     /// Set when the memory folder changed: the monitor restarts the server on the new folder.
     restart: AtomicBool,
+    /// Set by Retry on the setup page: the monitor tries again now instead of after its back-off.
+    retry: AtomicBool,
+    /// The `openmymemo` launcher (launcher.rs), shown in Settings.
+    launcher: PathBuf,
+    /// The last status the setup page was given, so it is logged once rather than on every tick.
+    last_status: Mutex<String>,
     /// Where the bundled setup page loads from (tauri://localhost, or Tauri's own server in development).
     splash_url: Mutex<Option<Url>>,
     tray: Mutex<Option<TrayIcon>>,
@@ -99,10 +107,17 @@ fn open_panel_at(app: &AppHandle, hash: &str) {
     }
 }
 
-fn splash_status(app: &AppHandle, status: &str, detail: &str, error: bool) {
+/// Tell the setup page what is happening. `kind`: "" while working, "error", or "offline" (only Retry helps).
+fn splash_status(app: &AppHandle, status: &str, detail: &str, kind: &str) {
+    let shared = app.state::<Arc<Shared>>();
+    let line = format!("{status} {detail}");
+    if *shared.last_status.lock().unwrap() != line {
+        eprintln!("OpenMyMemo: {line}");
+        *shared.last_status.lock().unwrap() = line;
+    }
     if let Some(w) = main_window(app) {
         let _ = w.eval(format!(
-            "window.__setStatus && window.__setStatus({status:?}, {detail:?}, {error})"
+            "window.__setStatus && window.__setStatus({status:?}, {detail:?}, {kind:?})"
         ));
     }
 }
@@ -126,6 +141,8 @@ struct AppSettings {
     vault: PathBuf,
     autostart: bool,
     version: String,
+    /// The `openmymemo` command for terminals and other MCP apps.
+    launcher: PathBuf,
 }
 
 #[tauri::command]
@@ -134,7 +151,14 @@ fn app_settings(app: AppHandle, shared: tauri::State<Arc<Shared>>) -> AppSetting
         vault: shared.settings.lock().unwrap().vault.clone(),
         autostart: app.autolaunch().is_enabled().unwrap_or(false),
         version: app.package_info().version.to_string(),
+        launcher: shared.launcher.clone(),
     }
+}
+
+/// Retry on the setup page: start again now (the monitor otherwise backs off up to a minute).
+#[tauri::command]
+fn retry_start(shared: tauri::State<Arc<Shared>>) {
+    shared.retry.store(true, Ordering::SeqCst);
 }
 
 #[tauri::command]
@@ -260,9 +284,12 @@ fn monitor(app: AppHandle, paths: Paths) {
             std::thread::sleep(Duration::from_millis(300));
         }
 
+        if shared.retry.swap(false, Ordering::SeqCst) {
+            failures = 0;
+        }
         let on_splash = shared.port.load(Ordering::SeqCst) == 0;
         let status_app = app.clone();
-        let status = move |s: &str, d: &str| splash_status(&status_app, s, d, false);
+        let status = move |s: &str, d: &str| splash_status(&status_app, s, d, "");
         match core.ensure(&status) {
             Ok((port, state)) => {
                 failures = 0;
@@ -282,19 +309,20 @@ fn monitor(app: AppHandle, paths: Paths) {
                     last_counts = Some(state.counts);
                 }
             }
-            Err(e) => {
+            Err(problem) => {
                 failures += 1;
                 if on_splash {
-                    splash_status(&app, "OpenMyMemo couldn't start", &e, true);
+                    let kind = if problem.offline { "offline" } else { "error" };
+                    splash_status(&app, &problem.title, &problem.detail, kind);
                 }
             }
         }
 
         // Every 4 seconds; after failures, back off to a minute so a folder that can't work isn't retried
-        // in a tight loop. Choosing another folder restarts at once.
+        // in a tight loop. Choosing another folder, or Retry on the setup page, starts again at once.
         let wait = if failures == 0 { 4 } else { (4u64 << failures.min(4)).min(60) };
         for _ in 0..wait * 4 {
-            if shared.restart.load(Ordering::SeqCst) {
+            if shared.restart.load(Ordering::SeqCst) || shared.retry.load(Ordering::SeqCst) {
                 break;
             }
             std::thread::sleep(Duration::from_millis(250));
@@ -440,6 +468,26 @@ fn build_window(app: &AppHandle, visible: bool) -> tauri::Result<WebviewWindow> 
     Ok(window)
 }
 
+/// Write the launcher AI apps run. It looks for this app where it is now, then in the Applications folders.
+fn write_launcher(app: &AppHandle, paths: &Paths, bundle: Option<&Path>) {
+    let search = [Path::new("/Applications").join(launcher::APP_NAME), dirs_home().join("Applications").join(launcher::APP_NAME)];
+    let version = app.package_info().version.to_string();
+    let uv_env = core::uv_env(paths);
+    let file = launcher::Launcher {
+        version: &version,
+        path: &paths.launcher,
+        venv: &paths.venv(),
+        uv_env: &uv_env,
+        uv_args: &core::UV_ARGS,
+        app: bundle,
+        search: &search,
+        mdfind: Path::new("/usr/bin/mdfind"),
+    };
+    if let Err(e) = file.write() {
+        eprintln!("OpenMyMemo: {e}");
+    }
+}
+
 /// A quit by signal (kill, Ctrl-C in a terminal) skips RunEvent::Exit; stop the server there too.
 extern "C" fn on_signal(sig: libc::c_int) {
     core::stop_child();
@@ -459,7 +507,7 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec![HIDDEN_ARG])))
-        .invoke_handler(tauri::generate_handler![reveal_path, app_settings, set_autostart, choose_vault])
+        .invoke_handler(tauri::generate_handler![reveal_path, app_settings, set_autostart, choose_vault, retry_start])
         .menu(|app| app_menu(app))
         .on_menu_event(|app, event| on_menu(app, event.id().as_ref()))
         .setup(|app| {
@@ -467,26 +515,33 @@ fn main() {
             let path = app.path();
             let support = path.app_data_dir()?;
             let settings_path = support.join("settings.json");
+
+            // The bundled uv sits next to the executable; the package source is a resource.
+            let exe = std::env::current_exe()?;
+            let exe_dir = exe.parent().map(PathBuf::from).unwrap_or_default();
+            let paths = Paths {
+                uv: exe_dir.join("uv"),
+                project: path.resource_dir()?.join("core"),
+                launcher: support.join("bin/openmymemo"),
+                support,
+                cache: path.app_cache_dir()?,
+                log: path.app_log_dir()?.join("core.log"),
+            };
+            write_launcher(&handle, &paths, launcher::bundle_of(&exe).as_deref());
+
             let shared = Arc::new(Shared {
                 settings: Mutex::new(load_settings(&settings_path)),
                 settings_path,
                 port: AtomicU16::new(0),
                 restart: AtomicBool::new(false),
+                retry: AtomicBool::new(false),
+                launcher: paths.launcher.clone(),
+                last_status: Mutex::new(String::new()),
                 splash_url: Mutex::new(None),
                 tray: Mutex::new(None),
                 review_item: Mutex::new(None),
             });
             app.manage(shared);
-
-            // The bundled uv sits next to the executable; the package source is a resource.
-            let exe_dir = std::env::current_exe()?.parent().map(PathBuf::from).unwrap_or_default();
-            let paths = Paths {
-                uv: exe_dir.join("uv"),
-                project: path.resource_dir()?.join("core"),
-                support,
-                cache: path.app_cache_dir()?,
-                log: path.app_log_dir()?.join("core.log"),
-            };
 
             let hidden = std::env::args().any(|a| a == HIDDEN_ARG);
             build_window(&handle, !hidden)?;
@@ -521,6 +576,9 @@ mod tests {
             settings_path: root.join("support/settings.json"),
             port: AtomicU16::new(8787),
             restart: AtomicBool::new(false),
+            retry: AtomicBool::new(false),
+            launcher: root.join("support/bin/openmymemo"),
+            last_status: Mutex::new(String::new()),
             splash_url: Mutex::new(None),
             tray: Mutex::new(None),
             review_item: Mutex::new(None),
