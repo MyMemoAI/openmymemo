@@ -287,7 +287,7 @@ def _load_json(path: Path) -> tuple[dict, str]:
 def _node(data: dict, key: tuple[str, ...], path: Path, create: bool) -> dict | None:
     node = data
     for k in key:
-        if create and (k not in node or node[k] == []):  # Cursor ships `"mcpServers": []`
+        if create and node.get(k) in (None, []):  # missing, null, or Cursor's `"mcpServers": []`
             node[k] = {}
         node = node.get(k)
         if node is None or node == []:
@@ -301,7 +301,8 @@ def write_json_entry(path: Path, key: tuple[str, ...], entry: dict) -> bool:
     """Set our server entry, changing nothing else. Returns whether the file changed."""
     data, text = _load_json(path)
     servers = _node(data, key, path, create=True)
-    assert servers is not None
+    if servers is None:
+        raise Refused(f"{path} doesn't look like a settings file, so OpenMyMemo won't rewrite it.")
     if servers.get(ENTRY) == entry:
         return False
     servers[ENTRY] = entry

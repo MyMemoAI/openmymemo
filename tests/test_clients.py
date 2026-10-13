@@ -315,6 +315,19 @@ def test_cursor_ships_an_empty_list_of_servers(vault, env):
     assert json.loads(path.read_text()) == {"mcpServers": {"openmymemo": entry_for(vault, "cursor")}}
 
 
+def test_a_null_list_of_servers_is_filled_in(vault, env, tmp_path):
+    path = env.home / ".cursor/mcp.json"
+    path.parent.mkdir()
+    path.write_text('{"mcpServers": null, "theme": "dark"}')
+    assert clients.disconnect(vault, "cursor", env).status == "done"
+    assert clients.connect(vault, "cursor", env).changed
+    assert json.loads(path.read_text()) == {"mcpServers": {"openmymemo": entry_for(vault, "cursor")}, "theme": "dark"}
+    nested = tmp_path / "amp.json"
+    nested.write_text('{"a": null}')
+    assert clients.write_json_entry(nested, ("a", "b"), {"command": "x"}) is True
+    assert json.loads(nested.read_text()) == {"a": {"b": {"openmymemo": {"command": "x"}}}}
+
+
 def test_an_unwritable_config_is_a_plain_error(vault, env):
     path = env.home / ".cursor/mcp.json"
     path.parent.mkdir()
