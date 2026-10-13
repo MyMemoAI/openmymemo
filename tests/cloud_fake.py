@@ -1,4 +1,4 @@
-"""A fake MyMemo service for the MyMemo Cloud tests, built from tests/fixtures/cloud/ (shared with mymemo-service).
+"""A fake MyMemo service for the MyMemo Cloud tests, built from tests/fixtures/cloud/ (the MyMemo service tests against the same files).
 
 It runs on 127.0.0.1 in a thread of its own: the link endpoints over HTTP and the bridge over a WebSocket, on one
 port, like the service. Tests drive it from the main thread: authorize a link the way the consent page would, send
@@ -160,7 +160,7 @@ class FakeService:
             return await call_next(request)
 
         @app.get("/openmymemo/device")
-        async def device(request: Request):  # what the service answers (mymemo-service routers/openmymemo.py)
+        async def device(request: Request):  # what the service answers
             auth = request.headers.get("authorization")
             self.device_checks.append(auth)
             if self.device_redirect:
@@ -192,7 +192,7 @@ class FakeService:
                 return JSONResponse({"error": "invalid_request", "error_description": "Bad link request"}, 400)
             if self.issued or any(not c.closed.is_set() for c in self.conns):
                 # Linking again replaces the device: a new id and token, and the old socket is told so with 4409
-                # (CLOSE_REPLACED in mymemo-service src/platform/openmymemo/bridge.py).
+                # (see bridge/close_codes.json).
                 device_id, self.token = str(uuid.uuid4()), "omd_TEST_ONLY_" + secrets.token_urlsafe(24)
                 self.link_response = {**self.link_response, "device_id": device_id, "device_token": self.token}
                 self.welcome = {**self.welcome, "device_id": device_id}

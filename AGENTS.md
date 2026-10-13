@@ -42,7 +42,7 @@ python3 scripts/stage_desktop.py && (cd desktop/src-tauri && cargo test)  # Mac 
 | `src/openmymemo/transfer.py` | Import (ChatGPT / Claude / Markdown / JSON) and export |
 | `src/openmymemo/mcp_server.py` | MCP tools (mcp SDK 2.x `MCPServer`); `relayed=` builds the MyMemo Cloud variant |
 | `src/openmymemo/web.py` | Panel API, `/mcp` and `/cloud/callback` combined into one ASGI app; `panel_server()` is the uvicorn server that starts MyMemo Cloud once its port is bound |
-| `src/openmymemo/cloud.py` | MyMemo Cloud (product-design.md §16): the per-computer link (`cloud.json`, never in the folder), linking with PKCE and a loopback callback, and the bridge: one outbound WebSocket that answers relayed tool calls as `cloud-<slug>` connectors. The wire format is pinned by `tests/fixtures/cloud/` (shared with mymemo-service); `tests/cloud_fake.py` is a fake service built from it |
+| `src/openmymemo/cloud.py` | MyMemo Cloud (product-design.md §16): the per-computer link (`cloud.json`, never in the folder), linking with PKCE and a loopback callback, and the bridge: one outbound WebSocket that answers relayed tool calls as `cloud-<slug>` connectors. The wire format is pinned by `tests/fixtures/cloud/` (the MyMemo service tests against the same files); `tests/cloud_fake.py` is a fake service built from it |
 | `src/openmymemo/cli.py` | Typer CLI |
 | `src/openmymemo/codex.py` | Codex session hook: merges it into `~/.codex/hooks.json` and takes it out again (Codex doesn't run plugin hooks) |
 | `web/` | Vue 3 + Tailwind v4 panel source; all copy lives in `web/src/i18n.ts` |

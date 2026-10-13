@@ -15,7 +15,7 @@ tool calls the service relays from web apps, by running the same tool code as th
   in this process within ten minutes, once. The code is exchanged at ``POST /openmymemo/device/link``, which also
   registers the public key.
 * **The service** is ``OPENMYMEMO_CLOUD_URL`` (default https://api.mymemo.ai); the bridge is ``/openmymemo/bridge``
-  on the same host. The wire format is pinned by ``tests/fixtures/cloud/`` (shared with mymemo-service).
+  on the same host. The wire format is pinned by ``tests/fixtures/cloud/`` (the MyMemo service tests against the same files).
 * **The bridge** runs on a thread of its own, starts once the panel's port is bound (``web.PanelServer``) and
   closes with 1000 when the panel stops. It reconnects with backoff and follows the close codes in
   ``tests/fixtures/cloud/bridge/close_codes.json``.
