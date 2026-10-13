@@ -138,6 +138,7 @@ class TopicIn(BaseModel):
 
 class SettingsPatch(BaseModel):
     require_approval: bool | None = None
+    onboarded: bool | None = None
 
 
 class TopicPatch(BaseModel):

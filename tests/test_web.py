@@ -178,11 +178,24 @@ def test_http_mcp_end_to_end_with_panel_approval(vault, live):
 
 
 def test_settings_api_toggles_approval(vault, api):
-    assert api.get("/api/state", headers=H).json()["settings"] == {"require_approval": False}
-    assert api.patch("/api/settings", headers=H, json={"require_approval": True}).json() == {"require_approval": True}
+    assert api.get("/api/state", headers=H).json()["settings"] == {"require_approval": False, "onboarded": False}
+    assert api.patch("/api/settings", headers=H, json={"require_approval": True}).json() == {
+        "require_approval": True, "onboarded": False}
     assert vault.settings()["require_approval"] is True
     assert api.patch("/api/settings", json={"require_approval": False}).status_code == 403  # guard still applies
     assert vault.settings()["require_approval"] is True
+
+
+def test_settings_api_exposes_and_sets_onboarded(vault, api):
+    """The first-run guide: shown while `onboarded` is false, which finishing or skipping it sets to true."""
+    assert api.get("/api/settings", headers=H).json()["onboarded"] is False
+    r = api.patch("/api/settings", headers=H, json={"onboarded": True})
+    assert r.status_code == 200 and r.json() == {"require_approval": False, "onboarded": True}
+    assert api.get("/api/state", headers=H).json()["settings"]["onboarded"] is True
+    assert api.patch("/api/settings", headers=H, json={"require_approval": True}).json()["onboarded"] is True
+    assert api.patch("/api/settings", headers=H, json={"onboarded": "maybe"}).status_code == 422
+    assert api.patch("/api/settings", json={"onboarded": False}).status_code == 403  # guard still applies
+    assert vault.settings() == {"require_approval": True, "onboarded": True}
 
 
 def test_digest_review_undo_and_edit_over_api(vault, api):
