@@ -245,3 +245,32 @@ def test_serve_init_creates_a_missing_or_empty_vault_and_refuses_other_folders(t
     r = runner.invoke(app, ["--vault", str(tmp_path / "other"), "serve", "--no-open", "--port", str(port)])
     assert r.exit_code == 1 and "openmymemo init" in r.output  # without --init nothing is created
     assert not (tmp_path / "other").exists() and len(served) == 3
+
+
+def test_a_process_from_a_mac_app_environment_holds_its_lock(tmp_path, monkeypatch):
+    import os
+
+    import pytest
+
+    fcntl = pytest.importorskip("fcntl")
+    from openmymemo import cli
+
+    other = tmp_path / "project/.venv"
+    other.mkdir(parents=True)
+    cli._hold_environment(str(other))
+    assert not (other / cli.ENV_LOCK).exists()
+
+    env = tmp_path / "venvs/9.0.0-1"
+    env.mkdir(parents=True)
+    monkeypatch.setattr(cli, "_env_lock", None)
+    cli._hold_environment(str(env))
+    try:
+        assert cli._env_lock is not None
+        fd = os.open(env / cli.ENV_LOCK, os.O_RDONLY)
+        try:
+            with pytest.raises(BlockingIOError):  # what the app's clean-up tries (core.rs)
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        finally:
+            os.close(fd)
+    finally:
+        os.close(cli._env_lock)

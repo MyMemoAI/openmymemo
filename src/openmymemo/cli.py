@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -592,5 +593,32 @@ def setup_codex(ctx: typer.Context,
         typer.echo(f"\nIf new sessions still start without your memory, it isn't trusted yet: {trust}")
 
 
+# The Mac app's environments, venvs/<version>-<stamp>: each process run from one holds a shared lock on
+# this file while it runs, so the app removes an old environment only once nothing runs from it (core.rs).
+ENV_LOCK = ".openmymemo-in-use"
+_env_lock: int | None = None
+
+
+def _hold_environment(prefix: str | None = None) -> None:
+    """Hold the shared lock on ENV_LOCK in the Mac app's environment this process runs from, if it does."""
+    global _env_lock
+    env = Path(prefix if prefix is not None else sys.prefix)
+    if (prefix is None and sys.prefix == sys.base_prefix) or env.parent.name != "venvs":
+        return
+    try:
+        import fcntl
+
+        fd = os.open(env / ENV_LOCK, os.O_RDONLY | os.O_CREAT, 0o644)
+    except (ImportError, OSError):
+        return
+    try:
+        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+    except OSError:  # the app is removing this environment right now
+        os.close(fd)
+        return
+    _env_lock = fd
+
+
 def main() -> None:
+    _hold_environment()
     app()

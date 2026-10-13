@@ -16,6 +16,7 @@ use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom};
 use std::ops::Range;
+use std::os::fd::AsRawFd;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -236,8 +237,21 @@ fn make_current(support: &Path, dir: &Path) -> std::io::Result<Option<PathBuf>> 
     Ok(previous)
 }
 
-/// Remove environments other than `keep` (the current one and the one before it). One that isn't ready
-/// is left for a day, in case a launcher is installing into it right now.
+/// The file every `openmymemo` process started from an environment under venvs/ holds a shared lock on
+/// (`flock`, cli.py's `_hold_environment`) for as long as it runs; the lock goes away with the process.
+pub const IN_USE: &str = ".openmymemo-in-use";
+
+/// Whether no process runs from `dir`. If so, the returned file (when there is one) holds the lock
+/// exclusively, so a process starting meanwhile doesn't take it, until it is dropped.
+fn unused(dir: &Path) -> Option<Option<File>> {
+    let Ok(file) = File::open(dir.join(IN_USE)) else { return Some(None) };
+    let free = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0;
+    free.then_some(Some(file))
+}
+
+/// Remove environments other than `keep` (the current one and the one before it) that no process runs
+/// from: a server an AI app kept alive across updates still reads its files (the panel's, for one). One
+/// that isn't ready is left for a day, in case a launcher is installing into it right now.
 fn collect_garbage(venvs: &Path, keep: &[&Path]) {
     let Ok(entries) = fs::read_dir(venvs) else { return };
     let day_ago = std::time::SystemTime::now() - Duration::from_secs(24 * 3600);
@@ -248,7 +262,10 @@ fn collect_garbage(venvs: &Path, keep: &[&Path]) {
             continue;
         }
         let old = entry.metadata().and_then(|m| m.modified()).map_or(false, |t| t < day_ago);
-        if is_ready(&dir) || old {
+        if !(is_ready(&dir) || old) {
+            continue;
+        }
+        if let Some(_lock) = unused(&dir) {
             let _ = fs::remove_dir_all(&dir);
         }
     }
@@ -357,8 +374,8 @@ impl Core {
     }
 
     /// Make this build's environment the current one, installing it if it isn't ready (the first start, a
-    /// new version or build). Old environments are removed, keeping the one before. If the install fails
-    /// (no network, say) but a complete environment exists, the server starts from that one.
+    /// new version or build). Old environments nothing runs from are removed, keeping the one before. If
+    /// the install fails (no network, say) but a complete environment exists, the server starts from that one.
     fn prepare(&mut self, status: &dyn Fn(&str, &str)) -> Result<(), Problem> {
         let (version, dir) = self.paths.build_env()?;
         if !is_ready(&dir) {
@@ -814,6 +831,28 @@ mod tests {
         assert_eq!(left.len(), 3, "{left:?}");
         assert!(left.iter().any(|n| n.starts_with("legacy-")) && left.contains(&current), "{left:?}");
         assert!(fs::symlink_metadata(root.join("support/venv")).unwrap().file_type().is_symlink());
+    }
+
+    #[test]
+    fn keeps_an_older_environment_a_server_still_runs_from() {
+        let (mut core, root) = fake_project("in-use", "9.1.0", "");
+        let busy = ready_env(&root, "8.0.0-1");
+        let idle = ready_env(&root, "8.5.0-1");
+        fs::write(idle.join(IN_USE), "").unwrap(); // its server has exited
+        let previous = ready_env(&root, "9.0.0-1");
+        std::os::unix::fs::symlink("venvs/9.0.0-1", root.join("support/venv")).unwrap();
+        // A server started two updates ago holds its environment's lock, as cli.py does.
+        let held = File::options().read(true).write(true).create(true).truncate(false).open(busy.join(IN_USE)).unwrap();
+        assert_eq!(unsafe { libc::flock(held.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) }, 0);
+
+        core.prepare(&|_, _| {}).unwrap();
+        assert!(busy.join(READY).exists(), "the environment a server runs from stays");
+        assert!(!idle.exists() && previous.exists());
+
+        // Once that server is gone, the next update's clean-up removes it.
+        drop(held);
+        collect_garbage(&root.join("support/venvs"), &[core.ready.as_deref().unwrap(), &previous]);
+        assert!(!busy.exists());
     }
 
     #[test]
