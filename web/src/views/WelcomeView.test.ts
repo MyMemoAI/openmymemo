@@ -36,6 +36,15 @@ const { api, saved } = vi.hoisted(() => {
         saved.push(m);
         return m;
       }),
+      patchMemory: vi.fn(async (id: string, body: { content?: string }) => {
+        const m = saved.find((x) => x.id === id)!;
+        Object.assign(m, body);
+        return m;
+      }),
+      archive: vi.fn(async (id: string) => {
+        const m = saved.splice(saved.findIndex((x) => x.id === id), 1)[0];
+        return { ...m, status: "archived" } as Memory;
+      }),
       importPreview: vi.fn(async (): Promise<ImportItem[]> => []),
       importCommit: vi.fn(async () => ({ memory_ids: ["i1"] })),
       // refresh() after a write
@@ -142,6 +151,65 @@ describe("the first-run guide", () => {
     expect(api.addMemory).toHaveBeenLastCalledWith({ topic: "work", content: "Work: Runs a bakery in Lyon.", kind: "fact" });
     await button(w, "Back").trigger("click");
     expect(button(w, "Next").exists()).toBe(true);
+  });
+
+  it("corrects a saved answer instead of adding a second memory, and archives one that is cleared", async () => {
+    const w = mount(WelcomeView, { props: { initialStep: "about" } });
+    await w.get('input[name="name"]').setValue("Sma");
+    await w.get('input[name="work"]').setValue("Baker");
+    await button(w, "Save and continue").trigger("click");
+    await flushPromises();
+    expect(api.addMemory).toHaveBeenCalledTimes(2);
+
+    await button(w, "Back").trigger("click");
+    await w.get('input[name="name"]').setValue("Sam");
+    await w.get('input[name="work"]').setValue("");
+    expect(w.text()).toContain("“Work: Baker.” will be archived");
+    await button(w, "Save and continue").trigger("click");
+    await flushPromises();
+    expect(api.addMemory).toHaveBeenCalledTimes(2); // nothing new: Identity holds one answer, not two
+    expect(api.patchMemory).toHaveBeenCalledWith("m0", { content: "Prefers to be called Sam." });
+    expect(api.archive).toHaveBeenCalledWith("m1");
+    expect(saved.map((m) => m.content)).toEqual(["Prefers to be called Sam."]);
+    expect(visibleStep(w)).toEqual(["done"]);
+
+    await button(w, "Back").trigger("click"); // nothing left to save
+    expect(button(w, "Next").exists()).toBe(true);
+  });
+
+  it("adds a new memory when the one it saved was changed or archived elsewhere meanwhile", async () => {
+    const w = mount(WelcomeView, { props: { initialStep: "about" } });
+    await w.get('input[name="name"]').setValue("Sma");
+    await button(w, "Save and continue").trigger("click");
+    await flushPromises();
+    saved[0].content = "Prefers to be called Sammy."; // edited on the Memories page
+    store.memories = [...saved];
+    await button(w, "Back").trigger("click");
+    await w.get('input[name="name"]').setValue("Sam");
+    await button(w, "Save and continue").trigger("click");
+    await flushPromises();
+    expect(api.patchMemory).not.toHaveBeenCalled(); // the person's own edit stays as they left it
+    expect(api.addMemory).toHaveBeenLastCalledWith({ topic: "identity", content: "Prefers to be called Sam.", kind: "preference" });
+  });
+
+  it("saves once when Enter is pressed again while the first save is on its way", async () => {
+    let finish: () => void = () => {};
+    api.addMemory.mockImplementationOnce(async (body: { topic?: string; content: string }) => {
+      await new Promise<void>((resolve) => (finish = resolve));
+      const m = { id: "m0", topic: body.topic ?? "identity", content: body.content } as Memory;
+      saved.push(m);
+      return m;
+    });
+    const w = mount(WelcomeView, { props: { initialStep: "about" } });
+    await w.get('input[name="name"]').setValue("Sam");
+    const last = w.get('input[name="answers"]');
+    await last.trigger("keydown", { key: "Enter" });
+    await last.trigger("keydown", { key: "Enter" }); // a second press, or key repeat
+    await button(w, "Save and continue").trigger("click");
+    finish();
+    await flushPromises();
+    expect(api.addMemory).toHaveBeenCalledTimes(1);
+    expect(saved).toHaveLength(1);
   });
 
   it("moves to the next field with Enter and saves from the last one", async () => {

@@ -85,41 +85,75 @@ const FIELDS: { id: "name" | "work" | "answers"; topic: string; kind: Kind }[] =
   { id: "work", topic: "work", kind: "fact" },
   { id: "answers", topic: "how-to-work-with-me", kind: "instruction" },
 ];
+type Field = (typeof FIELDS)[number];
 const answers = reactive({ name: "", work: "", answers: "" });
 const saving = ref(false);
+/** The memory the guide saved for each answer and its text then, so a correction updates that memory. */
+const savedFor = reactive<Partial<Record<Field["id"], { id: string; content: string }>>>({});
 
 /** One self-contained statement around the person's own words, in whatever language they wrote them. */
-function statement(id: (typeof FIELDS)[number]["id"]): string {
+function statement(id: Field["id"]): string {
   const text = answers[id].split(/\s+/).join(" ").trim();
   if (!text) return "";
   return t(`onb.about.${id}.statement`, { text }) + (/[.!?。！？…]$/.test(text) ? "" : ".");
 }
 
-/** Answers not saved yet; one already in its topic (after Back, then Next again) isn't added twice. */
-const unsaved = computed(() =>
-  FIELDS.map((f) => ({ ...f, content: statement(f.id) })).filter(
-    (f) => f.content && !store.memories.some((m) => m.topic === f.topic && m.content === f.content),
-  ),
-);
+type Plan = { op: "none" | "add"; content: string } | { op: "keep" | "update" | "archive"; id: string; content: string };
+
+/**
+ * What saving does with an answer. The memory the guide saved for it earlier (after Back) is corrected, or
+ * archived when the answer is cleared, as long as it is still as the guide left it; if someone changed or
+ * archived it meanwhile, it is left alone and a new answer becomes a new memory. An identical memory already
+ * in the topic is kept, and corrected from then on.
+ */
+function plan(f: Field): Plan {
+  const content = statement(f.id);
+  const prev = savedFor[f.id];
+  if (prev && store.memories.some((m) => m.id === prev.id && m.content === prev.content)) {
+    if (!content) return { op: "archive", id: prev.id, content: prev.content };
+    return content === prev.content ? { op: "none", content } : { op: "update", id: prev.id, content };
+  }
+  if (!content) return { op: "none", content };
+  const same = store.memories.find((m) => m.topic === f.topic && m.content === content);
+  return same ? { op: "keep", id: same.id, content } : { op: "add", content };
+}
+const plans = computed(() => Object.fromEntries(FIELDS.map((f) => [f.id, plan(f)])) as Record<Field["id"], Plan>);
+const unsaved = computed(() => FIELDS.some((f) => ["add", "update", "archive"].includes(plans.value[f.id].op)));
 
 async function saveAbout() {
-  const todo = unsaved.value;
-  if (todo.length) {
-    saving.value = true;
-    try {
-      for (const f of todo) {
+  if (saving.value) return; // a second Enter, or key repeat, while the first save is on its way
+  saving.value = true;
+  let saved = 0;
+  let archived = 0;
+  try {
+    for (const f of FIELDS) {
+      const p = plans.value[f.id];
+      if (p.op === "keep") {
+        savedFor[f.id] = { id: p.id, content: p.content };
+      } else if (p.op === "add") {
         // A folder whose topic was removed still gets the memory, filed automatically.
-        await api.addMemory({ topic: topicsBySlug.value[f.topic] ? f.topic : undefined, content: f.content, kind: f.kind });
+        const m = await api.addMemory({ topic: topicsBySlug.value[f.topic] ? f.topic : undefined, content: p.content, kind: f.kind });
+        savedFor[f.id] = { id: m.id, content: m.content };
+        saved++;
+      } else if (p.op === "update") {
+        const m = await api.patchMemory(p.id, { content: p.content }); // as the person: it stays protected
+        savedFor[f.id] = { id: m.id, content: m.content };
+        saved++;
+      } else if (p.op === "archive") {
+        await api.archive(p.id);
+        delete savedFor[f.id];
+        archived++;
       }
-      toast(tn("onb.about.saved", todo.length));
-    } catch (e) {
-      toast(e instanceof Error ? e.message : String(e), "error");
-      return;
-    } finally {
-      saving.value = false;
-      await refresh();
     }
+  } catch (e) {
+    toast(e instanceof Error ? e.message : String(e), "error");
+    return;
+  } finally {
+    saving.value = false;
+    if (saved || archived) await refresh();
   }
+  const done = [saved && tn("onb.about.saved", saved), archived && tn("onb.about.archived", archived)].filter(Boolean);
+  if (done.length) toast(done.join(" · "));
   go("done");
 }
 
@@ -256,11 +290,14 @@ function next() {
             class="input"
             :name="f.id"
             :placeholder="t(`onb.about.${f.id}.placeholder`)"
-            :aria-describedby="statement(f.id) ? `onb-${f.id}-saved` : undefined"
+            :aria-describedby="statement(f.id) || plans[f.id].op === 'archive' ? `onb-${f.id}-saved` : undefined"
             @keydown.enter="onFieldEnter($event, i)"
           />
           <p v-if="statement(f.id)" :id="`onb-${f.id}-saved`" class="text-xs text-muted">
             {{ t("onb.about.savedAs", { topic: topicTitle(f.topic), text: statement(f.id) }) }}
+          </p>
+          <p v-else-if="plans[f.id].op === 'archive'" :id="`onb-${f.id}-saved`" class="text-xs text-muted">
+            {{ t("onb.about.willArchive", { text: plans[f.id].content }) }}
           </p>
         </div>
       </div>
@@ -320,7 +357,7 @@ function next() {
         :disabled="saving"
         @click="next"
       >
-        {{ step === "about" && unsaved.length ? t("onb.saveNext") : t("onb.next") }}<AppIcon name="arrowRight" :size="14" />
+        {{ step === "about" && unsaved ? t("onb.saveNext") : t("onb.next") }}<AppIcon name="arrowRight" :size="14" />
       </button>
     </div>
   </div>
