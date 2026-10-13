@@ -29,13 +29,18 @@ const results = reactive<Record<string, ConnectResult>>({});
 const showAll = ref(false);
 
 let loadedAt = 0;
+/** Bumped by every load and every action, so an answer that was asked for earlier can't overwrite a newer one. */
+let seq = 0;
 async function load() {
+  const mine = ++seq;
   loadedAt = Date.now();
   try {
-    catalog.value = await api.apps();
+    const data = await api.apps();
+    if (mine !== seq) return;
+    catalog.value = data;
     failed.value = false;
   } catch {
-    failed.value = !catalog.value;
+    if (mine === seq) failed.value = !catalog.value;
   }
 }
 
@@ -117,6 +122,7 @@ function action(a: AppStatus): Action {
 
 function replace(app: AppStatus) {
   if (!catalog.value) return;
+  seq++; // anything still on its way was asked for before this action
   catalog.value = { ...catalog.value, apps: catalog.value.apps.map((a) => (a.id === app.id ? app : a)) };
 }
 

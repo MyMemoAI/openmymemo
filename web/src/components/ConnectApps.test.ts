@@ -82,6 +82,24 @@ describe("ConnectApps", () => {
     expect(w.findAll("button").filter((b) => b.text() === "Disconnect")).toHaveLength(1);
   });
 
+  it("ignores a list that was asked for before the last action", async () => {
+    api.connectApp.mockImplementation(async () => ({
+      result: result(),
+      app: app("cursor", "Cursor", { installed: true, connected: true, via: "config", has_connector: true }),
+    }));
+    const w = mount(ConnectApps, { props: { compact: true } });
+    await flushPromises();
+    let answer: (c: AppCatalog) => void = () => {};
+    api.apps.mockImplementationOnce(() => new Promise<AppCatalog>((resolve) => (answer = resolve)));
+    void (w.vm as unknown as { reload: () => Promise<void> }).reload(); // still on its way when Connect is clicked
+    await w.findAll("button").filter((b) => b.text() === "Connect")[1].trigger("click");
+    await flushPromises();
+    expect(w.text()).toContain("Connected — restart Cursor to finish");
+    answer(catalog()); // the answer from before connecting arrives last
+    await flushPromises();
+    expect(w.text()).toContain("Connected — restart Cursor to finish");
+  });
+
   it("shows the snippet, where it goes and the install link for an app set up by hand", async () => {
     api.connectApp.mockImplementation(async () => ({
       result: result({
