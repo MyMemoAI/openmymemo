@@ -523,7 +523,7 @@ claude.ai ─────┼──▶ MyMemo service  /openmymemo/mcp
 
 - **From the panel** (catalog entry "MyMemo Cloud — use your memory in ChatGPT and claude.ai on the web", method `account`) or **the CLI** (`openmymemo cloud link | status | unlink`).
 - **Flow:** the panel opens the browser at MyMemo's link page with a PKCE challenge and a loopback redirect (`http://127.0.0.1:<port>/cloud/callback`, RFC 8252); the person signs in to MyMemo; the callback's code and the verifier are exchanged for a device token (`omd_…`, stored on the service only as a SHA-256, like the existing MCP tokens), and the public key is registered. The callback route checks the `state` and accepts only that one exchange; the panel API guard is otherwise unchanged.
-- **Where the link lives:** per computer, not in the folder — the folder may be synced to other machines or kept in git. `~/Library/Application Support/OpenMyMemo/cloud.json` on macOS (`$XDG_CONFIG_HOME/openmymemo/` elsewhere), mode 0600: the device token, the private key, the folder it serves and the account it belongs to. If the folder moves, the panel asks to re-link.
+- **Where the link lives:** per computer, not in the folder — the folder may be synced to other machines or kept in git. `~/Library/Application Support/OpenMyMemo/cloud.json` on macOS (`%APPDATA%\OpenMyMemo\` on Windows, `$XDG_CONFIG_HOME/openmymemo/` elsewhere; `OPENMYMEMO_CLOUD_DIR` overrides it), mode 0600: the device token, the private key, the folder it serves and the account it belongs to. If the folder moves, the panel asks to re-link.
 - **One linked computer per account** at first. Linking another one replaces it; several computers come later (open question 1). Re-linking (another computer, or a new key after the folder moved) first drains the queue to the current computer; if that computer can't come online, the panel says how many queued proposals would be lost before it goes ahead.
 - **Unlinking** (panel, CLI, or the MyMemo website) deletes the device token, the public key and the queue on the service, and the local `cloud.json` — at once from the panel or CLI, at the next connection attempt when it was done on the website while the computer was off. The `cloud-*` connectors stay as revoked tombstones, as for any app (§5.5).
 
@@ -557,3 +557,15 @@ The MyMemo Cloud row on the Connectors page shows: signed in as, online or offli
 2. Should a web app's connector default to fewer topics than local apps (e.g. only "How I work" and "Who I am") until the person widens it?
 3. Mobile ChatGPT and Claude apps use the same connectors; anything specific to check there?
 4. MCP elicitation for in-chat approval (§5.4) applies here too once the web apps support it.
+
+### 16.10 As built (phase 1, 2026-10-12)
+
+Where the sections above left a choice open, the build settled it as follows:
+
+- **Connectors:** web apps get the connector kind `cloud` (MEMORY_FORMAT.md §5), named "ChatGPT (web)", "Claude (web)", or "… (web, unverified)" for an unverified client. A revoked one answers `revoked`; after unlinking, or after removing one by itself, it comes back only through **Allow again** on the MyMemo Cloud row — linking again doesn't re-grant it.
+- **Which process connects:** the bridge runs on a thread of the process serving the panel, starts only once that process holds the panel's port (two AI apps may start a panel for the same folder at once; only the one that gets the port connects) and closes with 1000 when the panel stops. A panel inside an AI app's MCP process closes it at interpreter exit, not when the process is killed.
+- **The connection:** it offers the WebSocket subprotocol `openmymemo-bridge.v1`, sends no `Origin` and no compression. A refused upgrade (401 or 403) means the token is gone: `cloud.json` is deleted and the web apps revoked, as for close code 4401. `cloud.json` is only ever deleted while it still holds that device, so linking again (which stops the old connection before exchanging the code) can't lose the new link.
+- **Relayed calls:** a result carries `content`, `structuredContent` and `isError` only, and is replaced by a "too large to relay" message above the service's `result_max_bytes`. Tool errors (read-only app, bad arguments) come back as `isError` results, as over local MCP; a malformed call gets `bad_request`, a crash `internal`.
+- **Unlinking** while MyMemo can't be reached still forgets the link here and says to remove the computer in the MyMemo account settings too.
+- **The CLI** (`openmymemo cloud link`) signs in through the running panel when one serves the folder, and otherwise through a short-lived listener on an ephemeral port. `openmymemo connect mymemo-cloud` does the same.
+- **The panel:** MyMemo Cloud has its own "On the web" section on the Connectors page; the first-run guide (§15.3) leaves it out.

@@ -40,12 +40,13 @@ python3 scripts/stage_desktop.py && (cd desktop/src-tauri && cargo test)  # Mac 
 | `src/openmymemo/proposals.py` | Proposal lifecycle, dedupe, auto-apply and undo |
 | `src/openmymemo/context.py` | Compiles what an AI sees, MEMORY.md, log.md, search |
 | `src/openmymemo/transfer.py` | Import (ChatGPT / Claude / Markdown / JSON) and export |
-| `src/openmymemo/mcp_server.py` | MCP tools (mcp SDK 2.x `MCPServer`) |
-| `src/openmymemo/web.py` | Panel API and `/mcp` combined into one ASGI app |
+| `src/openmymemo/mcp_server.py` | MCP tools (mcp SDK 2.x `MCPServer`); `relayed=` builds the MyMemo Cloud variant |
+| `src/openmymemo/web.py` | Panel API, `/mcp` and `/cloud/callback` combined into one ASGI app; `panel_server()` is the uvicorn server that starts MyMemo Cloud once its port is bound |
+| `src/openmymemo/cloud.py` | MyMemo Cloud (product-design.md §16): the per-computer link (`cloud.json`, never in the folder), linking with PKCE and a loopback callback, and the bridge: one outbound WebSocket that answers relayed tool calls as `cloud-<slug>` connectors. The wire format is pinned by `tests/fixtures/cloud/` (shared with mymemo-service); `tests/cloud_fake.py` is a fake service built from it |
 | `src/openmymemo/cli.py` | Typer CLI |
 | `src/openmymemo/codex.py` | Codex session hook: merges it into `~/.codex/hooks.json` and takes it out again (Codex doesn't run plugin hooks) |
 | `web/` | Vue 3 + Tailwind v4 panel source; all copy lives in `web/src/i18n.ts` |
-| `web/src/components/ConnectApps.vue` | The app list with Connect / Disconnect / Set up, used by the Connectors page and the first-run guide; `ConnectNote` shows what's left to do, `ConnectorPanel` a connected app's permissions |
+| `web/src/components/ConnectApps.vue` | The app list with Connect / Disconnect / Set up, used by the Connectors page and the first-run guide; `ConnectNote` shows what's left to do, `ConnectorPanel` a connected app's permissions, `CloudRow` the MyMemo Cloud row (sign-in, status, setup for ChatGPT and claude.ai, its web apps) |
 | `web/src/desktop.ts` | The Mac layout switch (`?desktop=1`), the shell's commands and shortcuts; `MemoriesDesktopView`, `MemoryInspector`, `DesktopSidebar`, `DesktopToolbar` are its screens; `memorySaves.ts` queues the inspector's saves per memory. `PageHeader` becomes the window toolbar there |
 | `desktop/` | Mac app (Tauri 2, product-design.md §14): `src-tauri/src/core.rs` finds or starts the server for the folder, `main.rs` has the window, menus, menu-bar item and notifications; `scripts/stage_desktop.py` stages the core and `uv` before each build |
 | `.claude-plugin/` | Claude Code plugin manifest and marketplace (the repo root is the plugin) |
@@ -66,4 +67,5 @@ python3 scripts/stage_desktop.py && (cd desktop/src-tauri && cargo test)  # Mac 
 - CI (`.github/workflows/ci.yml`) runs the tests on Linux and macOS, checks that the committed panel build matches `web/`, runs the panel's and the Mac app's tests, and packs the `.mcpb`. To release: bump the version, merge, then push a tag `v<version>`; `.github/workflows/release.yml` publishes the `.mcpb`, wheel and sdist as a GitHub release.
 - Don't add a root `.mcp.json`: Claude Code would treat it as project config for everyone working on this repo. The Claude Code MCP server is declared inline in `.claude-plugin/plugin.json`.
 - Commit messages are imperative English; one topic per PR.
+- MyMemo Cloud reads `OPENMYMEMO_CLOUD_URL` (the service, default `https://api.mymemo.ai`) and `OPENMYMEMO_CLOUD_DIR` (the folder of `cloud.json`). `tests/conftest.py` gives every test its own HOME, cloud folder and a local URL; set both yourself before trying `openmymemo cloud …` or the panel's sign-in by hand, so nothing touches your real link or MyMemo.
 - The Mac app adds nothing to the panel's API: it is the same panel in another layout. New panel features go into the web screens; give the Mac layout its own version only where the design has one. A native command the panel calls must be listed in `desktop/src-tauri/build.rs` and granted in `capabilities/default.json`, because the panel is a remote origin to Tauri.
