@@ -17,8 +17,10 @@ import anyio
 import pytest
 from cloud_fake import FakeService, fixture, wait_until
 from fastapi.testclient import TestClient
+from typer.testing import CliRunner
 
 from openmymemo import __version__, clients, cloud
+from openmymemo.cli import app as cli
 from openmymemo.cloud import Bridge, Cloud, Link, Timing
 from openmymemo.connectors import Connectors
 from openmymemo.mcp_server import build_server
@@ -499,3 +501,42 @@ def test_the_panel_server_connects_once_its_port_is_bound_and_says_1000_when_it_
     server.should_exit = True
     thread.join(10)
     assert conn.closed.wait(5) and conn.client_close == 1000
+
+
+# ---- the command line ---------------------------------------------------------------------------------------------
+
+
+def test_cli_links_shows_status_and_unlinks(vault, fake, monkeypatch):
+    import socket
+    import webbrowser
+
+    monkeypatch.setenv("OPENMYMEMO_CLOUD_URL", fake.base)
+    opened: list[str] = []
+
+    def browser(url: str) -> bool:  # the person signs in; MyMemo sends the browser back to the CLI's listener
+        opened.append(url)
+        back = fake.authorize(url)
+        threading.Thread(target=lambda: urllib.request.urlopen(back, timeout=10).read(), daemon=True).start()
+        return True
+
+    monkeypatch.setattr(webbrowser, "open", browser)
+    with socket.socket() as s:  # no panel runs there
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    runner = CliRunner()
+    base = ["--vault", str(vault.root), "cloud"]
+    out = runner.invoke(cli, [*base, "link", "--port", str(port)])
+    assert out.exit_code == 0, out.output
+    assert "Linked as Sam (Ultra · live relay and offline queue)." in out.output
+    assert f"{fake.base}/openmymemo/mcp" in out.output and "Developer Mode" in out.output
+    redirect = dict(parse_qsl(urlsplit(opened[0]).query))["redirect_uri"]
+    assert redirect.startswith("http://127.0.0.1:") and redirect.endswith("/cloud/callback")
+    assert cloud.load_link().vault == str(vault.root)
+
+    out = runner.invoke(cli, [*base, "status", "--port", str(port)])
+    assert out.exit_code == 0 and "Linked as Sam" in out.output and "not running" in out.output
+
+    out = runner.invoke(cli, [*base, "unlink", "--yes", "--port", str(port)])
+    assert out.exit_code == 0 and "Unlinked" in out.output and cloud.load_link() is None
+    assert fake.unlinks == [f"Bearer {fake.token}"]
+    assert "Not linked" in runner.invoke(cli, [*base, "status"]).output
