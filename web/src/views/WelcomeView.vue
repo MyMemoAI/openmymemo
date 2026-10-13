@@ -252,21 +252,24 @@ function next() {
         <p class="text-[13px] text-muted">{{ t("onb.about.lead") }}</p>
       </div>
       <div class="card divide-y divide-sep">
-        <label v-for="(f, i) in FIELDS" :key="f.id" class="block space-y-1.5 px-4.5 py-3.5">
-          <span class="block text-sm font-semibold">{{ t(`onb.about.${f.id}.label`) }}</span>
+        <div v-for="(f, i) in FIELDS" :key="f.id" class="space-y-1.5 px-4.5 py-3.5">
+          <label :for="`onb-${f.id}`" class="block text-sm font-semibold">{{ t(`onb.about.${f.id}.label`) }}</label>
           <input
+            :id="`onb-${f.id}`"
             v-model="answers[f.id]"
             type="text"
             maxlength="300"
+            autocomplete="off"
             class="input"
             :name="f.id"
             :placeholder="t(`onb.about.${f.id}.placeholder`)"
+            :aria-describedby="statement(f.id) ? `onb-${f.id}-saved` : undefined"
             @keydown.enter="onFieldEnter($event, i)"
           />
-          <span v-if="statement(f.id)" class="block text-xs text-muted">
+          <p v-if="statement(f.id)" :id="`onb-${f.id}-saved`" class="text-xs text-muted">
             {{ t("onb.about.savedAs", { topic: topicTitle(f.topic), text: statement(f.id) }) }}
-          </span>
-        </label>
+          </p>
+        </div>
       </div>
     </section>
 
