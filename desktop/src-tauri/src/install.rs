@@ -65,19 +65,25 @@ pub fn version_of(bundle: &Path) -> Option<String> {
     (out.status.success() && !version.is_empty()).then_some(version)
 }
 
-/// Processes running from `bundle` (`ps` shows each one's executable path).
+/// The executable a process runs.
+fn executable_of(pid: i32) -> Option<PathBuf> {
+    let mut buf = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+    let len = unsafe { libc::proc_pidpath(pid, buf.as_mut_ptr().cast(), buf.len() as u32) };
+    (len > 0).then(|| PathBuf::from(std::ffi::OsStr::from_bytes(&buf[..len as usize])))
+}
+
+/// This user's processes running from `bundle` (another account's copy isn't ours to quit).
 pub fn running_from(bundle: &Path) -> Vec<i32> {
-    let prefix = bundle.join("Contents/MacOS/");
-    let Ok(out) = Command::new("/bin/ps").args(["-axo", "pid=,comm="]).stdin(Stdio::null()).output() else {
+    // The kernel reports real paths (/private/var/…, not /var/…).
+    let prefix = fs::canonicalize(bundle).unwrap_or_else(|_| bundle.to_path_buf()).join("Contents/MacOS/");
+    let Ok(out) = Command::new("/bin/ps").args(["-xo", "pid="]).stdin(Stdio::null()).output() else {
         return Vec::new();
     };
     String::from_utf8_lossy(&out.stdout)
         .lines()
-        .filter_map(|line| {
-            let (pid, comm) = line.trim_start().split_once(' ')?;
-            Path::new(comm.trim_start()).starts_with(&prefix).then(|| pid.parse().ok()).flatten()
-        })
+        .filter_map(|line| line.trim().parse::<i32>().ok())
         .filter(|pid| *pid != std::process::id() as i32)
+        .filter(|pid| executable_of(*pid).is_some_and(|exe| exe.starts_with(&prefix)))
         .collect()
 }
 
@@ -262,9 +268,21 @@ mod tests {
     }
 
     #[test]
-    fn finds_nothing_running_from_a_copy_that_isnt_running() {
+    fn quits_the_copy_running_from_a_bundle_and_nothing_else() {
         let root = temp_dir("running");
-        assert!(running_from(&root.join(APP_NAME)).is_empty());
-        assert!(quit(&root.join(APP_NAME)).is_ok());
+        let bundle = root.join(APP_NAME);
+        assert!(running_from(&bundle).is_empty());
+        assert!(quit(&bundle).is_ok());
+        // A process running from the bundle (a copy of sleep), and the same program from elsewhere.
+        fs::create_dir_all(bundle.join("Contents/MacOS")).unwrap();
+        fs::copy("/bin/sleep", bundle.join("Contents/MacOS/openmymemo-desktop")).unwrap();
+        let mut inside = Command::new(bundle.join("Contents/MacOS/openmymemo-desktop")).arg("30").spawn().unwrap();
+        let mut outside = Command::new("/bin/sleep").arg("30").spawn().unwrap();
+        assert_eq!(running_from(&bundle), vec![inside.id() as i32]);
+        quit(&bundle).unwrap();
+        assert!(inside.try_wait().unwrap().is_some(), "quit");
+        assert!(outside.try_wait().unwrap().is_none(), "left alone");
+        let _ = outside.kill();
+        let _ = outside.wait();
     }
 }
