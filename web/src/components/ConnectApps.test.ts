@@ -82,6 +82,18 @@ describe("ConnectApps", () => {
     expect(w.findAll("button").filter((b) => b.text() === "Disconnect")).toHaveLength(1);
   });
 
+  it("offers to connect again when only the connector is left of an app's setup", async () => {
+    api.apps.mockImplementation(async () => ({
+      ...catalog(),
+      apps: [app("cursor", "Cursor", { installed: true, connected: false, has_connector: true })],
+    }));
+    const w = mount(ConnectApps, { props: { compact: true } });
+    await flushPromises();
+    expect(w.findAll("button").filter((b) => b.text() === "Connect")).toHaveLength(1);
+    expect(w.findAll("button").filter((b) => b.text() === "Disconnect")).toHaveLength(0);
+    expect(w.text()).not.toContain("restart Cursor");
+  });
+
   it("ignores a list that was asked for before the last action", async () => {
     api.connectApp.mockImplementation(async () => ({
       result: result(),

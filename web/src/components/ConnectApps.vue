@@ -104,7 +104,7 @@ type Tone = "fresh" | "wait" | "danger" | "muted";
 function status(a: AppStatus): { text: string; tone: Tone } {
   if (a.in_use) return { text: t("apps.inUse", { time: relTime(a.last_seen) }), tone: "fresh" };
   if (a.broken) return { text: t("apps.broken"), tone: "danger" };
-  if (a.connected || a.has_connector) {
+  if (a.connected) {
     return { text: t(a.session ? "apps.newSession" : "apps.restart", { name: a.restart_name }), tone: "wait" };
   }
   if (a.revoked) return { text: t("apps.revoked"), tone: "muted" };
@@ -116,7 +116,8 @@ const DOT: Record<Tone, string> = { fresh: "bg-fresh", wait: "bg-wait", danger: 
 type Action = "connect" | "reconnect" | "disconnect" | "setup";
 function action(a: AppStatus): Action {
   if (a.broken) return "reconnect";
-  if (a.connected || a.has_connector) return "disconnect";
+  // A connector whose entry was removed from the app outside OpenMyMemo is repaired by connecting again.
+  if (a.connected) return "disconnect";
   return a.method === "manual" ? "setup" : "connect";
 }
 
@@ -217,7 +218,7 @@ defineExpose({ addOther, disconnect, reload: load });
 
         <template v-for="a in s.apps" :key="a.id">
           <div class="flex items-center gap-3 px-4.5 py-3">
-            <span class="avatar size-[34px] text-sm" :class="{ 'avatar-on': a.connected || a.has_connector }" aria-hidden="true">{{ a.name.slice(0, 1) }}</span>
+            <span class="avatar size-[34px] text-sm" :class="{ 'avatar-on': a.connected }" aria-hidden="true">{{ a.name.slice(0, 1) }}</span>
             <div class="min-w-0 flex-1">
               <div class="truncate font-semibold">{{ a.name }}<span v-if="a.note" class="font-normal text-muted"> · {{ a.note }}</span></div>
               <div class="flex items-center gap-1.5 text-[13px] text-muted">
