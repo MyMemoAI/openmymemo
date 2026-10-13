@@ -251,6 +251,20 @@ def delete_link(device_id: str | None = None) -> bool:
             return False
 
 
+def forget_link(device_id: str, vault: Vault | None) -> bool:
+    """Revoke the web apps and delete ``cloud.json``, only while it still belongs to `device_id`: all under the lock
+    ``save_link`` takes, so a link saved meanwhile (linking again, from another process) keeps its web apps."""
+    with _link_lock():
+        current = load_link()
+        if current is None or current.device_id != device_id:
+            return False
+        if vault is not None:  # first, so whoever sees the link gone also sees the web apps revoked
+            revoke_web_apps(vault)
+        with contextlib.suppress(FileNotFoundError):
+            link_path().unlink()
+        return True
+
+
 def _update_link(device_id: str, **changes: Any) -> None:
     with _link_lock():
         current = load_link()
@@ -422,6 +436,9 @@ class Linker:
         self.ttl = ttl
         self._pending: dict[str, PendingLink] = {}
         self._lock = threading.Lock()
+        # One callback at a time, from taking its state to saving its link: two sign-in tabs answered at once
+        # must not let the older exchange's link overwrite the newer one, or both be accepted.
+        self._finishing = threading.Lock()
         self.error: str | None = None  # why the last link didn't work, for the panel
 
     def _expire(self) -> None:
@@ -454,21 +471,25 @@ class Linker:
             self._expire()
             return self._pending.pop(state, None) if state else None
 
-    def finish(self, params: Mapping[str, str], before_exchange: Callable[[], None] | None = None) -> Outcome:
-        """Answer the browser coming back: check the state, exchange the code. The caller saves the link."""
-        p = self._take(params.get("state") or "")
-        if p is None:
-            return Outcome(400, "This sign-in link isn't valid anymore",
-                           "It was already used, or it is more than ten minutes old. Start again in OpenMyMemo: "
-                           "Connectors → MyMemo Cloud → Sign in.")
-        outcome = self._exchange(p, params, before_exchange)
-        outcome.used = True
-        if outcome.link is None:
-            self.error = outcome.message
-        else:  # linked: any other sign-in still open in a browser tab is stale now
-            with self._lock:
+    def finish(self, params: Mapping[str, str], before_exchange: Callable[[], None] | None = None,
+               keep: Callable[[Link], None] | None = None) -> Outcome:
+        """Answer the browser coming back: check the state, exchange the code and `keep` the link it made."""
+        with self._finishing:
+            p = self._take(params.get("state") or "")
+            if p is None:
+                return Outcome(400, "This sign-in link isn't valid anymore",
+                               "It was already used, or it is more than ten minutes old. Start again in OpenMyMemo: "
+                               "Connectors → MyMemo Cloud → Sign in.")
+            outcome = self._exchange(p, params, before_exchange)
+            outcome.used = True
+            if outcome.link is None:
+                self.error = outcome.message
+                return outcome
+            if keep:
+                keep(outcome.link)
+            with self._lock:  # linked: any other sign-in still open in a browser tab is stale now
                 self._pending.clear()
-        return outcome
+            return outcome
 
     def _exchange(self, p: PendingLink, params: Mapping[str, str],
                   before_exchange: Callable[[], None] | None) -> Outcome:
@@ -559,10 +580,7 @@ def unlink() -> str:
         why = "" if reached else f" ({_service_message(data, status)})"
     except CloudError as e:
         reached, why = False, f" ({e})"
-    delete_link(link.device_id)
-    vault = _linked_vault(link)
-    if vault is not None:
-        revoke_web_apps(vault)
+    forget_link(link.device_id, _linked_vault(link))
     if reached:
         return "Unlinked this computer from MyMemo Cloud. ChatGPT and claude.ai on the web can't reach your memory anymore."
     return ("Unlinked this computer here, but MyMemo couldn't be told" + why.rstrip(".") + ". It stops working either "
@@ -815,12 +833,10 @@ class Bridge:
     def _forget(self) -> None:
         """The service no longer knows this computer: revoke the web apps and delete our link (if it is still ours).
         In that order, so whoever sees the link gone also sees the web apps revoked."""
-        current = load_link()
-        if current is None or current.device_id != self.link.device_id:
-            return
-        with contextlib.suppress(VaultError, OSError):
-            revoke_web_apps(self.vault)
-        delete_link(self.link.device_id)
+        try:
+            forget_link(self.link.device_id, self.vault)
+        except (VaultError, OSError) as e:  # the web apps couldn't be revoked: keep the link, so this is tried again
+            log.warning("MyMemo Cloud: couldn't revoke the web apps (%s)", type(e).__name__)
 
     async def _sleep(self, seconds: float) -> None:
         assert self._wake is not None
@@ -1155,9 +1171,8 @@ class Cloud:
 
     def callback(self, params: Mapping[str, str]) -> Outcome:
         """The browser came back to ``/cloud/callback``. A new link replaces the old one, bridge included."""
-        outcome = self.linker.finish(params, before_exchange=self.stop)  # the old bridge mustn't see the kick
-        if outcome.link is not None:
-            keep_link(self.vault, outcome.link)
+        outcome = self.linker.finish(params, before_exchange=self.stop,  # the old bridge mustn't see the kick
+                                     keep=lambda link: keep_link(self.vault, link))
         if outcome.used:
             self.start()  # the new link, or the old one again when linking failed
         return outcome
@@ -1233,9 +1248,7 @@ def link_with_listener(vault: Vault, open_url: Callable[[str], Any], timeout: fl
             url = urlsplit(self.path)
             if url.path != "/cloud/callback":
                 return self._reply(404, "Not found")
-            outcome = linker.finish(dict(parse_qsl(url.query)))
-            if outcome.link is not None:
-                keep_link(vault, outcome.link)
+            outcome = linker.finish(dict(parse_qsl(url.query)), keep=lambda link: keep_link(vault, link))
             self._reply(outcome.status, callback_page(outcome), CALLBACK_HEADERS)
             if outcome.used:
                 result["outcome"] = outcome

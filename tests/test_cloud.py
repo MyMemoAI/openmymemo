@@ -242,6 +242,60 @@ def test_linking_from_the_panel_writes_cloud_json_and_connects(vault, fake, pane
     assert len(fake.link_requests) == 1 and cloud.load_link() == link
 
 
+def test_two_sign_in_tabs_answered_at_once_link_once(vault, fake, panel, monkeypatch):
+    monkeypatch.setenv("OPENMYMEMO_CLOUD_URL", fake.base)
+    api, _ = panel
+    first, second = (callback_path(fake.authorize(api.post("/api/cloud/link", headers=H).json()["url"]))
+                     for _ in range(2))
+    real, calls = cloud._request, []
+
+    def slow_first(method, url, **kw):  # the first exchange's answer arrives after the second's would
+        calls.append(url)
+        if len(calls) == 1:
+            time.sleep(0.5)
+        return real(method, url, **kw)
+
+    monkeypatch.setattr(cloud, "_request", slow_first)
+    answers: dict[str, int] = {}
+    threads = [threading.Thread(target=lambda n=n, path=path: answers.__setitem__(n, api.get(path).status_code))
+               for n, path in (("first", first), ("second", second))]
+    threads[0].start()
+    time.sleep(0.1)
+    threads[1].start()
+    for t in threads:
+        t.join(10)
+    assert answers == {"first": 200, "second": 400}  # the second waited, and found its sign-in stale
+    assert len(fake.link_requests) == 1 and cloud.load_link().device_token == fake.token
+
+
+def test_a_stale_bridge_forgetting_its_link_leaves_a_newer_link_and_its_web_apps_alone(vault):
+    old = linked(vault, "http://127.0.0.1:9")
+    bridge = Bridge(vault, old)
+    new = Link(**{**old.__dict__, "device_id": "new-device", "device_token": "omd_TEST_ONLY_new"})
+    cloud.save_link(new)  # linked again (from another process) before the old bridge heard it was gone
+    Connectors(vault).ensure("cloud-chatgpt", "ChatGPT (web)", kind="cloud")
+    bridge._forget()
+    assert cloud.load_link() == new and [c.id for c in Connectors(vault).list()] == ["cloud-chatgpt"]
+    Bridge(vault, new)._forget()  # its own link: the web apps go with it
+    assert cloud.load_link() is None and Connectors(vault).list() == []
+
+
+def test_a_link_saved_while_the_old_one_is_forgotten_waits_for_it(vault, monkeypatch):
+    old = linked(vault, "http://127.0.0.1:9")
+    new = Link(**{**old.__dict__, "device_id": "new-device", "device_token": "omd_TEST_ONLY_new"})
+    Connectors(vault).ensure("cloud-chatgpt", "ChatGPT (web)", kind="cloud")
+    real, saved = cloud.revoke_web_apps, threading.Event()
+
+    def revoke_while_relinking(v):
+        threading.Thread(target=lambda: (cloud.save_link(new), saved.set()), daemon=True).start()
+        assert not saved.wait(0.3)  # the replacement can't be saved between the check and the revocation
+        return real(v)
+
+    monkeypatch.setattr(cloud, "revoke_web_apps", revoke_while_relinking)
+    Bridge(vault, old)._forget()
+    assert saved.wait(5) and cloud.load_link() == new  # saved once the old link was gone, and kept
+
+
 def test_the_account_is_kept_up_to_date_from_welcome_and_shown_with_its_masked_email(vault, fake, clouds):
     fake.welcome = {**fake.welcome, "member": {"display_name": "Sam Lee", "email_masked": "s***@example.org"}}
     c, _ = online(vault, fake, clouds)  # linked() knows only the display name "Sam"
