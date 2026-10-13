@@ -346,6 +346,7 @@ const strings: Record<string, string> = {
   "cloud.chatgptSteps": "Custom connectors need Developer Mode: turn it on in Settings, then add a connector with this URL and sign in with your MyMemo account. ChatGPT asks before it runs a tool that writes.",
   "cloud.chatgptPlan": "Whether ChatGPT lets a connector write (save a memory) can depend on your ChatGPT plan; reading works either way.",
   "cloud.whileRunning": "Works while OpenMyMemo runs on this computer.",
+  "cloud.whileRunningQueue": "Reading works while OpenMyMemo runs on this computer. While it doesn't, new memories wait in MyMemo, encrypted so only this computer can read them.",
   "cloud.app.seen": "In use · seen {time}",
   "cloud.app.new": "Through MyMemo Cloud",
   "cloud.app.revoked": "Access removed",

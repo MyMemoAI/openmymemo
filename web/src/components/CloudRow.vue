@@ -240,7 +240,7 @@ defineExpose({ reload: load });
           <span class="text-muted">{{ t("cloud.chatgptPlan") }}</span>
         </li>
       </ul>
-      <p class="text-muted">{{ t("cloud.whileRunning") }}</p>
+      <p class="text-muted">{{ t(s?.plan?.queue ? "cloud.whileRunningQueue" : "cloud.whileRunning") }}</p>
     </div>
 
     <template v-for="app in apps" :key="app.id">
