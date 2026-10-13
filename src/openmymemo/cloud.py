@@ -53,7 +53,7 @@ import urllib.request
 from collections.abc import Callable, Mapping
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode, urlsplit
@@ -80,6 +80,10 @@ TOO_LARGE = "The answer from your computer was too large to relay. Ask for less 
 ENC = "hpke-x25519-hkdfsha256-chacha20poly1305/v1"
 QUEUE_INFO = b"openmymemo-queue/v1|"
 PROPOSE_FIELDS = ("content", "memory_id", "topic", "kind", "reason", "evidence")
+QUEUE_MAX_AGE = timedelta(days=31)
+# The web apps whose slug the service derives from a verified redirect host (its design note, §1.3). The sealed
+# plaintext carries no `verified` flag, so a queued item from any other slug is named as unverified.
+VERIFIED_WEB_APPS = {"chatgpt": "ChatGPT", "claude": "Claude"}
 
 
 class CloudError(Exception):
@@ -588,15 +592,46 @@ def open_item(private_key: str, device_id: str, qid: str, ct: str) -> bytes:
 
 def _parse_time(value: Any) -> str | None:
     """An ISO time from the service, written the way OpenMyMemo writes times (UTC, seconds); None if it isn't one."""
-    if not isinstance(value, str):
+    if not isinstance(value, str) or len(value) > 64:
         return None
     try:
         dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt.astimezone(UTC).isoformat(timespec="seconds")
+    except (ValueError, OverflowError):
         return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
-    return dt.astimezone(UTC).isoformat(timespec="seconds")
+
+
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _queued_at(value: Any) -> str | None:
+    """When a queued proposal was made, kept within [now − 31 days, now]: the service keeps items 30 days, so
+    anything outside that is a clock or a bug, and a time in the future would never expire. None: use now."""
+    parsed = _parse_time(value)
+    if parsed is None:
+        return None
+    now = _now().replace(microsecond=0)
+    return min(max(datetime.fromisoformat(parsed), now - QUEUE_MAX_AGE), now).isoformat(timespec="seconds")
+
+
+def _read_queued(plaintext: bytes, qid: str) -> tuple[dict, str, dict, str | None] | None:
+    """A queued ``memory_propose``: (client, op, the proposal's fields, when it was made); None if it isn't one."""
+    item = json.loads(plaintext)
+    client = item.get("client") if isinstance(item, dict) else None
+    params = item.get("params") if isinstance(item, dict) else None
+    if (not isinstance(item, dict) or item.get("v") != 1 or item.get("qid") != qid
+            or not isinstance(client, dict) or not isinstance(client.get("slug"), str)
+            or not SLUG.fullmatch(client["slug"]) or not isinstance(params, dict)
+            or params.get("name") != "memory_propose" or not isinstance(params.get("arguments"), dict)):
+        return None
+    slug, args = client["slug"], params["arguments"]
+    name = VERIFIED_WEB_APPS.get(slug) or (client["name"] if isinstance(client.get("name"), str) else slug)
+    named = {"slug": slug, "name": name, "verified": slug in VERIFIED_WEB_APPS}
+    fields = {k: args[k] for k in PROPOSE_FIELDS if isinstance(args.get(k), str)}
+    return named, str(args.get("op")), fields, _queued_at(item.get("received_at"))
 
 
 # ---- the bridge ------------------------------------------------------------------------------------------------
@@ -934,25 +969,21 @@ class Bridge:
         if msg.get("enc") != ENC or msg.get("key_id") != self.link.key_id or not isinstance(msg.get("ct"), str):
             return "undecryptable"  # sealed to a key this computer doesn't hold
         try:
-            item = json.loads(open_item(self.link.private_key, self.link.device_id, qid, msg["ct"]))
+            plaintext = open_item(self.link.private_key, self.link.device_id, qid, msg["ct"])
         except Undecryptable:
             return "undecryptable"
-        except ValueError:
+        try:
+            queued = _read_queued(plaintext, qid)
+        except Exception:  # noqa: BLE001 - anything malformed (deep nesting is a RecursionError) is turned down for good
+            queued = None
+        if queued is None:
             return "rejected"
-        client = item.get("client") if isinstance(item, dict) else None
-        params = item.get("params") if isinstance(item, dict) else None
-        if (not isinstance(item, dict) or item.get("v") != 1 or item.get("qid") != qid
-                or not isinstance(client, dict) or not isinstance(client.get("slug"), str)
-                or not SLUG.fullmatch(client["slug"]) or not isinstance(params, dict)
-                or params.get("name") != "memory_propose" or not isinstance(params.get("arguments"), dict)):
-            return "rejected"
-        args = params["arguments"]
-        fields = {k: args[k] for k in PROPOSE_FIELDS if isinstance(args.get(k), str)}
+        client, op, fields, made_at = queued
         try:
             out = Proposals(self.vault).propose(
-                self._connector(client), str(args.get("op")), **fields,
+                self._connector(client), op, **fields,
                 idempotency_key=qid,  # not the AI's own key: the queue id is what a replay carries
-                created_at=_parse_time(item.get("received_at")))
+                created_at=made_at)
         except VaultError:  # revoked, read-only, a blocked topic, a bad proposal
             return "rejected"
         return "duplicate" if out.get("deduplicated") or out.get("status") == "duplicate" else "stored"

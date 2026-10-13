@@ -11,6 +11,7 @@ import stat
 import threading
 import time
 import urllib.request
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
@@ -729,7 +730,7 @@ def test_the_panel_server_connects_once_its_port_is_bound_and_says_1000_when_it_
 # ---- the offline queue (phase 2) ------------------------------------------------------------------------------
 
 
-def seal(plaintext: dict, qid: str) -> str:
+def seal(plaintext: dict | bytes, qid: str) -> str:
     """What the service does with a memory_propose while the computer is offline (hpke_vector.json's suite)."""
     from cryptography.hazmat.primitives import hpke
     from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PublicKey
@@ -737,10 +738,11 @@ def seal(plaintext: dict, qid: str) -> str:
     suite = hpke.Suite(hpke.KEM.X25519, hpke.KDF.HKDF_SHA256, hpke.AEAD.CHACHA20_POLY1305)
     key = X25519PublicKey.from_public_bytes(cloud.unb64u(VECTOR["public_key"]))
     info = b"openmymemo-queue/v1|" + VECTOR["device_id"].encode() + b"|" + qid.encode()
-    return cloud.b64u(suite.encrypt(json.dumps(plaintext).encode(), key, info=info))
+    raw = plaintext if isinstance(plaintext, bytes) else json.dumps(plaintext).encode()
+    return cloud.b64u(suite.encrypt(raw, key, info=info))
 
 
-def item(qid: str, plaintext: dict | None = None, **extra) -> dict:
+def item(qid: str, plaintext: dict | bytes | None = None, **extra) -> dict:
     frame = {**fixture("bridge/item.json"), "qid": qid, **extra}
     if plaintext is not None:
         frame["ct"] = seal(plaintext, qid)
@@ -761,7 +763,17 @@ def test_the_hpke_vector_opens():
         cloud.open_item(VECTOR["private_key"], "another-device", VECTOR["qid"], VECTOR["ct"])
 
 
-def test_queued_proposals_are_filed_as_their_web_app_with_their_time_and_acknowledged(vault, fake, clouds):
+QUEUE_NOW = datetime(2026, 10, 13, 6, 0, tzinfo=UTC)  # the fixtures' items were queued the evening before
+
+
+@pytest.fixture
+def queue_clock(monkeypatch):
+    """Queued times are kept within the last 31 days, so tests about the fixtures' times run on their day."""
+    monkeypatch.setattr(cloud, "_now", lambda: QUEUE_NOW)
+    return QUEUE_NOW
+
+
+def test_queued_proposals_are_filed_as_their_web_app_with_their_time_and_acknowledged(vault, fake, clouds, queue_clock):
     c, conn = online(vault, fake, clouds)
     assert c.status()["queued"] == 1  # welcome.json
     qid = VECTOR["qid"]
@@ -796,6 +808,12 @@ def test_queued_items_that_cant_be_opened_or_filed(vault, fake, clouds):
                    "rejected"),
         "q-bad": (item("q-bad", {**good, "qid": "q-bad", "params": {"name": "memory_propose",
                                                                     "arguments": {"op": "explode"}}}), "rejected"),
+        "q-deep": (item("q-deep", b"[" * 12000), "rejected"),  # json.loads raises RecursionError: still acked
+        "q-text": (item("q-text", b"not json at all"), "rejected"),
+        "q-list": (item("q-list", b"[1, 2, 3]"), "rejected"),
+        "q-op": (item("q-op", {**good, "qid": "q-op", "params": {"name": "memory_propose",
+                                                                  "arguments": {"op": ["add"], "content": 7}}}),
+                 "rejected"),
     }
     for frame, _ in cases.values():
         conn.send(frame)
@@ -823,6 +841,41 @@ def test_queued_items_are_filed_in_the_order_they_arrive(vault, fake, clouds):
     acks = [f["qid"] for f in conn.frames if f["type"] == "ack"]
     assert acks == [f"q{n}" for n in range(5)]
     assert [p.content for p in Proposals(vault).list()][::-1] == texts
+
+
+def test_queued_items_name_unknown_web_apps_as_unverified_and_keep_times_in_range(vault, fake, clouds, queue_clock):
+    _, conn = online(vault, fake, clouds)
+    good = VECTOR["plaintext"]
+
+    def propose(qid: str, content: str, **over) -> dict:
+        args = {"op": "add", "content": content, "topic": "goals"}
+        return {**good, "qid": qid, "params": {"name": "memory_propose", "arguments": args}, **over}
+
+    now = queue_clock
+    cases = [
+        # The sealed client has no `verified` flag: only chatgpt and claude are named as verified, by their own name.
+        propose("q-x", "Is learning Japanese", client={"slug": "x-0123456789", "name": "ChatGPT"}),
+        propose("q-gpt", "Plays the cello on weekends", client={"slug": "chatgpt", "name": "Totally ChatGPT"}),
+        propose("q-svc", "Grows tomatoes on the balcony",  # how the service names an unverified client
+                client={"slug": "x-abcdef0123", "name": "Notes Helper (unverified)"}),
+        propose("q-future", "Wants to run a marathon in Tokyo", received_at="2999-01-01T00:00:00Z"),
+        propose("q-old", "Is writing a book about bridges",
+                received_at=(now - timedelta(days=90)).isoformat()),
+        propose("q-odd", "Plans to visit Iceland next summer", received_at="0001-01-01T00:00:00+01:00"),
+        propose("q-junk", "Keeps bees in the garden", received_at="9" * 5000),
+    ]
+    for c in cases:
+        conn.send(item(c["qid"], c))
+    assert [ack(conn, c["qid"])["outcome"] for c in cases] == ["stored"] * len(cases)
+    names = {c.id: c.name for c in Connectors(vault).list()}
+    assert names == {"cloud-x-0123456789": "ChatGPT (web, unverified)", "cloud-chatgpt": "ChatGPT (web)",
+                     "cloud-x-abcdef0123": "Notes Helper (web, unverified)"}
+    made = {p.content: datetime.fromisoformat(p.created_at) for p in Proposals(vault).list()}
+    assert made["Is learning Japanese"] == datetime(2026, 10, 12, 21, 4, 5, tzinfo=UTC)  # received_at, as sent
+    assert made["Wants to run a marathon in Tokyo"] == now  # never in the future
+    assert made["Is writing a book about bridges"] == now - timedelta(days=31)  # nor older than the queue keeps
+    for text in ("Plans to visit Iceland next summer", "Keeps bees in the garden"):  # not a usable time: filed now
+        assert abs(made[text] - datetime.now(UTC)) < timedelta(seconds=30), text
 
 
 # ---- the command line ---------------------------------------------------------------------------------------------
