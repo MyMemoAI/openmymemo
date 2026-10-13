@@ -16,9 +16,13 @@ tool calls the service relays from web apps, by running the same tool code as th
   registers the public key.
 * **The service** is ``OPENMYMEMO_CLOUD_URL`` (default https://api.mymemo.ai); the bridge is ``/openmymemo/bridge``
   on the same host. The wire format is pinned by ``tests/fixtures/cloud/`` (the MyMemo service tests against the same files).
-* **The bridge** runs on a thread of its own, starts once the panel's port is bound (``web.PanelServer``) and
+* **The bridge** runs on a thread of its own, starts once the panel's port is bound (``web.panel_server``) and
   closes with 1000 when the panel stops. It reconnects with backoff and follows the close codes in
   ``tests/fixtures/cloud/bridge/close_codes.json``.
+* **The offline queue:** while this computer was offline, the service sealed web apps' ``memory_propose`` calls
+  to its X25519 key (HPKE, RFC 9180). They arrive as ``item`` frames after connecting, in order; each is opened,
+  filed through ``proposals.py`` as its web app with the time it was made and ``idempotency_key = qid`` (so a
+  replay is a duplicate), and acknowledged: stored, duplicate, undecryptable or rejected.
 
 The service never sees anything at rest in readable form, and nothing here logs tool arguments or results.
 """
@@ -49,12 +53,14 @@ import urllib.request
 from collections.abc import Callable, Mapping
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode, urlsplit
 
 from . import __version__
 from .connectors import Connector, Connectors, Revoked
+from .proposals import Proposals
 from .vault import NotFound, Vault, VaultError, now_iso
 
 log = logging.getLogger("openmymemo.cloud")
@@ -71,6 +77,9 @@ TOOL_NAMES = ("memory_context", "memory_search", "memory_get", "memory_propose",
 SLUG = re.compile(r"[a-z0-9][a-z0-9-]{0,62}")
 CLOUD_PREFIX = "cloud-"
 TOO_LARGE = "The answer from your computer was too large to relay. Ask for less (fewer ids, a smaller max_chars)."
+ENC = "hpke-x25519-hkdfsha256-chacha20poly1305/v1"
+QUEUE_INFO = b"openmymemo-queue/v1|"
+PROPOSE_FIELDS = ("content", "memory_id", "topic", "kind", "reason", "evidence")
 
 
 class CloudError(Exception):
@@ -555,6 +564,41 @@ def unlink() -> str:
             "way; remove it from your MyMemo account settings too.")
 
 
+# ---- the offline queue -----------------------------------------------------------------------------------------
+
+
+class Undecryptable(Exception):
+    pass
+
+
+def open_item(private_key: str, device_id: str, qid: str, ct: str) -> bytes:
+    """Open one queued item: HPKE base mode, X25519 / HKDF-SHA256 / ChaCha20-Poly1305, bound to this device and row
+    by ``info`` (tests/fixtures/cloud/hpke_vector.json)."""
+    from cryptography.exceptions import InvalidTag
+    from cryptography.hazmat.primitives import hpke
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+
+    try:
+        key = X25519PrivateKey.from_private_bytes(unb64u(private_key))
+        suite = hpke.Suite(hpke.KEM.X25519, hpke.KDF.HKDF_SHA256, hpke.AEAD.CHACHA20_POLY1305)
+        return suite.decrypt(unb64u(ct), key, info=QUEUE_INFO + device_id.encode() + b"|" + qid.encode())
+    except (InvalidTag, ValueError, TypeError) as e:  # binascii.Error is a ValueError
+        raise Undecryptable(type(e).__name__) from None
+
+
+def _parse_time(value: Any) -> str | None:
+    """An ISO time from the service, written the way OpenMyMemo writes times (UTC, seconds); None if it isn't one."""
+    if not isinstance(value, str):
+        return None
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC).isoformat(timespec="seconds")
+
+
 # ---- the bridge ------------------------------------------------------------------------------------------------
 
 
@@ -793,7 +837,12 @@ class Bridge:
                 since = time.monotonic()
                 self._set("online")
                 log.info("MyMemo Cloud: connected")
-                await self._serve(ws)
+                items: asyncio.Queue[dict] = asyncio.Queue()
+                drain = asyncio.create_task(self._drain(ws, items))
+                try:
+                    await self._serve(ws, items)
+                finally:
+                    drain.cancel()  # anything not acknowledged is sent again after reconnecting
                 return ws.close_code, time.monotonic() - since
             finally:
                 self._ws = None
@@ -818,7 +867,7 @@ class Bridge:
             with contextlib.suppress(OSError):
                 _update_link(self.link.device_id, **changes)
 
-    async def _serve(self, ws) -> None:
+    async def _serve(self, ws, items: asyncio.Queue[dict]) -> None:
         from websockets.exceptions import ConnectionClosed
 
         while True:
@@ -838,6 +887,8 @@ class Bridge:
             kind = msg.get("type")
             if kind == "call":
                 self._spawn(self._call(ws, msg))
+            elif kind == "item":
+                items.put_nowait(msg)  # one at a time, in the order the service sends them
             elif kind == "ping":
                 await self._send(ws, {"type": "pong", "t": msg.get("t")})
             elif kind == "bye":
@@ -858,6 +909,53 @@ class Bridge:
         with contextlib.suppress(ConnectionClosed):
             async with self._send_lock:
                 await ws.send(json.dumps(frame, ensure_ascii=False))
+
+    # -- the offline queue --
+
+    async def _drain(self, ws, items: asyncio.Queue[dict]) -> None:
+        while True:
+            msg = await items.get()
+            try:
+                outcome = await asyncio.to_thread(self.file_item, msg)
+            except Exception as e:  # noqa: BLE001 - no ack: the service sends it again, and then it's a duplicate
+                log.warning("MyMemo Cloud: couldn't file a queued change (%s)", type(e).__name__)
+                continue
+            if outcome is None:
+                continue
+            await self._send(ws, {"type": "ack", "qid": msg["qid"], "outcome": outcome})
+            if self.queued:
+                self.queued -= 1
+
+    def file_item(self, msg: Mapping[str, Any]) -> str | None:
+        """File one queued ``memory_propose`` as the web app that made it; the ack's outcome (None: no ack)."""
+        qid = msg.get("qid")
+        if not isinstance(qid, str) or not qid:
+            return None
+        if msg.get("enc") != ENC or msg.get("key_id") != self.link.key_id or not isinstance(msg.get("ct"), str):
+            return "undecryptable"  # sealed to a key this computer doesn't hold
+        try:
+            item = json.loads(open_item(self.link.private_key, self.link.device_id, qid, msg["ct"]))
+        except Undecryptable:
+            return "undecryptable"
+        except ValueError:
+            return "rejected"
+        client = item.get("client") if isinstance(item, dict) else None
+        params = item.get("params") if isinstance(item, dict) else None
+        if (not isinstance(item, dict) or item.get("v") != 1 or item.get("qid") != qid
+                or not isinstance(client, dict) or not isinstance(client.get("slug"), str)
+                or not SLUG.fullmatch(client["slug"]) or not isinstance(params, dict)
+                or params.get("name") != "memory_propose" or not isinstance(params.get("arguments"), dict)):
+            return "rejected"
+        args = params["arguments"]
+        fields = {k: args[k] for k in PROPOSE_FIELDS if isinstance(args.get(k), str)}
+        try:
+            out = Proposals(self.vault).propose(
+                self._connector(client), str(args.get("op")), **fields,
+                idempotency_key=qid,  # not the AI's own key: the queue id is what a replay carries
+                created_at=_parse_time(item.get("received_at")))
+        except VaultError:  # revoked, read-only, a blocked topic, a bad proposal
+            return "rejected"
+        return "duplicate" if out.get("deduplicated") or out.get("status") == "duplicate" else "stored"
 
     # -- relayed calls --
 

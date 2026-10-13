@@ -726,6 +726,105 @@ def test_the_panel_server_connects_once_its_port_is_bound_and_says_1000_when_it_
     assert conn.closed.wait(5) and conn.client_close == 1000
 
 
+# ---- the offline queue (phase 2) ------------------------------------------------------------------------------
+
+
+def seal(plaintext: dict, qid: str) -> str:
+    """What the service does with a memory_propose while the computer is offline (hpke_vector.json's suite)."""
+    from cryptography.hazmat.primitives import hpke
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PublicKey
+
+    suite = hpke.Suite(hpke.KEM.X25519, hpke.KDF.HKDF_SHA256, hpke.AEAD.CHACHA20_POLY1305)
+    key = X25519PublicKey.from_public_bytes(cloud.unb64u(VECTOR["public_key"]))
+    info = b"openmymemo-queue/v1|" + VECTOR["device_id"].encode() + b"|" + qid.encode()
+    return cloud.b64u(suite.encrypt(json.dumps(plaintext).encode(), key, info=info))
+
+
+def item(qid: str, plaintext: dict | None = None, **extra) -> dict:
+    frame = {**fixture("bridge/item.json"), "qid": qid, **extra}
+    if plaintext is not None:
+        frame["ct"] = seal(plaintext, qid)
+    return frame
+
+
+def ack(conn, qid: str) -> dict:
+    return conn.wait_frame(lambda f: f.get("type") == "ack" and f.get("qid") == qid)
+
+
+def test_the_hpke_vector_opens():
+    pt = cloud.open_item(VECTOR["private_key"], VECTOR["device_id"], VECTOR["qid"], VECTOR["ct"])
+    assert pt == cloud.unb64u(VECTOR["plaintext_b64u"]) and json.loads(pt) == VECTOR["plaintext"]
+    assert VECTOR["info"].encode() == cloud.QUEUE_INFO + VECTOR["device_id"].encode() + b"|" + VECTOR["qid"].encode()
+    with pytest.raises(cloud.Undecryptable):  # bound to the row: another qid doesn't open it
+        cloud.open_item(VECTOR["private_key"], VECTOR["device_id"], "another-qid", VECTOR["ct"])
+    with pytest.raises(cloud.Undecryptable):  # and to the device
+        cloud.open_item(VECTOR["private_key"], "another-device", VECTOR["qid"], VECTOR["ct"])
+
+
+def test_queued_proposals_are_filed_as_their_web_app_with_their_time_and_acknowledged(vault, fake, clouds):
+    c, conn = online(vault, fake, clouds)
+    assert c.status()["queued"] == 1  # welcome.json
+    qid = VECTOR["qid"]
+    conn.send(fixture("bridge/item.json"))
+    assert ack(conn, qid) == fixture("bridge/ack.json")  # {"type": "ack", "qid": …, "outcome": "stored"}
+    p = Proposals(vault).list(connector_id="cloud-chatgpt")[0]
+    assert (p.connector_name, p.op, p.content) == ("ChatGPT (web)", "add", "Is training for a half marathon in March.")
+    assert p.created_at == "2026-10-12T21:04:05+00:00" and p.idempotency_key == qid  # not the AI's "chatgpt-41aa"
+    assert p.reason == "Mentioned while planning a week" and p.status == "applied"
+    assert Connectors(vault).get("cloud-chatgpt").kind == "cloud"
+    assert c.status()["queued"] == 0
+
+    conn.frames.clear()
+    conn.send(fixture("bridge/item.json"))  # sent again after a reconnect: at-least-once delivery
+    assert ack(conn, qid)["outcome"] == "duplicate"
+    assert len(Proposals(vault).list(connector_id="cloud-chatgpt")) == 1
+
+
+def test_queued_items_that_cant_be_opened_or_filed(vault, fake, clouds):
+    _, conn = online(vault, fake, clouds)
+    good = VECTOR["plaintext"]
+    broken = fixture("bridge/item.json")
+    raw = bytearray(cloud.unb64u(broken["ct"]))
+    raw[-1] ^= 1
+    cases = {
+        "q-flipped": ({**broken, "qid": "q-flipped", "ct": cloud.b64u(bytes(raw))}, "undecryptable"),
+        "q-other-row": ({**broken, "qid": "q-other-row"}, "undecryptable"),  # sealed for another qid
+        "q-key": (item("q-key", {**good, "qid": "q-key"}, key_id="0000000000000000"), "undecryptable"),
+        "q-garbage": ({**broken, "qid": "q-garbage", "ct": "%%%"}, "undecryptable"),
+        "q-inner": (item("q-inner", {**good, "qid": "someone-else"}), "rejected"),
+        "q-tool": (item("q-tool", {**good, "qid": "q-tool", "params": {"name": "memory_search", "arguments": {}}}),
+                   "rejected"),
+        "q-bad": (item("q-bad", {**good, "qid": "q-bad", "params": {"name": "memory_propose",
+                                                                    "arguments": {"op": "explode"}}}), "rejected"),
+    }
+    for frame, _ in cases.values():
+        conn.send(frame)
+    for qid, (_, outcome) in cases.items():
+        assert ack(conn, qid)["outcome"] == outcome, qid
+    assert Proposals(vault).list() == []
+
+    Connectors(vault).ensure("cloud-chatgpt", "ChatGPT (web)", kind="cloud")
+    Connectors(vault).remove("cloud-chatgpt")
+    conn.send(item("q-revoked", {**good, "qid": "q-revoked"}))
+    assert ack(conn, "q-revoked")["outcome"] == "rejected"
+    assert Proposals(vault).list() == [] and Connectors(vault).list() == []
+
+
+def test_queued_items_are_filed_in_the_order_they_arrive(vault, fake, clouds):
+    _, conn = online(vault, fake, clouds)
+    good = VECTOR["plaintext"]
+    texts = ["Is learning Japanese", "Plays the cello on weekends", "Wants to run a marathon in Tokyo",
+             "Is writing a book about bridges", "Plans to visit Iceland next summer"]
+    for n, text in enumerate(texts):
+        args = {"op": "add", "content": text, "topic": "goals"}
+        conn.send(item(f"q{n}", {**good, "qid": f"q{n}", "params": {"name": "memory_propose", "arguments": args}}))
+    for n in range(5):
+        ack(conn, f"q{n}")
+    acks = [f["qid"] for f in conn.frames if f["type"] == "ack"]
+    assert acks == [f"q{n}" for n in range(5)]
+    assert [p.content for p in Proposals(vault).list()][::-1] == texts
+
+
 # ---- the command line ---------------------------------------------------------------------------------------------
 
 
