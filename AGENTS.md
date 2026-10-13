@@ -35,6 +35,7 @@ python3 scripts/stage_desktop.py && (cd desktop/src-tauri && cargo test)  # Mac 
 | `docs/MEMORY_FORMAT.md` | The folder format; change it before changing what the code reads or writes |
 | `src/openmymemo/textutil.py` | Similarity, search scoring, rule-based classification |
 | `src/openmymemo/connectors.py` | Connector permissions, tokens, revocation tombstones |
+| `src/openmymemo/clients.py` | The catalog of AI apps (product-design.md §15.1): detection, status, one-click connect and disconnect by editing an app's MCP config (JSON or Codex TOML) or running its `mcp add`, and the manual snippets |
 | `src/openmymemo/proposals.py` | Proposal lifecycle, dedupe, auto-apply and undo |
 | `src/openmymemo/context.py` | Compiles what an AI sees, MEMORY.md, log.md, search |
 | `src/openmymemo/transfer.py` | Import (ChatGPT / Claude / Markdown / JSON) and export |
@@ -43,6 +44,7 @@ python3 scripts/stage_desktop.py && (cd desktop/src-tauri && cargo test)  # Mac 
 | `src/openmymemo/cli.py` | Typer CLI |
 | `src/openmymemo/codex.py` | Codex session hook: merges it into `~/.codex/hooks.json` and takes it out again (Codex doesn't run plugin hooks) |
 | `web/` | Vue 3 + Tailwind v4 panel source; all copy lives in `web/src/i18n.ts` |
+| `web/src/components/ConnectApps.vue` | The app list with Connect / Disconnect / Set up, used by the Connectors page and the first-run guide; `ConnectNote` shows what's left to do, `ConnectorPanel` a connected app's permissions |
 | `web/src/desktop.ts` | The Mac layout switch (`?desktop=1`), the shell's commands and shortcuts; `MemoriesDesktopView`, `MemoryInspector`, `DesktopSidebar`, `DesktopToolbar` are its screens; `memorySaves.ts` queues the inspector's saves per memory. `PageHeader` becomes the window toolbar there |
 | `desktop/` | Mac app (Tauri 2, product-design.md §14): `src-tauri/src/core.rs` finds or starts the server for the folder, `main.rs` has the window, menus, menu-bar item and notifications; `scripts/stage_desktop.py` stages the core and `uv` before each build |
 | `.claude-plugin/` | Claude Code plugin manifest and marketplace (the repo root is the plugin) |
