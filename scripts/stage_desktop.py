@@ -33,6 +33,9 @@ def main() -> None:
     # pyproject.toml references README.md and LICENSE, so building the package needs them.
     for name in ("pyproject.toml", "uv.lock", "README.md", "LICENSE"):
         shutil.copy2(ROOT / name, core / name)
+    # The app installs the package non-editable, and uv reinstalls it when pyproject.toml's modification
+    # time changes (or the version does): stamp it with the staging time so each build's code is installed.
+    (core / "pyproject.toml").touch()
     shutil.copytree(ROOT / "src/openmymemo", core / "src/openmymemo",
                     ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
 
