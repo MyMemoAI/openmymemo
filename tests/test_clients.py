@@ -467,8 +467,19 @@ CLAUDE_WRITES = (
     "p = pathlib.Path.home() / '.claude.json'\n"
     "data = json.loads(p.read_text()) if p.exists() else {}\n"
     "if args[:2] == ['mcp', 'add']:\n"
-    "    cmd = args[args.index('--') + 1:]\n"
-    "    data.setdefault('mcpServers', {})['openmymemo'] = {'type': 'stdio', 'command': cmd[0], 'args': cmd[1:], 'env': {}}\n"
+    "    opts, cmd = args[2:args.index('--')], args[args.index('--') + 1:]\n"
+    "    env, names, i = {}, [], 0\n"
+    "    while i < len(opts):\n"  # like Claude Code's parser: --env is variadic, up to the next option
+    "        if opts[i] == '--env':\n"
+    "            i += 1\n"
+    "            while i < len(opts) and not opts[i].startswith('-'):\n"
+    "                k, eq, v = opts[i].partition('=')\n"
+    "                if not eq: print(f'Invalid environment variable format: {opts[i]}', file=sys.stderr); sys.exit(1)\n"
+    "                env[k] = v; i += 1\n"
+    "        elif opts[i] in ('--scope', '--transport'): i += 2\n"
+    "        else: names.append(opts[i]); i += 1\n"
+    "    if names != ['openmymemo']: print(f'error: expected the server name, got {names}', file=sys.stderr); sys.exit(1)\n"
+    "    data.setdefault('mcpServers', {})['openmymemo'] = {'type': 'stdio', 'command': cmd[0], 'args': cmd[1:], 'env': env}\n"
     "if args[:2] == ['mcp', 'remove']:\n"
     "    data.get('mcpServers', {}).pop('openmymemo', None)\n"
     "if args[:2] == ['mcp', 'add-json']:\n"
@@ -521,7 +532,8 @@ def test_claude_code_reconnect_keeps_the_servers_environment(vault, env):
     assert clients.connect(vault, "claude-code", env).status == "done"
     add = calls(log)[-1]
     assert add[:2] == ["mcp", "add"] and add[add.index("--env") + 1] == "HTTPS_PROXY=http://proxy:3128"
-    assert add.index("--env") < add.index("openmymemo") < add.index("--")
+    # The fake parses --env as Claude Code does (variadic), so the name must not follow its values directly.
+    assert json.loads(claude_json.read_text())["mcpServers"]["openmymemo"]["env"] == old["env"]
 
 
 def test_claude_code_keeps_the_old_entry_when_the_new_one_cant_be_added(vault, env):
