@@ -254,11 +254,22 @@ def _replace(path: Path, text: str) -> None:
         mode = target.stat().st_mode & 0o777
     except FileNotFoundError:
         mode = None
+    data = text.encode("utf-8")
     tmp = target.with_name(f".{target.name}.{secrets.token_hex(4)}.tmp")
-    tmp.write_text(text, encoding="utf-8", newline="")
-    if mode is not None:
-        os.chmod(tmp, mode)
-    os.replace(tmp, target)
+    # Born with the file's own permissions (private for a new file): a config holding API keys is never
+    # readable by others, not even for a moment.
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600 if mode is None else mode)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            if mode is not None and hasattr(os, "fchmod"):
+                os.fchmod(f.fileno(), mode)  # exactly, whatever the umask
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, target)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def _backup(path: Path) -> None:

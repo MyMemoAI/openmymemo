@@ -127,6 +127,21 @@ def test_json_writer_follows_a_symlink_to_the_real_file(tmp_path):
     assert link.is_symlink() and json.loads(real.read_text())["mcpServers"]["openmymemo"] == {"command": "x"}
 
 
+def test_the_temporary_file_is_private_from_the_start_and_cleaned_up_on_failure(tmp_path, monkeypatch):
+    path = tmp_path / "settings.json"
+    path.write_text("{}")
+    path.chmod(0o600)
+    monkeypatch.setattr(os, "chmod", lambda *a, **k: None)  # what the temporary file is born with is what counts
+    clients._replace(path, '{"a": 1}')
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600 and path.read_text() == '{"a": 1}'
+    with pytest.raises(UnicodeEncodeError):
+        clients._replace(path, "\ud800")  # can't be written as UTF-8
+    monkeypatch.setattr(os, "fsync", lambda fd: (_ for _ in ()).throw(OSError(28, "No space left on device")))
+    with pytest.raises(OSError):
+        clients._replace(path, '{"b": 2}')
+    assert path.read_text() == '{"a": 1}' and sorted(p.name for p in tmp_path.iterdir()) == ["settings.json"]
+
+
 def test_jsonc_is_read_for_status():
     text = '{\n  // comment, with "quotes"\n  "a": "http://x", /* block */ "b": [1, 2,],\n}'
     assert json.loads(clients._strip_jsonc(text)) == {"a": "http://x", "b": [1, 2]}
