@@ -278,12 +278,24 @@ def _node(data: dict, key: tuple[str, ...], path: Path, create: bool) -> dict | 
     return node
 
 
+ENV_KEYS = ("env", "environment")  # where apps keep a server's environment variables (opencode: environment)
+
+
+def _with_env(current: object, entry: dict) -> dict:
+    """Our entry, keeping the environment the person gave our server (a proxy, say) when it is rewritten."""
+    if not isinstance(current, dict):
+        return entry
+    kept = {k: current[k] for k in ENV_KEYS if k not in entry and isinstance(current.get(k), dict) and current[k]}
+    return {**entry, **kept}
+
+
 def write_json_entry(path: Path, key: tuple[str, ...], entry: dict) -> bool:
     """Set our server entry, changing nothing else. Returns whether the file changed."""
     data, text = _load_json(path)
     servers = _node(data, key, path, create=True)
     if servers is None:
         raise Refused(f"{path} doesn't look like a settings file, so OpenMyMemo won't rewrite it.")
+    entry = _with_env(servers.get(ENTRY), entry)
     if servers.get(ENTRY) == entry:
         return False
     servers[ENTRY] = entry
@@ -385,6 +397,7 @@ def write_toml_entry(path: Path, entry: dict) -> bool:
     text = _read_toml_text(path) or ""
     before = _parse_toml(path, text)
     current = (before.get("mcp_servers") or {}).get(ENTRY) if isinstance(before.get("mcp_servers"), dict) else None
+    entry = _with_env(current, entry)  # an [mcp_servers.openmymemo.env] table comes back as an inline table
     if current == entry:
         return False
     base = _cut_toml_table(text) if current is not None else text

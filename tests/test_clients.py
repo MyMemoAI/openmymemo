@@ -359,6 +359,28 @@ def test_a_null_list_of_servers_is_filled_in(vault, env, tmp_path):
     assert json.loads(nested.read_text()) == {"a": {"b": {"openmymemo": {"command": "x"}}}}
 
 
+def test_reconnecting_keeps_the_environment_the_person_gave_our_server(vault, env):
+    path = env.home / ".cursor/mcp.json"
+    path.parent.mkdir()
+    proxy = {"HTTPS_PROXY": "http://proxy:3128"}
+    path.write_text(json.dumps({"mcpServers": {"openmymemo": {"command": "/old/omm", "args": [], "env": proxy}}}))
+    assert clients.connect(vault, "cursor", env).changed
+    assert json.loads(path.read_text())["mcpServers"]["openmymemo"] == {**entry_for(vault, "cursor"), "env": proxy}
+    assert not clients.connect(vault, "cursor", env).changed
+
+    config = env.home / ".codex/config.toml"
+    config.parent.mkdir()
+    config.write_text('[mcp_servers.openmymemo]\ncommand = "/old/omm"\n\n[mcp_servers.openmymemo.env]\nA = "1"\n\n'
+                      '[mcp_servers.github]\ncommand = "gh"\n')
+    assert clients.connect(vault, "codex", env).changed
+    data = tomllib.loads(config.read_text())
+    assert data["mcp_servers"]["openmymemo"] == {**entry_for(vault, "codex"), "env": {"A": "1"}}
+    assert data["mcp_servers"]["github"] == {"command": "gh"}
+    assert not clients.connect(vault, "codex", env).changed
+    clients.disconnect(vault, "codex", env)
+    assert tomllib.loads(config.read_text()) == {"mcp_servers": {"github": {"command": "gh"}}}
+
+
 def test_an_unwritable_config_is_a_plain_error(vault, env):
     path = env.home / ".cursor/mcp.json"
     path.parent.mkdir()
