@@ -196,6 +196,7 @@ const moreActive = computed(() => moreItems.value.some((n) => n.id === current.v
 
         <footer class="mx-auto mt-12 max-w-[820px] text-xs text-muted">
           {{ t("app.tagline") }} · <span class="font-mono break-all">{{ store.state?.vault }}</span> · v{{ store.state?.version }}
+          · <a href="#/welcome" class="underline-offset-2 hover:underline">{{ t("app.guide") }}</a>
         </footer>
       </main>
     </div>

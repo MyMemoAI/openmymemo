@@ -10,6 +10,7 @@ const strings: Record<string, string> = {
   "nav.more": "More",
   "nav.sections": "Sections",
   "app.tagline": "Your AI memory, on your own computer",
+  "app.guide": "Welcome guide",
   "app.offline": "Can't reach the local server. Check that openmymemo serve is still running.",
   "common.save": "Save",
   "common.cancel": "Cancel",
@@ -133,6 +134,9 @@ const strings: Record<string, string> = {
   "set.autostart": "Open at login",
   "set.autostartHelp": "Keeps OpenMyMemo in the menu bar, so it can tell you when an AI app changes something.",
   "set.version": "OpenMyMemo {version}",
+  "set.guide": "Welcome guide",
+  "set.guideHelp": "Connect your AI apps, bring in memory from other assistants and tell your AI a few things about you.",
+  "set.openGuide": "Open the guide",
 
   "hist.title": "Version history",
   "hist.rollback": "Restore this version",

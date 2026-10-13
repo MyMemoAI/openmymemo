@@ -27,6 +27,10 @@ async function run(fn: () => unknown) {
 const reveal = () => run(() => shell.reveal(vault.value));
 const chooseVault = () => run(() => shell.chooseVault());
 const toggleAutostart = () => run(() => shell.setAutostart(!app.value?.autostart));
+function openGuide() {
+  location.hash = "#/welcome";
+  emit("close");
+}
 </script>
 
 <template>
@@ -45,6 +49,14 @@ const toggleAutostart = () => run(() => shell.setAutostart(!app.value?.autostart
       </section>
 
       <ApprovalSwitch />
+
+      <section class="card flex items-center gap-4 px-4.5 py-3.5">
+        <div class="min-w-0 flex-1 space-y-0.5">
+          <div class="font-semibold">{{ t("set.guide") }}</div>
+          <p class="text-[13px] text-muted">{{ t("set.guideHelp") }}</p>
+        </div>
+        <button type="button" class="btn btn-sm shrink-0" @click="openGuide">{{ t("set.openGuide") }}</button>
+      </section>
 
       <section v-if="native && app" class="card flex items-center gap-4 px-4.5 py-3.5">
         <div class="min-w-0 flex-1 space-y-0.5">
