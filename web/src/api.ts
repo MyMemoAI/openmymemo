@@ -213,7 +213,8 @@ export interface CloudStatus {
   folder: string | null;
   /** The link serves the folder this panel shows. */
   this_folder: boolean;
-  account: { display_name: string } | null;
+  /** Who this computer is linked to: MyMemo's display name and masked email ("s***@example.com"). */
+  account: { display_name: string; email_masked: string } | null;
   plan: CloudPlan | null;
   linked_at: string | null;
   state: "connecting" | "online" | "waiting" | "stopped";
@@ -240,7 +241,8 @@ export interface ConnectorCreated {
 export interface Activity {
   at: string;
   connector: string;
-  action: "context" | "search" | "get" | "propose" | "import";
+  /** link: this computer was linked to MyMemo Cloud (connector "mymemo-cloud"), to `account` / `email_masked`. */
+  action: "context" | "search" | "get" | "propose" | "import" | "link";
   query?: string;
   memory_ids?: string[];
   proposal_id?: string;
@@ -248,6 +250,8 @@ export interface Activity {
   result?: string;
   chars?: number;
   source?: string;
+  account?: string;
+  email_masked?: string;
 }
 
 export interface HistoryRow {

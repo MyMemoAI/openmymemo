@@ -743,8 +743,8 @@ def _cloud_link(ctx: typer.Context, port: int, open_browser: bool) -> None:
             raise typer.Exit(1)
         link = outcome.link
     plan = cloud.plan_label(link.plan)
-    typer.secho(f"Linked as {link.display_name or 'your MyMemo account'}" + (f" ({plan})." if plan else "."),
-                fg="green")
+    typer.secho(f"Linked to {link.account}" + (f" · {plan}." if plan else "."), fg="green")
+    typer.echo("If that isn't your MyMemo account, run `openmymemo cloud unlink` now.")
     _web_steps(cloud.endpoint(link.service))
     if not panel:
         typer.echo("\nMyMemo Cloud works while OpenMyMemo runs on this computer: the Mac app, `openmymemo serve`, or "
@@ -772,7 +772,7 @@ def cloud_status(ctx: typer.Context,
                    "your memory.")
         return
     plan = cloud.plan_label(link.plan)
-    typer.echo(f"Linked as {link.display_name or 'your MyMemo account'}" + (f" ({plan})" if plan else ""))
+    typer.echo(f"Linked to {link.account}" + (f" · {plan}" if plan else ""))
     root = Path(ctx.obj["vault"]).expanduser()
     here = link.serves(root)
     typer.echo(f"Folder: {link.vault}" + ("" if here else f"  (not {root}: link again from that folder to move it)"))

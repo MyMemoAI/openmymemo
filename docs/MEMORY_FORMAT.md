@@ -300,7 +300,7 @@ Append-only, one JSON object per line: what each connector did.
 {"at": "2026-10-08T09:15:00+00:00", "connector": "claude-code", "action": "context", "memory_ids": ["m7f3a", "k2p9d"], "chars": 1840, "via": "hook"}
 ```
 
-`action` is `context`, `search`, `get`, `propose` or `import`; other fields depend on it (`query`, `memory_ids`, `proposal_id`, `result`, `op`, `chars`, `via`, `source`). Reads never rewrite `connectors.yaml`; "last seen" is derived from here.
+`action` is `context`, `search`, `get`, `propose`, `import` or `link`; other fields depend on it (`query`, `memory_ids`, `proposal_id`, `result`, `op`, `chars`, `via`, `source`, `account`, `email_masked`). `link` is written when this computer is linked to MyMemo Cloud, with `connector` `mymemo-cloud` and the account it was linked to: its display name and MyMemo's masked email (`s***@example.com`). Reads never rewrite `connectors.yaml`; "last seen" is derived from here.
 
 ### 6.6 `proposals/<id>.json`
 

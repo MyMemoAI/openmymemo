@@ -205,7 +205,8 @@ def test_linking_from_the_panel_writes_cloud_json_and_connects(vault, fake, pane
 
     back = callback_path(fake.authorize(url))
     r = api.get(back)  # a browser navigation: no X-OpenMyMemo header
-    assert r.status_code == 200 and "Linked" in r.text and r.headers["cache-control"] == "no-store"
+    assert r.status_code == 200 and r.headers["cache-control"] == "no-store"
+    assert "<h1>Linked to Sam (s***@example.com)</h1>" in r.text and "isn&#x27;t your MyMemo account" in r.text
     assert r.headers["referrer-policy"] == "no-referrer"
 
     sent = fake.link_requests[-1]
@@ -214,7 +215,7 @@ def test_linking_from_the_panel_writes_cloud_json_and_connects(vault, fake, pane
     link = cloud.load_link()
     response = fixture("link/response.json")
     assert link.device_id == response["device_id"] and link.device_token == response["device_token"]
-    assert link.service == fake.base and link.vault == str(vault.root) and link.display_name == "Sam"
+    assert link.service == fake.base and link.vault == str(vault.root) and link.member == response["member"]
     assert link.plan == response["plan"] and link.key_id == cloud.key_id(cloud.unb64u(sent["public_key"]))
     assert stat.S_IMODE(cloud.link_path().stat().st_mode) == 0o600 or os.name == "nt"
     assert not (vault.root / "cloud.json").exists()
@@ -224,7 +225,10 @@ def test_linking_from_the_panel_writes_cloud_json_and_connects(vault, fake, pane
     assert conn.hello["key_id"] == link.key_id and conn.headers["authorization"] == f"Bearer {link.device_token}"
     assert "origin" not in conn.headers
     status = wait_until(lambda: (s := api.get("/api/cloud", headers=H).json())["online"] and s)
-    assert status["account"] == {"display_name": "Sam"} and status["plan"]["tier"] == "ultra"
+    assert status["account"] == {"display_name": "Sam", "email_masked": "s***@example.com"}
+    assert status["plan"]["tier"] == "ultra" and cloud.load_link() == link  # welcome names Sam only: the email stays
+    assert [(a["connector"], a["action"], a["account"], a["email_masked"]) for a in vault.activity()] == [
+        ("mymemo-cloud", "link", "Sam", "s***@example.com")]
     assert status["endpoint"] == f"{fake.base}/openmymemo/mcp" and status["this_folder"] and not status["pending"]
 
     # The same callback again (a replay) does nothing.
@@ -234,6 +238,20 @@ def test_linking_from_the_panel_writes_cloud_json_and_connects(vault, fake, pane
     # So does the other tab's sign-in: linking made it stale.
     assert api.get(callback_path(fake.authorize(stale))).status_code == 400
     assert len(fake.link_requests) == 1 and cloud.load_link() == link
+
+
+def test_the_account_is_kept_up_to_date_from_welcome_and_shown_with_its_masked_email(vault, fake, clouds):
+    fake.welcome = {**fake.welcome, "member": {"display_name": "Sam Lee", "email_masked": "s***@example.org"}}
+    c, _ = online(vault, fake, clouds)  # linked() knows only the display name "Sam"
+    wait_until(lambda: cloud.load_link().email_masked == "s***@example.org")
+    assert cloud.load_link().member == {"display_name": "Sam Lee", "email_masked": "s***@example.org"}
+    assert c.status()["account"] == {"display_name": "Sam Lee", "email_masked": "s***@example.org"}
+
+    assert cloud.account_label({"display_name": "Sam", "email_masked": "s***@example.com"}) == "Sam (s***@example.com)"
+    assert cloud.account_label({"email_masked": "s***@example.com"}) == "s***@example.com"
+    assert cloud.account_label({}) == "your MyMemo account"
+    assert cloud.member_fields({"display_name": " Sam\n\tLee ", "email_masked": 7, "plan": "x"}) == {
+        "display_name": "Sam Lee"}
 
 
 def test_the_callback_needs_a_state_this_process_started_recently(vault, fake, panel, monkeypatch):
@@ -705,14 +723,17 @@ def test_cli_links_shows_status_and_unlinks(vault, fake, monkeypatch):
     base = ["--vault", str(vault.root), "cloud"]
     out = runner.invoke(cli, [*base, "link", "--port", str(port)])
     assert out.exit_code == 0, out.output
-    assert "Linked as Sam (Ultra · live relay and offline queue)." in out.output
+    assert "Linked to Sam (s***@example.com) · Ultra · live relay and offline queue." in out.output
+    assert "If that isn't your MyMemo account, run `openmymemo cloud unlink` now." in out.output
+    assert [(a["action"], a["email_masked"]) for a in vault.activity("mymemo-cloud")] == [("link", "s***@example.com")]
     assert f"{fake.base}/openmymemo/mcp" in out.output and "Developer Mode" in out.output
     redirect = dict(parse_qsl(urlsplit(opened[0]).query))["redirect_uri"]
     assert redirect.startswith("http://127.0.0.1:") and redirect.endswith("/cloud/callback")
     assert cloud.load_link().vault == str(vault.root)
 
     out = runner.invoke(cli, [*base, "status", "--port", str(port)])
-    assert out.exit_code == 0 and "Linked as Sam" in out.output and "not running" in out.output
+    assert out.exit_code == 0 and "Linked to Sam (s***@example.com) · Ultra" in out.output
+    assert "not running" in out.output
 
     out = runner.invoke(cli, [*base, "unlink", "--yes", "--port", str(port)])
     assert out.exit_code == 0 and "Unlinked" in out.output and cloud.load_link() is None

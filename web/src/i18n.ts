@@ -314,6 +314,7 @@ const strings: Record<string, string> = {
   "cloud.linkError": "Not linked: {error}",
   "cloud.linked": "Linked to MyMemo Cloud",
   "cloud.signedInAs": "Signed in as {name}",
+  "cloud.yourAccount": "your MyMemo account",
   "cloud.lastCall": "last call {time}",
   "cloud.state.online": "Online",
   "cloud.state.connecting": "Connecting…",
@@ -359,6 +360,7 @@ const strings: Record<string, string> = {
   "act.get": "read {n} memories",
   "act.propose": "proposed to {op}",
   "act.import": "imported {n} ({source})",
+  "act.link": "linked this computer to {who}",
   "act.duplicate": "(already known, ignored)",
 
   "imp.title": "Import memories",

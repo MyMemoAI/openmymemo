@@ -73,7 +73,9 @@ const line = computed<{ text: string; tone: Tone }>(() => {
     return { text: t("cloud.description"), tone: "muted" };
   }
   if (!c.this_folder) return { text: t("cloud.folder", { folder: c.folder ?? "" }), tone: "danger" };
-  const who = c.account?.display_name ? t("cloud.signedInAs", { name: c.account.display_name }) : "";
+  // The masked email too: it is what tells someone this computer is linked to their account and not another's.
+  const account = [c.account?.display_name, c.account?.email_masked].filter(Boolean).join(" · ");
+  const who = account ? t("cloud.signedInAs", { name: account }) : "";
   let state: { key: string; tone: Tone };
   if (c.online) state = { key: "online", tone: "fresh" };
   else if (c.reason === "plan") state = { key: "plan", tone: "danger" };

@@ -85,6 +85,7 @@ export function topicTitle(slug: string | null | undefined): string {
 
 export function connectorName(id: string): string {
   if (id === "user") return t("source.user");
+  if (id === "mymemo-cloud") return t("cloud.name"); // linking it is logged; it isn't a connector itself
   return store.connectors.find((c) => c.id === id)?.name ?? id;
 }
 

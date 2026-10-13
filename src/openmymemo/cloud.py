@@ -115,13 +115,21 @@ class Link:
     private_key: str  # raw X25519 private key, base64url
     key_id: str
     vault: str  # the folder this link serves
-    member: dict = field(default_factory=dict)  # {"display_name"}
+    member: dict = field(default_factory=dict)  # {"display_name", "email_masked"}
     plan: dict = field(default_factory=dict)  # {"tier", "live", "queue"}
     linked_at: str = ""
 
     @property
     def display_name(self) -> str:
         return str(self.member.get("display_name") or "")
+
+    @property
+    def email_masked(self) -> str:
+        return str(self.member.get("email_masked") or "")
+
+    @property
+    def account(self) -> str:
+        return account_label(self.member)
 
     def serves(self, vault_root: Path) -> bool:
         return same_folder(self.vault, vault_root)
@@ -135,6 +143,22 @@ def same_folder(a: str | Path, b: str | Path) -> bool:
         return Path(a).expanduser().resolve() == Path(b).expanduser().resolve()
     except (OSError, RuntimeError):
         return False
+
+
+def member_fields(raw: Any) -> dict[str, str]:
+    """What cloud.json keeps about the account: MyMemo's display name and masked email, each one short line."""
+    if not isinstance(raw, dict):
+        return {}
+    return {k: " ".join(raw[k].split())[:120] for k in ("display_name", "email_masked") if isinstance(raw.get(k), str)}
+
+
+def account_label(member: Mapping[str, Any] | None) -> str:
+    """The account a link belongs to, the same everywhere it is shown: "Sam (s***@example.com)". The masked email is
+    what lets a person notice their computer was linked to someone else's account (a sign-in approved by another)."""
+    name, email = (str((member or {}).get(k) or "") for k in ("display_name", "email_masked"))
+    if name and email:
+        return f"{name} ({email})"
+    return name or email or "your MyMemo account"
 
 
 def load_link() -> Link | None:
@@ -188,6 +212,15 @@ def save_link(link: Link) -> None:
         _write_private(link_path(), link.to_json())
 
 
+def keep_link(vault: Vault, link: Link) -> None:
+    """Save a link just made, and note in the folder's activity log which account it went to."""
+    from .clients import CLOUD
+
+    save_link(link)
+    with contextlib.suppress(OSError):
+        vault.log_activity(CLOUD, "link", account=link.display_name or None, email_masked=link.email_masked or None)
+
+
 def delete_link(device_id: str | None = None) -> bool:
     """Delete ``cloud.json``; with `device_id`, only while it still belongs to that device (a newer link stays)."""
     path = link_path()
@@ -208,6 +241,8 @@ def _update_link(device_id: str, **changes: Any) -> None:
         current = load_link()
         if current is None or current.device_id != device_id:
             return
+        if "member" in changes:  # a welcome may name only some of the account's fields; the others stay
+            changes["member"] = {**current.member, **changes["member"]}
         if all(getattr(current, k) == v for k, v in changes.items()):
             return
         for k, v in changes.items():
@@ -446,15 +481,15 @@ class Linker:
               and isinstance(data.get("device_token"), str))
         if not ok:
             return Outcome(502, "MyMemo didn't link this computer", _service_message(data, status))
-        member = data.get("member") if isinstance(data.get("member"), dict) else {}
         plan = data.get("plan") if isinstance(data.get("plan"), dict) else {}
         link = Link(service=p.service, device_id=data["device_id"], device_token=data["device_token"],
                     private_key=p.private_key, key_id=key_id(unb64u(p.public_key)), vault=p.vault,
-                    member={"display_name": str(member.get("display_name") or "")},
+                    member=member_fields(data.get("member")),
                     plan={k: plan[k] for k in ("tier", "live", "queue") if k in plan}, linked_at=now_iso())
-        who = f"{link.display_name}'s" if link.display_name else "your"
-        return Outcome(200, "Linked", f"This computer is linked to {who} MyMemo account. You can close this tab.",
-                       link=link)
+        return Outcome(200, f"Linked to {link.account}",
+                       f"This computer is now linked to {link.account} on MyMemo. If that isn't your MyMemo account, "
+                       "unlink it in OpenMyMemo now (Connectors → MyMemo Cloud → Unlink). Otherwise you can close "
+                       "this tab.", link=link)
 
 
 def callback_page(outcome: Outcome) -> str:
@@ -752,11 +787,11 @@ class Bridge:
             self._heartbeat = float(msg.get("heartbeat_s") or 25)
         queued = msg.get("queued")
         self.queued = queued if isinstance(queued, int) and queued >= 0 else None
-        member = msg.get("member") if isinstance(msg.get("member"), dict) else None
+        member = member_fields(msg.get("member"))
         plan = msg.get("plan") if isinstance(msg.get("plan"), dict) else None
         changes: dict[str, Any] = {}
-        if member and isinstance(member.get("display_name"), str):
-            changes["member"] = {"display_name": member["display_name"]}
+        if member:
+            changes["member"] = member
         if plan:
             changes["plan"] = {k: plan[k] for k in ("tier", "live", "queue") if k in plan}
         if changes:
@@ -954,7 +989,7 @@ class Cloud:
         """The browser came back to ``/cloud/callback``. A new link replaces the old one, bridge included."""
         outcome = self.linker.finish(params, before_exchange=self.stop)  # the old bridge mustn't see the kick
         if outcome.link is not None:
-            save_link(outcome.link)
+            keep_link(self.vault, outcome.link)
         if outcome.used:
             self.start()  # the new link, or the old one again when linking failed
         return outcome
@@ -981,7 +1016,7 @@ class Cloud:
         if link is None:
             return out
         out.update(folder=link.vault, this_folder=link.serves(self.vault.root), linked_at=link.linked_at,
-                   account={"display_name": link.display_name}, plan=link.plan)
+                   account={"display_name": link.display_name, "email_masked": link.email_masked}, plan=link.plan)
         if not out["this_folder"]:
             out["reason"] = "folder"
             return out
@@ -1032,7 +1067,7 @@ def link_with_listener(vault: Vault, open_url: Callable[[str], Any], timeout: fl
                 return self._reply(404, "Not found")
             outcome = linker.finish(dict(parse_qsl(url.query)))
             if outcome.link is not None:
-                save_link(outcome.link)
+                keep_link(vault, outcome.link)
             self._reply(outcome.status, callback_page(outcome), CALLBACK_HEADERS)
             if outcome.used:
                 result["outcome"] = outcome

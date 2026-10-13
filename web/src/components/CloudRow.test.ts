@@ -17,7 +17,7 @@ function status(extra: Partial<CloudStatus> = {}): CloudStatus {
 }
 
 const linked = (extra: Partial<CloudStatus> = {}) => status({
-  linked: true, folder: "/Users/sam/OpenMyMemo", this_folder: true, account: { display_name: "Sam" },
+  linked: true, folder: "/Users/sam/OpenMyMemo", this_folder: true, account: { display_name: "Sam", email_masked: "s***@example.com" },
   plan: { tier: "ultra", live: true, queue: true }, state: "online", online: true, ...extra,
 });
 
@@ -90,7 +90,7 @@ describe("CloudRow", () => {
     await (w.vm as unknown as { reload: () => Promise<void> }).reload(); // the browser came back
     await flushPromises();
     expect(w.text()).toContain("MyMemo Cloud · Ultra · live relay + offline queue");
-    expect(w.text()).toContain("Online · Signed in as Sam");
+    expect(w.text()).toContain("Online · Signed in as Sam · s***@example.com"); // whose account, unmistakably
     expect(w.find("[data-endpoint]").text()).toBe(ENDPOINT); // exactly, no trailing slash
     expect(w.text()).toContain("Developer Mode");
     expect(w.text()).toContain("can depend on your ChatGPT plan");
