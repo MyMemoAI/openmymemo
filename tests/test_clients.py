@@ -8,10 +8,17 @@ import tomllib
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
+from typer.testing import CliRunner
 
 from openmymemo import clients, codex
+from openmymemo.cli import app
 from openmymemo.connectors import Connectors
 from openmymemo.snippets import command_for, stdio_command
+from openmymemo.web import create_api
+
+H = {"X-OpenMyMemo": "1"}
+runner = CliRunner()
 
 
 @pytest.fixture
@@ -533,3 +540,73 @@ def test_an_entry_whose_program_is_gone_is_broken(vault, env):
     assert clients.app_status(vault, clients.get("cursor"), env)["broken"]
     clients.connect(vault, "cursor", env)
     assert not clients.app_status(vault, clients.get("cursor"), env)["broken"]
+
+
+# ---- the panel API -----------------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def api(vault, env):
+    return TestClient(create_api(vault, 8787), base_url="http://127.0.0.1:8787")
+
+
+def test_api_lists_connects_and_disconnects_apps(vault, env, api):
+    assert api.get("/api/clients").status_code == 403  # the guard applies
+    assert api.post("/api/clients/cursor/connect").status_code == 403
+    Connectors(vault).create("My Tool", "stdio")
+    data = api.get("/api/clients", headers=H).json()
+    assert data["system"] == "darwin" and [c["id"] for c in data["custom"]] == ["my-tool"]
+    cursor = next(a for a in data["apps"] if a["id"] == "cursor")
+    assert cursor["connected"] is False and cursor["connector"] is None
+
+    r = api.post("/api/clients/cursor/connect", headers=H).json()
+    assert r["result"]["status"] == "done" and r["result"]["restart"]
+    assert r["app"]["connected"] and r["app"]["connector"]["id"] == "cursor"
+    assert r["app"]["connector"]["last_seen"] is None and "token_hash" not in r["app"]["connector"]
+    assert (env.home / ".cursor/mcp.json").exists()
+
+    setup = api.get("/api/clients/zed/setup", headers=H).json()
+    assert setup["path"].endswith(".config/zed/settings.json") and "context_servers" in setup["snippet"]
+
+    r = api.post("/api/clients/cursor/disconnect", headers=H).json()
+    assert r["result"]["status"] == "done" and not r["app"]["connected"] and r["app"]["revoked"]
+    assert api.get("/api/connectors", headers=H).json()[0]["id"] == "my-tool"
+
+    for path in ("/api/clients/nope/connect", "/api/clients/nope/disconnect"):
+        assert api.post(path, headers=H).status_code == 404
+    assert api.get("/api/clients/nope/setup", headers=H).status_code == 404
+
+
+# ---- the CLI -----------------------------------------------------------------------------------------------
+
+
+def test_cli_apps_connect_and_disconnect(vault, env):
+    (env.app_dirs[0] / "Cursor.app").mkdir()
+    base = ["--vault", str(vault.root)]
+    out = runner.invoke(app, [*base, "apps"])
+    assert out.exit_code == 0
+    first = out.stdout.splitlines()[1]
+    assert first.startswith("Cursor (cursor)") and " yes " in first
+
+    out = runner.invoke(app, [*base, "connect", "cursor"])
+    assert out.exit_code == 0 and "Restart Cursor to finish" in out.stdout
+    assert json.loads((env.home / ".cursor/mcp.json").read_text())["mcpServers"]["openmymemo"]
+
+    out = runner.invoke(app, [*base, "connect", "goose"])
+    assert out.exit_code == 0 and "extensions:" in out.stdout and "Restart Goose afterwards" in out.stdout
+
+    out = runner.invoke(app, [*base, "disconnect", "cursor"])
+    assert out.exit_code == 0 and "Disconnected Cursor" in out.stdout
+    assert json.loads((env.home / ".cursor/mcp.json").read_text())["mcpServers"] == {}
+
+    out = runner.invoke(app, [*base, "connect", "nope"])
+    assert out.exit_code == 2 and "openmymemo apps" in out.stderr
+
+    out = runner.invoke(app, [*base, "connector", "list"])  # the old commands still work
+    assert out.exit_code == 0 and out.stdout == ""
+
+
+def test_cli_connect_creates_a_missing_vault(tmp_path, env):
+    folder = tmp_path / "fresh"
+    out = runner.invoke(app, ["--vault", str(folder), "connect", "cursor"])
+    assert out.exit_code == 0 and (folder / "memories").is_dir()

@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel
 
-from . import __version__, transfer
+from . import __version__, clients, transfer
 from .connectors import Connector, Connectors
 from .context import compile_context
 from .mcp_server import build_server
@@ -330,6 +330,39 @@ def create_api(vault: Vault, port: int) -> FastAPI:
     @api.get("/api/connectors/{cid}/snippets")
     def connector_snippets(cid: str) -> dict:
         return snippets_for(connectors.get(cid))
+
+    # ---- AI apps: the catalog and one-click connect (product-design.md §15.1) --------------------
+
+    def app_dict(row: dict, known: dict[str, Connector]) -> dict:
+        c = known.get(row["id"])
+        return {**row, "connector": connector_dict(c) if c and row["has_connector"] else None}
+
+    @api.get("/api/clients")
+    def list_clients() -> dict:
+        env = clients.Env.current()
+        known = {c.id: c for c in connectors.list()}
+        ids = {c.id for c in clients.CLIENTS}
+        return {"system": env.system, "apps": [app_dict(r, known) for r in clients.catalog(vault, env)],
+                "custom": [connector_dict(c) for c in known.values() if c.id not in ids]}
+
+    def client_action(app_id: str, action) -> dict:
+        env = clients.Env.current()
+        result = action(vault, app_id, env)
+        known = {c.id: c for c in connectors.list()}
+        return {"result": result.to_dict(),
+                "app": app_dict(clients.app_status(vault, clients.get(app_id), env), known)}
+
+    @api.get("/api/clients/{app_id}/setup")
+    def client_setup(app_id: str) -> dict:
+        return clients.setup(vault, app_id)
+
+    @api.post("/api/clients/{app_id}/connect")
+    def connect_client(app_id: str) -> dict:
+        return client_action(app_id, clients.connect)
+
+    @api.post("/api/clients/{app_id}/disconnect")
+    def disconnect_client(app_id: str) -> dict:
+        return client_action(app_id, clients.disconnect)
 
     # ---- what AI sees, activity ----------------------------------------------------------------
 
