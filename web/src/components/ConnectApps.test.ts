@@ -94,6 +94,21 @@ describe("ConnectApps", () => {
     expect(w.text()).not.toContain("restart Cursor");
   });
 
+  it("lists an app added by hand under the name Other like any other", async () => {
+    const other = {
+      id: "other", name: "Other", kind: "stdio" as const, read_topics: "all" as const, include_private: false,
+      write: "propose" as const, blocked_topics: [], token_preview: null, has_token: false, created_at: "",
+      last_seen: null, reads: 0, proposals: 0,
+    };
+    api.apps.mockImplementation(async () => ({ ...catalog(), custom: [other] }));
+    const w = mount(ConnectApps, { props: { compact: false }, slots: { manage: () => h("div", "permissions") } });
+    await flushPromises();
+    const manage = w.find("button[aria-label='Permissions for Other']");
+    expect(manage.exists()).toBe(true);
+    await manage.trigger("click");
+    expect(w.emitted("manage")).toEqual([["other"]]);
+  });
+
   it("ignores a list that was asked for before the last action", async () => {
     api.connectApp.mockImplementation(async () => ({
       result: result(),

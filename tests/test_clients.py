@@ -754,6 +754,15 @@ def test_api_lists_connects_and_disconnects_apps(vault, env, api):
     assert api.get("/api/clients/nope/setup", headers=H).status_code == 404
 
 
+def test_api_keeps_an_app_added_by_hand_as_other_manageable(vault, env, api):
+    created = api.post("/api/connectors", headers=H, json={"name": "Other", "kind": "stdio"}).json()
+    assert created["connector"]["id"] == "other"
+    data = api.get("/api/clients", headers=H).json()
+    assert [c["id"] for c in data["custom"]] == ["other"]
+    assert api.delete("/api/connectors/other", headers=H).json() == {"ok": True}
+    assert api.get("/api/clients", headers=H).json()["custom"] == []
+
+
 # ---- the CLI -----------------------------------------------------------------------------------------------
 
 

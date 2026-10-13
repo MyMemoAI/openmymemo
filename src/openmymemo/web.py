@@ -341,7 +341,7 @@ def create_api(vault: Vault, port: int) -> FastAPI:
     def list_clients() -> dict:
         env = clients.Env.current()
         known = {c.id: c for c in connectors.list()}
-        ids = {c.id for c in clients.CLIENTS}
+        ids = {c.id for c in clients.CLIENTS if c.id != clients.OTHER}  # "other" is a button, not an app
         return {"system": env.system, "apps": [app_dict(r, known) for r in clients.catalog(vault, env)],
                 "custom": [connector_dict(c) for c in known.values() if c.id not in ids]}
 
