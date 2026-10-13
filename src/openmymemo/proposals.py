@@ -222,6 +222,9 @@ class Proposals:
             if idempotency_key:
                 for p in self.list(connector_id=connector.id):
                     if p.idempotency_key == idempotency_key:
+                        if queue_id and not p.queue_id:  # the live retry came first: keep the queued receipt too
+                            p.queue_id = queue_id
+                            self._save(p)
                         return self._result(p, deduplicated=True)
 
             private = v.private_topics()

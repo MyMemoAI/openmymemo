@@ -634,7 +634,7 @@ def _read_queued(plaintext: bytes, qid: str) -> tuple[dict, str, dict, str | Non
     named = {"slug": slug, "name": name, "verified": slug in VERIFIED_WEB_APPS}
     fields = {k: args[k] for k in PROPOSE_FIELDS if isinstance(args.get(k), str)}
     key = args.get("idempotency_key")
-    key = key if isinstance(key, str) and 0 < len(key) <= 200 else None
+    key = key if isinstance(key, str) and key else None  # as the live path takes it, whatever its length
     return named, str(args.get("op")), fields, _queued_at(item.get("received_at")), key
 
 
@@ -956,9 +956,12 @@ class Bridge:
             msg = await items.get()
             try:
                 outcome = await asyncio.to_thread(self.file_item, msg)
-            except Exception as e:  # noqa: BLE001 - no ack: the service sends it again, and then it's a duplicate
-                log.warning("MyMemo Cloud: couldn't file a queued change (%s)", type(e).__name__)
-                continue
+            except Exception as e:  # noqa: BLE001 - a passing failure (a full disk, a locked file): try it again later
+                # Nothing after it may be filed first, or an older change could land on top of a newer one when it
+                # is sent again. Hang up instead: the service sends the queue again, in order, after reconnecting.
+                log.warning("MyMemo Cloud: couldn't file a queued change (%s); reconnecting", type(e).__name__)
+                await ws.close(1011, "couldn't file a queued change")
+                return
             if outcome is None:
                 continue
             await self._send(ws, {"type": "ack", "qid": msg["qid"], "outcome": outcome})

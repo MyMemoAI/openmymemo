@@ -861,6 +861,74 @@ def test_a_queued_write_retried_live_is_one_proposal_and_traceable(vault, fake, 
     assert next(p for p in Proposals(vault).list() if p.queue_id == "q-plain").idempotency_key == "q-plain"
 
 
+def test_a_passing_failure_stops_the_queue_until_it_is_sent_again_in_order(vault, fake, clouds, queue_clock, monkeypatch):
+    m = vault.add("how-to-work-with-me", "Drinks coffee.")
+    _, conn = online(vault, fake, clouds)
+    Connectors(vault).ensure("cloud-chatgpt", "ChatGPT (web)", kind="cloud")
+    Connectors(vault).update("cloud-chatgpt", write="auto")
+    good = VECTOR["plaintext"]
+
+    def update(qid, text):
+        args = {"op": "update", "memory_id": m.id, "content": text}
+        return item(qid, {**good, "qid": qid, "params": {"name": "memory_propose", "arguments": args}})
+
+    real, failed = Proposals.propose, []
+
+    def once(self, *a, **k):
+        if k.get("queue_id") == "q-old" and not failed:
+            failed.append(True)
+            raise OSError(28, "No space left on device")
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(Proposals, "propose", once)
+    conn.send(update("q-old", "Drinks black tea."))
+    conn.send(update("q-new", "Drinks green tea."))
+    assert conn.closed.wait(5) and conn.client_close == 1011  # hung up rather than filing q-new first
+    assert not [f for f in conn.frames if f.get("type") == "ack"] and vault.get(m.id).content == "Drinks coffee."
+
+    again = fake.connection(1)  # the service sends the queue again, in order
+    again.send(update("q-old", "Drinks black tea."))
+    again.send(update("q-new", "Drinks green tea."))
+    assert ack(again, "q-old")["outcome"] == ack(again, "q-new")["outcome"] == "stored"
+    assert vault.get(m.id).content == "Drinks green tea."
+
+
+@pytest.mark.parametrize("live_first", [True, False])
+def test_the_queued_receipt_is_kept_whichever_copy_arrives_first(live_first, vault, fake, clouds, queue_clock):
+    _, conn = online(vault, fake, clouds)
+    args = {"op": "add", "content": "Keeps bees on the roof.", "topic": "goals", "idempotency_key": "retry-key"}
+    relayed = {**fixture("bridge/call.json"), "client": {"slug": "chatgpt", "name": "ChatGPT", "verified": True}}
+    queued = item("q-race", {**VECTOR["plaintext"], "qid": "q-race",
+                             "params": {"name": "memory_propose", "arguments": args}})
+    live = {**relayed, "id": "c-live", "params": {"name": "memory_propose", "arguments": args}}
+    if live_first:
+        call(conn, live)
+        conn.send(queued)
+        assert ack(conn, "q-race")["outcome"] == "duplicate"
+    else:
+        conn.send(queued)
+        assert ack(conn, "q-race")["outcome"] == "stored"
+        call(conn, live)
+    [p] = Proposals(vault).list(connector_id="cloud-chatgpt")
+    assert p.queue_id == "q-race" and p.idempotency_key == "retry-key"
+
+
+def test_a_long_idempotency_key_keeps_its_identity(vault, fake, clouds, queue_clock):
+    vault.update_settings(require_approval=True)
+    _, conn = online(vault, fake, clouds)
+    args = {"op": "add", "content": "Keeps bees on the roof.", "topic": "goals", "idempotency_key": "a" * 201}
+    conn.send(item("q-long", {**VECTOR["plaintext"], "qid": "q-long",
+                              "params": {"name": "memory_propose", "arguments": args}}))
+    assert ack(conn, "q-long")["outcome"] == "stored"
+    [p] = Proposals(vault).list(connector_id="cloud-chatgpt")
+    assert p.idempotency_key == "a" * 201 and p.status == "pending"
+    Proposals(vault).reject(p.id)
+    relayed = {**fixture("bridge/call.json"), "client": {"slug": "chatgpt", "name": "ChatGPT", "verified": True}}
+    again = call(conn, {**relayed, "id": "c-long", "params": {"name": "memory_propose", "arguments": args}})
+    assert again["result"]["structuredContent"]["proposal_id"] == p.id  # the rejected one, not a second proposal
+    assert len(Proposals(vault).list(connector_id="cloud-chatgpt")) == 1
+
+
 def test_queued_items_are_filed_in_the_order_they_arrive(vault, fake, clouds):
     _, conn = online(vault, fake, clouds)
     good = VECTOR["plaintext"]
