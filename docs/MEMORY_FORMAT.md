@@ -191,7 +191,7 @@ connectors:
 
 - `write`: `none` is read only; `propose` follows the folder's `require_approval` setting and the protected-memory rule (§6.1); `auto` applies every change except in private topics.
 - Tokens are never stored; only the SHA-256 and a short preview are.
-- `kind: cloud` is a web app reaching the folder through MyMemo Cloud (product-design.md §16). Its id is `cloud-<slug>` (`cloud-chatgpt`, `cloud-claude`, …), it has no token, and it is created on first use like a stdio app.
+- `kind: cloud` is a web app reaching the folder through MyMemo Cloud (product-design.md §16). Its id is `cloud-<slug>` (`cloud-chatgpt`, `cloud-claude`, …), it has no token, and it is created on first use like a stdio app. Ids starting with `cloud-` are kept for this kind: OpenMyMemo gives another app whose name would make such an id `app-cloud-…` instead, and never lets a web app act as a connector of another kind that has one.
 - A connector with `revoked_at` refuses every call. Adding the same id again is an explicit re-grant.
 
 ## 6. `.openmymemo/`

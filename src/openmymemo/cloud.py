@@ -781,13 +781,20 @@ class Bridge:
 
     def _connector(self, client: Mapping[str, Any]) -> Connector:
         cid = CLOUD_PREFIX + str(client["slug"])
+        name = web_name(client)
         cons = Connectors(self.vault)
         try:
-            return cons.ensure(cid, web_name(client), kind="cloud")
+            c = cons.ensure(cid, name, kind="cloud")
         except Revoked:
             known = next((c for c in cons._load() if c.id == cid), None)
-            name = known.name if known else web_name(client)
+            if known is not None and known.kind == "cloud":
+                name = known.name
             raise Revoked(f"The person revoked {name}'s access in OpenMyMemo.") from None
+        if c.kind != "cloud":
+            # An app of the person's own that has this id (from before cloud- was kept for web apps): a web app
+            # must never read or write as it, so it is turned away, without learning that app's name.
+            raise Revoked(f"The person revoked {name}'s access in OpenMyMemo.")
+        return c
 
     async def answer(self, call_id: str, msg: Mapping[str, Any]) -> dict:
         """Run one relayed ``tools/call`` as the web app's connector; the result frame for the service."""

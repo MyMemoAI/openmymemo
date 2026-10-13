@@ -317,6 +317,8 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
 
     @api.post("/api/connectors")
     def create_connector(body: ConnectorIn) -> dict:
+        if body.kind not in ("stdio", "http"):  # web apps come through MyMemo Cloud, not by name
+            raise HTTPException(400, "kind must be stdio or http")
         c, token = connectors.create(body.name, body.kind, write=body.write)
         return {"connector": connector_dict(c), "token": token, "snippets": snippets_for(c, token)}
 

@@ -15,7 +15,8 @@ Every change that applies stays undoable for as long as it is the memory's lates
 stdio connectors are identified by ``openmymemo mcp --connector <id>``; HTTP connectors by a bearer
 token. Only the SHA-256 of a token is stored. ``cloud`` connectors (``cloud-chatgpt``, ``cloud-claude``, …) are
 web apps that reach the folder through MyMemo Cloud (``cloud.py``); like stdio apps they have no token and are
-created on first use.
+created on first use. Ids starting with ``cloud-`` belong to them alone, so a web app can never answer as an app
+the person added: another app whose name would slugify to ``cloud-…`` gets ``app-cloud-…`` instead.
 
 Removing a connector leaves a ``revoked`` tombstone. A stdio app keeps launching ``openmymemo mcp
 --connector <id>`` after the user removes it, and without the tombstone its next call would quietly
@@ -34,6 +35,7 @@ from .vault import NotFound, Vault, VaultError, _atomic_write, now_iso, slugify
 
 WRITE_MODES = ("none", "propose", "auto")
 KINDS = ("stdio", "http", "cloud")
+CLOUD_PREFIX = "cloud-"  # kept for kind "cloud"
 
 
 class Revoked(VaultError):
@@ -127,8 +129,15 @@ class Connectors:
             raise VaultError("kind must be stdio, http or cloud")
         if write not in WRITE_MODES:
             raise VaultError(f"write must be one of {', '.join(WRITE_MODES)}")
+        cid = connector_id or slugify(name)
+        if kind == "cloud" and not cid.startswith(CLOUD_PREFIX):
+            raise VaultError(f"A MyMemo Cloud app's id starts with {CLOUD_PREFIX}")
+        if kind != "cloud" and cid.startswith(CLOUD_PREFIX):
+            if connector_id:
+                raise VaultError(f"Ids starting with {CLOUD_PREFIX} are kept for apps using MyMemo Cloud; choose "
+                                 "another id")
+            cid = "app-" + cid
         with self.vault.lock():
-            cid = connector_id or slugify(name)
             items = [c for c in self._load() if not (c.id == cid and c.revoked_at)]  # re-grant replaces the tombstone
             if any(c.id == cid for c in items):
                 raise VaultError(f"Connector {cid} already exists")

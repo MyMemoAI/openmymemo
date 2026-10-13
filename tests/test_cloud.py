@@ -328,6 +328,41 @@ def test_a_revoked_web_app_is_told_so(vault, fake, clouds):
     assert Connectors(vault).list() == []  # not silently registered again
 
 
+def test_cloud_ids_are_kept_for_web_apps(vault, panel):
+    from openmymemo.vault import VaultError
+
+    cons = Connectors(vault)
+    mine, _ = cons.create("Cloud Claude", "http")  # what "Add another app" makes of that name
+    assert mine.id == "app-cloud-claude"
+    with pytest.raises(VaultError):
+        cons.create("Claude", "stdio", connector_id="cloud-claude")
+    with pytest.raises(VaultError):
+        cons.create("Claude", "cloud")  # a web app's id always starts with cloud-
+    assert cons.ensure("cloud-claude", "Claude (web)", kind="cloud").kind == "cloud"
+    api, _ = panel
+    assert api.post("/api/connectors", headers=H, json={"name": "Cloud thing", "kind": "cloud"}).status_code == 400
+
+
+def test_a_web_app_never_answers_as_an_app_of_another_kind_with_its_id(vault, fake, clouds):
+    from openmymemo.connectors import Connector
+
+    # A folder from before cloud- was kept: the person's own HTTP app happens to be called cloud-claude.
+    cons = Connectors(vault)
+    cons._save([Connector(id="cloud-claude", name="Cloud Claude", kind="http", include_private=True, write="auto",
+                          token_hash="0" * 64, created_at="2026-10-01T00:00:00+00:00")])
+    secret = vault.add("identity", "Secret thing in a private memory", private=True)
+    _, conn = online(vault, fake, clouds)
+    client = {"slug": "claude", "name": "Claude", "verified": True}
+    got = call(conn, {"type": "call", "id": "g1", "client": client,
+                      "params": {"name": "memory_get", "arguments": {"ids": [secret.id]}}})
+    assert got == {"type": "result", "id": "g1",
+                   "error": {"code": "revoked", "message": "The person revoked Claude (web)'s access in OpenMyMemo."}}
+    wrote = call(conn, {**fixture("bridge/call_propose.json"), "id": "g2"})
+    assert wrote["error"]["code"] == "revoked" and Proposals(vault).list() == []
+    assert vault.activity("cloud-claude") == []
+    assert cloud.revoke_web_apps(vault) == [] and cons.get("cloud-claude").kind == "http"  # left alone
+
+
 def test_bad_calls_and_tool_errors(vault, fake, clouds):
     _, conn = online(vault, fake, clouds)
     client = {"slug": "chatgpt", "name": "ChatGPT", "verified": True}
