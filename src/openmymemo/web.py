@@ -31,7 +31,7 @@ from .proposals import PermissionDenied, Proposals
 from .snippets import http_snippets, stdio_snippets
 from .textutil import KINDS, classify_topic
 from .topics import IMPORTED_GROUP
-from .vault import NotFound, Vault, VaultError
+from .vault import Conflict, NotFound, Vault, VaultError
 
 STATIC_DIR = Path(str(files("openmymemo") / "static"))
 
@@ -53,6 +53,11 @@ class MemoryPatch(BaseModel):
     pinned: bool | None = None
     private: bool | None = None
     until: str | None = None
+    expected_version: int | None = None  # refused with 409 when the memory has moved on
+
+
+class ArchiveIn(BaseModel):
+    expected_version: int | None = None
 
 
 class RollbackIn(BaseModel):
@@ -167,7 +172,8 @@ def create_api(vault: Vault, port: int) -> FastAPI:
 
     @api.exception_handler(VaultError)
     async def vault_error(_: Request, exc: VaultError):
-        code = 404 if isinstance(exc, NotFound) else 403 if isinstance(exc, PermissionDenied) else 400
+        code = (404 if isinstance(exc, NotFound) else 403 if isinstance(exc, PermissionDenied)
+                else 409 if isinstance(exc, Conflict) else 400)
         return JSONResponse({"detail": str(exc)}, status_code=code)
 
     def mem_dict(m) -> dict:
@@ -231,8 +237,8 @@ def create_api(vault: Vault, port: int) -> FastAPI:
         return mem_dict(vault.update(memory_id, **body.model_dump(exclude_unset=True)))
 
     @api.post("/api/memories/{memory_id}/archive")
-    def archive_memory(memory_id: str) -> dict:
-        return mem_dict(vault.archive(memory_id))
+    def archive_memory(memory_id: str, body: ArchiveIn | None = None) -> dict:
+        return mem_dict(vault.archive(memory_id, expected_version=body.expected_version if body else None))
 
     @api.post("/api/memories/{memory_id}/restore")
     def restore_memory(memory_id: str) -> dict:

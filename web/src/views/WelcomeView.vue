@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
-import { api, type Kind } from "../api";
+import { api, ApiError, type Kind } from "../api";
 import AppIcon from "../components/AppIcon.vue";
 import ConnectApps from "../components/ConnectApps.vue";
 import ImportPaste from "../components/ImportPaste.vue";
@@ -88,8 +88,8 @@ const FIELDS: { id: "name" | "work" | "answers"; topic: string; kind: Kind }[] =
 type Field = (typeof FIELDS)[number];
 const answers = reactive({ name: "", work: "", answers: "" });
 const saving = ref(false);
-/** The memory the guide saved for each answer and its text then, so a correction updates that memory. */
-const savedFor = reactive<Partial<Record<Field["id"], { id: string; content: string }>>>({});
+/** The memory the guide saved for each answer, its text and version then, so a correction updates that memory. */
+const savedFor = reactive<Partial<Record<Field["id"], { id: string; content: string; version: number }>>>({});
 
 /** One self-contained statement around the person's own words, in whatever language they wrote them. */
 function statement(id: Field["id"]): string {
@@ -98,27 +98,33 @@ function statement(id: Field["id"]): string {
   return t(`onb.about.${id}.statement`, { text }) + (/[.!?。！？…]$/.test(text) ? "" : ".");
 }
 
-type Plan = { op: "none" | "add"; content: string } | { op: "keep" | "update" | "archive"; id: string; content: string };
+type Plan =
+  | { op: "none" | "add"; content: string }
+  | { op: "keep"; id: string; content: string; version: number }
+  | { op: "update" | "archive"; id: string; content: string; version: number };
 
 /**
  * What saving does with an answer. The memory the guide saved for it earlier (after Back) is corrected, or
  * archived when the answer is cleared, as long as it is still as the guide left it; if someone changed or
  * archived it meanwhile, it is left alone and a new answer becomes a new memory. An identical memory already
- * in the topic is kept, and corrected from then on.
+ * in the topic is kept, and corrected from then on. The panel's copy of the memories can be a few seconds old,
+ * so the server checks the version again when saving (see saveAbout).
  */
 function plan(f: Field): Plan {
   const content = statement(f.id);
   const prev = savedFor[f.id];
-  if (prev && store.memories.some((m) => m.id === prev.id && m.content === prev.content)) {
-    if (!content) return { op: "archive", id: prev.id, content: prev.content };
-    return content === prev.content ? { op: "none", content } : { op: "update", id: prev.id, content };
+  if (prev && store.memories.some((m) => m.id === prev.id && m.content === prev.content && m.version === prev.version)) {
+    if (!content) return { op: "archive", id: prev.id, content: prev.content, version: prev.version };
+    return content === prev.content ? { op: "none", content } : { op: "update", id: prev.id, content, version: prev.version };
   }
   if (!content) return { op: "none", content };
   const same = store.memories.find((m) => m.topic === f.topic && m.content === content);
-  return same ? { op: "keep", id: same.id, content } : { op: "add", content };
+  return same ? { op: "keep", id: same.id, content, version: same.version } : { op: "add", content };
 }
 const plans = computed(() => Object.fromEntries(FIELDS.map((f) => [f.id, plan(f)])) as Record<Field["id"], Plan>);
 const unsaved = computed(() => FIELDS.some((f) => ["add", "update", "archive"].includes(plans.value[f.id].op)));
+
+const changedMeanwhile = (e: unknown) => e instanceof ApiError && (e as ApiError).status === 409;
 
 async function saveAbout() {
   if (saving.value) return; // a second Enter, or key repeat, while the first save is on its way
@@ -128,21 +134,34 @@ async function saveAbout() {
   try {
     for (const f of FIELDS) {
       const p = plans.value[f.id];
-      if (p.op === "keep") {
-        savedFor[f.id] = { id: p.id, content: p.content };
-      } else if (p.op === "add") {
+      const add = async (content: string) => {
         // A folder whose topic was removed still gets the memory, filed automatically.
-        const m = await api.addMemory({ topic: topicsBySlug.value[f.topic] ? f.topic : undefined, content: p.content, kind: f.kind });
-        savedFor[f.id] = { id: m.id, content: m.content };
+        const m = await api.addMemory({ topic: topicsBySlug.value[f.topic] ? f.topic : undefined, content, kind: f.kind });
+        savedFor[f.id] = { id: m.id, content: m.content, version: m.version };
         saved++;
+      };
+      if (p.op === "keep") {
+        savedFor[f.id] = { id: p.id, content: p.content, version: p.version };
+      } else if (p.op === "add") {
+        await add(p.content);
       } else if (p.op === "update") {
-        const m = await api.patchMemory(p.id, { content: p.content }); // as the person: it stays protected
-        savedFor[f.id] = { id: m.id, content: m.content };
-        saved++;
+        try {
+          // As the person, so it stays protected; only if it is still the version the guide saved.
+          const m = await api.patchMemory(p.id, { content: p.content, expected_version: p.version });
+          savedFor[f.id] = { id: m.id, content: m.content, version: m.version };
+          saved++;
+        } catch (e) {
+          if (!changedMeanwhile(e)) throw e;
+          await add(p.content); // someone else's edit stays; the new answer is a memory of its own
+        }
       } else if (p.op === "archive") {
-        await api.archive(p.id);
+        try {
+          await api.archive(p.id, p.version);
+          archived++;
+        } catch (e) {
+          if (!changedMeanwhile(e)) throw e; // changed or archived by someone else: left alone
+        }
         delete savedFor[f.id];
-        archived++;
       }
     }
   } catch (e) {

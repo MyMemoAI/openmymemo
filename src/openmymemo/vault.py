@@ -61,6 +61,10 @@ class NotFound(VaultError):
     pass
 
 
+class Conflict(VaultError):
+    """The memory isn't at the version the caller last saw: someone changed it meanwhile."""
+
+
 def now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
@@ -121,6 +125,12 @@ class Memory:
         until = parse_until(self.until)
         d["review_due"] = bool(until and until <= date.today() + timedelta(days=14))
         return d
+
+
+def _check_version(memory_id: str, e: dict, expected: int | None) -> None:
+    """Checked under the lock after re-reading the files, so an edit made in the meantime is never overwritten."""
+    if expected is not None and int(e.get("version", 1)) != expected:
+        raise Conflict(f"Memory {memory_id} was changed meanwhile (now version {e.get('version', 1)})")
 
 
 @dataclass
@@ -704,12 +714,14 @@ class Vault:
 
     def update(self, memory_id: str, *, content: str | None = None, topic: str | None = None,
                kind: str | None = None, pinned: bool | None = None, private: bool | None = None,
-               until: str | None = None, actor: str = "user", proposal_id: str | None = None) -> Memory:
+               until: str | None = None, actor: str = "user", proposal_id: str | None = None,
+               expected_version: int | None = None) -> Memory:
         with self.lock():
             self.sync()
             e = self._meta["memories"].get(memory_id)
             if e is None:
                 raise NotFound(f"No memory with id {memory_id}")
+            _check_version(memory_id, e, expected_version)
             if e.get("status") == "archived":
                 raise VaultError(f"Memory {memory_id} is archived; restore it first")
             if kind is not None and kind not in KINDS:
@@ -762,12 +774,14 @@ class Vault:
             self._after_write()
             return self._memory(memory_id, e)
 
-    def archive(self, memory_id: str, *, actor: str = "user", proposal_id: str | None = None) -> Memory:
+    def archive(self, memory_id: str, *, actor: str = "user", proposal_id: str | None = None,
+                expected_version: int | None = None) -> Memory:
         with self.lock():
             self.sync()
             e = self._meta["memories"].get(memory_id)
             if e is None:
                 raise NotFound(f"No memory with id {memory_id}")
+            _check_version(memory_id, e, expected_version)
             if e.get("status") == "archived":
                 return self._memory(memory_id, e)
             self._edit_file(e["topic"], lambda mf: mf.remove(memory_id))

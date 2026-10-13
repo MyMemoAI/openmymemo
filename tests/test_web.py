@@ -50,6 +50,21 @@ def test_memory_crud_over_api(vault, api):
     assert api.get("/api/memories/zzzzz/history", headers=H).status_code == 404
 
 
+def test_update_and_archive_refuse_a_memory_that_moved_on(vault, api):
+    m = api.post("/api/memories", headers=H, json={"topic": "identity", "content": "Prefers Sam"}).json()
+    assert m["version"] == 1
+    vault.update(m["id"], content="Prefers Sammy")  # say, edited in the Markdown file meanwhile
+    r = api.patch(f"/api/memories/{m['id']}", headers=H, json={"content": "Prefers Samuel", "expected_version": 1})
+    assert r.status_code == 409 and "changed meanwhile" in r.json()["detail"]
+    r = api.post(f"/api/memories/{m['id']}/archive", headers=H, json={"expected_version": 1})
+    assert r.status_code == 409
+    assert vault.get(m["id"]).content == "Prefers Sammy" and vault.get(m["id"]).status == "active"
+    r = api.patch(f"/api/memories/{m['id']}", headers=H, json={"content": "Prefers Samuel", "expected_version": 2})
+    assert r.status_code == 200 and r.json()["version"] == 3
+    assert api.post(f"/api/memories/{m['id']}/archive", headers=H, json={"expected_version": 3}).status_code == 200
+    assert api.post(f"/api/memories/{m['id']}/archive", headers=H).status_code == 200  # no body: as before
+
+
 def test_import_preview_commit_and_export(vault, api):
     items = api.post("/api/import/preview", headers=H,
                      json={"source": "chatgpt", "text": "用户在 Acme 担任 CTO\n删除\n用户喜欢科幻小说"}).json()

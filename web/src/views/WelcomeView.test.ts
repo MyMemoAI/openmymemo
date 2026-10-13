@@ -27,22 +27,27 @@ function item(content: string, extra: Partial<ImportItem> = {}): ImportItem {
 
 const { api, saved } = vi.hoisted(() => {
   const saved: Memory[] = []; // what addMemory wrote, returned by the next refresh
+  // What the server answers when the version named isn't the memory's (ApiError itself is mocked away).
+  const conflict = () => Object.assign(new Error("changed meanwhile"), { status: 409 });
   return {
     saved,
     api: {
       patchSettings: vi.fn(async (body: object) => ({ require_approval: false, onboarded: false, ...body })),
       addMemory: vi.fn(async (body: { topic?: string; content: string }) => {
-        const m = { id: `m${saved.length}`, topic: body.topic ?? "identity", content: body.content } as Memory;
+        const m = { id: `m${saved.length}`, topic: body.topic ?? "identity", content: body.content, version: 1 } as Memory;
         saved.push(m);
         return m;
       }),
-      patchMemory: vi.fn(async (id: string, body: { content?: string }) => {
+      patchMemory: vi.fn(async (id: string, body: { content?: string; expected_version?: number }) => {
         const m = saved.find((x) => x.id === id)!;
-        Object.assign(m, body);
+        if (body.expected_version !== undefined && body.expected_version !== m.version) throw conflict();
+        Object.assign(m, { content: body.content ?? m.content, version: m.version + 1 });
         return m;
       }),
-      archive: vi.fn(async (id: string) => {
-        const m = saved.splice(saved.findIndex((x) => x.id === id), 1)[0];
+      archive: vi.fn(async (id: string, expectedVersion?: number) => {
+        const i = saved.findIndex((x) => x.id === id);
+        if (expectedVersion !== undefined && expectedVersion !== saved[i].version) throw conflict();
+        const m = saved.splice(i, 1)[0];
         return { ...m, status: "archived" } as Memory;
       }),
       importPreview: vi.fn(async (): Promise<ImportItem[]> => []),
@@ -57,7 +62,7 @@ const { api, saved } = vi.hoisted(() => {
     },
   };
 });
-vi.mock("../api", () => ({ api }));
+vi.mock("../api", () => ({ api, ApiError: Error })); // a 409 is an Error with `status` (see `conflict`)
 
 const visibleStep = (w: VueWrapper) =>
   w.findAll("[data-step]").filter((s) => (s.element as HTMLElement).style.display !== "none").map((s) => s.attributes("data-step"));
@@ -168,8 +173,8 @@ describe("the first-run guide", () => {
     await button(w, "Save and continue").trigger("click");
     await flushPromises();
     expect(api.addMemory).toHaveBeenCalledTimes(2); // nothing new: Identity holds one answer, not two
-    expect(api.patchMemory).toHaveBeenCalledWith("m0", { content: "Prefers to be called Sam." });
-    expect(api.archive).toHaveBeenCalledWith("m1");
+    expect(api.patchMemory).toHaveBeenCalledWith("m0", { content: "Prefers to be called Sam.", expected_version: 1 });
+    expect(api.archive).toHaveBeenCalledWith("m1", 1);
     expect(saved.map((m) => m.content)).toEqual(["Prefers to be called Sam."]);
     expect(visibleStep(w)).toEqual(["done"]);
 
@@ -190,6 +195,28 @@ describe("the first-run guide", () => {
     await flushPromises();
     expect(api.patchMemory).not.toHaveBeenCalled(); // the person's own edit stays as they left it
     expect(api.addMemory).toHaveBeenLastCalledWith({ topic: "identity", content: "Prefers to be called Sam.", kind: "preference" });
+  });
+
+  it("checks the version again when saving, in case the page's copy is behind", async () => {
+    const w = mount(WelcomeView, { props: { initialStep: "about" } });
+    await w.get('input[name="name"]').setValue("Sma");
+    await w.get('input[name="work"]').setValue("Baker");
+    await button(w, "Save and continue").trigger("click");
+    await flushPromises();
+    // Edited in the Markdown file after the guide's last refresh: the panel still shows the old text.
+    saved[0] = { ...saved[0], content: "Prefers to be called Sammy.", version: 2 };
+    saved[1] = { ...saved[1], content: "Work: Baker and teacher.", version: 2 };
+    await button(w, "Back").trigger("click");
+    await w.get('input[name="name"]').setValue("Sam");
+    await w.get('input[name="work"]').setValue("");
+    await button(w, "Save and continue").trigger("click");
+    await flushPromises();
+    expect(api.patchMemory).toHaveBeenCalledWith("m0", { content: "Prefers to be called Sam.", expected_version: 1 });
+    expect(api.archive).toHaveBeenCalledWith("m1", 1);
+    // Both edits stay; the corrected answer is a memory of its own.
+    expect(saved.map((m) => m.content)).toEqual(
+      ["Prefers to be called Sammy.", "Work: Baker and teacher.", "Prefers to be called Sam."]);
+    expect(visibleStep(w)).toEqual(["done"]);
   });
 
   it("saves once when Enter is pressed again while the first save is on its way", async () => {

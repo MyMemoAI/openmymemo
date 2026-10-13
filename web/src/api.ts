@@ -229,11 +229,18 @@ export interface ImportItem {
 
 const HEADERS = { "X-OpenMyMemo": "1", "Content-Type": "application/json" };
 
+/** A refused request; `status` 409 means the memory changed since the version the request named. */
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, { method, headers: HEADERS, body: body === undefined ? undefined : JSON.stringify(body) });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new Error(typeof data.detail === "string" ? data.detail : res.statusText);
+    throw new ApiError(typeof data.detail === "string" ? data.detail : res.statusText, res.status);
   }
   return res.json() as Promise<T>;
 }
@@ -245,9 +252,12 @@ export const api = {
   memories: (status: "active" | "archived" = "active") => req<Memory[]>("GET", `/api/memories?status=${status}`),
   addMemory: (body: { topic?: string; content: string; kind?: Kind; section?: string | null; private?: boolean }) =>
     req<Memory>("POST", "/api/memories", body),
-  patchMemory: (id: string, body: Partial<Pick<Memory, "content" | "topic" | "kind" | "pinned" | "private" | "until">>) =>
-    req<Memory>("PATCH", `/api/memories/${enc(id)}`, body),
-  archive: (id: string) => req<Memory>("POST", `/api/memories/${enc(id)}/archive`),
+  patchMemory: (
+    id: string,
+    body: Partial<Pick<Memory, "content" | "topic" | "kind" | "pinned" | "private" | "until">> & { expected_version?: number },
+  ) => req<Memory>("PATCH", `/api/memories/${enc(id)}`, body),
+  archive: (id: string, expectedVersion?: number) =>
+    req<Memory>("POST", `/api/memories/${enc(id)}/archive`, expectedVersion === undefined ? undefined : { expected_version: expectedVersion }),
   restore: (id: string) => req<Memory>("POST", `/api/memories/${enc(id)}/restore`),
   rollback: (id: string, version: number) => req<Memory>("POST", `/api/memories/${enc(id)}/rollback`, { version }),
   history: (id: string) => req<HistoryRow[]>("GET", `/api/memories/${enc(id)}/history`),
