@@ -703,6 +703,7 @@ fn write_launcher(app: &AppHandle, paths: &Paths, bundle: Option<&Path>) {
         uv_env: &uv_env,
         uv_args: &core::UV_ARGS,
         app: bundle,
+        app_transient: bundle.is_some_and(|b| install::transient(b, install::is_read_only).is_some()),
         search: &search,
         mdfind: Path::new("/usr/bin/mdfind"),
     };

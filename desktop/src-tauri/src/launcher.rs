@@ -41,6 +41,9 @@ pub struct Launcher<'a> {
     pub uv_args: &'a [&'static str],
     /// The app bundle that wrote the launcher, when the app runs from one (not in `tauri dev`).
     pub app: Option<&'a Path>,
+    /// Whether `app` runs from its disk image or a translocated copy (install.rs): then it is only the last
+    /// place to look, as it goes away.
+    pub app_transient: bool,
     /// Where else to look for the app, in order, before asking Spotlight.
     pub search: &'a [PathBuf],
     /// Spotlight's command-line tool; a stand-in in tests.
@@ -79,9 +82,12 @@ usable() {{ [ -x "$1/Contents/MacOS/uv" ] && [ -f "$1/Contents/Resources/core/py
 transient() {{ case "$1" in (/Volumes/*|*/AppTranslocation/*) return 0 ;; esac; return 1; }}
 recorded={app}
 app=
-for candidate in "$recorded" {search}; do
-  if [ -n "$candidate" ] && ! transient "$candidate" && usable "$candidate"; then app=$candidate; break; fi
-done
+if [ -n "$recorded" ] && [ {app_transient} = 0 ] && usable "$recorded"; then app=$recorded; fi
+if [ -z "$app" ]; then
+  for candidate in {search}; do
+    if usable "$candidate"; then app=$candidate; break; fi
+  done
+fi
 if [ -z "$app" ]; then
   app=$({mdfind} "kMDItemCFBundleIdentifier == '{bundle_id}'" 2>/dev/null | while IFS= read -r found; do
     case "$found" in (*/.Trash/*) continue ;; esac
@@ -105,6 +111,7 @@ exec "$app/Contents/MacOS/uv" run --project "$core" {uv_args} openmymemo "$@"
             path = quote(self.path),
             support = quote(self.support),
             app = self.app.map(quote).unwrap_or_else(|| "''".into()),
+            app_transient = u8::from(self.app_transient),
             search = search.join(" "),
             mdfind = quote(self.mdfind),
             bundle_id = BUNDLE_ID,
@@ -180,6 +187,7 @@ mod tests {
         launcher: PathBuf,
         support: PathBuf,
         recorded: Option<PathBuf>,
+        recorded_transient: bool,
         search: Vec<PathBuf>,
         /// What the stand-in Spotlight finds, one path per line.
         spotlight: String,
@@ -192,6 +200,7 @@ mod tests {
                 launcher: root.join("Application Support/bin/openmymemo"),
                 support: root.join("Application Support"),
                 recorded: None,
+                recorded_transient: false,
                 search: vec![root.join("Applications/OpenMyMemo.app"), root.join("home/Applications/OpenMyMemo.app")],
                 spotlight: String::new(),
                 root,
@@ -223,6 +232,7 @@ mod tests {
                 uv_env: &uv_env,
                 uv_args: &["--frozen", "--no-editable"],
                 app: self.recorded.as_deref(),
+                app_transient: self.recorded_transient,
                 search: &self.search,
                 mdfind: &mdfind,
             };
@@ -295,6 +305,20 @@ mod tests {
     }
 
     #[test]
+    fn the_app_says_whether_where_it_ran_from_is_temporary() {
+        // An app kept on an external drive, which the path alone would take for a disk image.
+        let mut s = Setup::new("flag");
+        s.recorded = Some(fake_app(&s.root.join("AppTranslocation/Drive/OpenMyMemo.app")));
+        fake_app(&s.search[0]);
+        let out = s.run(&["--version"]);
+        assert!(stdout(&out).starts_with(&format!("uv from {}/", s.recorded.as_ref().unwrap().display())), "{}", stdout(&out));
+        // The disk image it was opened from: an installed copy comes first.
+        s.recorded_transient = true;
+        let out = s.run(&["--version"]);
+        assert!(stdout(&out).starts_with(&format!("uv from {}/", s.search[0].display())), "{}", stdout(&out));
+    }
+
+    #[test]
     fn a_launcher_that_lost_its_exec_bit_is_written_again() {
         let s = Setup::new("mode");
         s.install_venv(true);
@@ -310,6 +334,7 @@ mod tests {
         let mut s = Setup::new("transient");
         // Opened from the disk image, translocated by macOS, then dragged to Applications.
         s.recorded = Some(fake_app(&s.root.join("AppTranslocation/ABC/d/OpenMyMemo.app")));
+        s.recorded_transient = true;
         fake_app(&s.search[1]);
         let out = s.run(&["--version"]);
         assert!(stdout(&out).starts_with(&format!("uv from {}/", s.search[1].display())), "{}", stdout(&out));
@@ -330,6 +355,7 @@ mod tests {
     fn uses_the_disk_image_copy_while_it_is_the_only_one() {
         let mut s = Setup::new("only");
         s.recorded = Some(fake_app(&s.root.join("AppTranslocation/ABC/d/OpenMyMemo.app")));
+        s.recorded_transient = true;
         let out = s.run(&["--version"]);
         assert!(stdout(&out).starts_with("uv from "), "{}", stdout(&out));
     }
