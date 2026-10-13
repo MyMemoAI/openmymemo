@@ -1,0 +1,16 @@
+{
+  "type": "call",
+  "id": "9e1d2c3b4a5f60718293a4b5c6d7e8f9",
+  "client": {
+    "slug": "chatgpt",
+    "name": "ChatGPT",
+    "verified": true
+  },
+  "params": {
+    "name": "memory_context",
+    "arguments": {
+      "max_chars": 8000
+    }
+  },
+  "deadline_ms": 20000
+}

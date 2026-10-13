@@ -1,0 +1,21 @@
+{
+  "type": "welcome",
+  "device_id": "5f0c6d0e-3b7a-4c1e-9a64-2f1d8e7c9b10",
+  "conn_id": "c3a1f0e94b2d4f7a8e6c5b4a39281706",
+  "member": {
+    "display_name": "Sam"
+  },
+  "plan": {
+    "tier": "ultra",
+    "live": true,
+    "queue": true
+  },
+  "limits": {
+    "max_frame_bytes": 1048576,
+    "result_max_bytes": 524288,
+    "call_timeout_ms": 20000,
+    "max_inflight": 4
+  },
+  "heartbeat_s": 25,
+  "queued": 1
+}

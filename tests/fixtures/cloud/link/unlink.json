@@ -1,0 +1,10 @@
+{
+  "method": "DELETE",
+  "path": "/openmymemo/device",
+  "headers": {
+    "Authorization": "Bearer omd_TEST_ONLY_not_a_real_token_0000000000"
+  },
+  "response": {
+    "status": 204
+  }
+}

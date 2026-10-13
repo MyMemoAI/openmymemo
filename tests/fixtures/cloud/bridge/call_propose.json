@@ -1,0 +1,20 @@
+{
+  "type": "call",
+  "id": "1a2b3c4d5e6f708192a3b4c5d6e7f809",
+  "client": {
+    "slug": "claude",
+    "name": "Claude",
+    "verified": true
+  },
+  "params": {
+    "name": "memory_propose",
+    "arguments": {
+      "op": "add",
+      "content": "Prefers answers with the conclusion first.",
+      "reason": "Said so twice",
+      "evidence": "Give me the conclusion first, please.",
+      "idempotency_key": "claude-7f3e"
+    }
+  },
+  "deadline_ms": 20000
+}

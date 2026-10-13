@@ -1,0 +1,12 @@
+{
+  "method": "GET",
+  "path": "/openmymemo/bridge",
+  "headers": {
+    "Authorization": "Bearer omd_TEST_ONLY_not_a_real_token_0000000000"
+  },
+  "rules": [
+    "auth is checked before the upgrade is accepted (403 on a bad token)",
+    "any request with an Origin header is rejected",
+    "first frame from the computer is hello; the service answers welcome"
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "type": "bye",
+  "reason": "service restart",
+  "retry_after_ms": 2400
+}

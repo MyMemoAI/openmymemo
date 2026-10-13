@@ -1,0 +1,32 @@
+{
+  "_note": "TEST-ONLY key material, derived from a fixed string. Never use outside tests.",
+  "suite": "DHKEM(X25519, HKDF-SHA256), HKDF-SHA256, ChaCha20-Poly1305; RFC 9180 base mode; ct = enc || ciphertext as returned by cryptography's hpke.Suite.encrypt",
+  "private_key": "R7wsZRhG3DAN2PgABoutq2CmEm6GMrRON9Pf3voonQc",
+  "public_key": "uJlVhjwyb0eHqjZxtmVSCoSicdR_0lrKaPUQ1mLczm0",
+  "key_id": "a095e17e05019955",
+  "key_id_rule": "first 16 hex chars of sha256(raw public key)",
+  "device_id": "5f0c6d0e-3b7a-4c1e-9a64-2f1d8e7c9b10",
+  "qid": "0b6f3e2a-91c4-4d7e-8f25-6a3c1d9e7b42",
+  "info": "openmymemo-queue/v1|5f0c6d0e-3b7a-4c1e-9a64-2f1d8e7c9b10|0b6f3e2a-91c4-4d7e-8f25-6a3c1d9e7b42",
+  "info_rule": "b'openmymemo-queue/v1|' + device_id + b'|' + qid",
+  "plaintext": {
+    "v": 1,
+    "qid": "0b6f3e2a-91c4-4d7e-8f25-6a3c1d9e7b42",
+    "client": {
+      "slug": "chatgpt",
+      "name": "ChatGPT"
+    },
+    "received_at": "2026-10-12T21:04:05Z",
+    "params": {
+      "name": "memory_propose",
+      "arguments": {
+        "op": "add",
+        "content": "Is training for a half marathon in March.",
+        "reason": "Mentioned while planning a week",
+        "idempotency_key": "chatgpt-41aa"
+      }
+    }
+  },
+  "plaintext_b64u": "eyJ2IjoxLCJxaWQiOiIwYjZmM2UyYS05MWM0LTRkN2UtOGYyNS02YTNjMWQ5ZTdiNDIiLCJjbGllbnQiOnsic2x1ZyI6ImNoYXRncHQiLCJuYW1lIjoiQ2hhdEdQVCJ9LCJyZWNlaXZlZF9hdCI6IjIwMjYtMTAtMTJUMjE6MDQ6MDVaIiwicGFyYW1zIjp7Im5hbWUiOiJtZW1vcnlfcHJvcG9zZSIsImFyZ3VtZW50cyI6eyJvcCI6ImFkZCIsImNvbnRlbnQiOiJJcyB0cmFpbmluZyBmb3IgYSBoYWxmIG1hcmF0aG9uIGluIE1hcmNoLiIsInJlYXNvbiI6Ik1lbnRpb25lZCB3aGlsZSBwbGFubmluZyBhIHdlZWsiLCJpZGVtcG90ZW5jeV9rZXkiOiJjaGF0Z3B0LTQxYWEifX19",
+  "ct": "uZByaHBGlI8yT64t1p6v_5C0dSAH_TSfMXMwoPWNlk1B-NKjpDXzcojG6QPZqqr9XyM61Ce6FP6R7wEkw5G2HayHRVbef8FYJ84tN0KEZkPs0GFdd8ZFlsLdhpUBTLfDbjjISB5KnQGHKgcu1y07fzkYZgcS5ZlW7--W3p7lkAaBmGVmXZA5ilgOkDdUI6_cKcKant2-xQDJ3AOrbhAxiR4VuqdjD_-ISTBhp-pBiEXOM_Q6aSAknL-K1Xv3XB2MGvzCh4N6wwyb99u6Oz4W1xwxujCXCCCGuWVChQHPVx0dyt1qrI7-o5RaJY5L2tTFuy-VZrI0PiDIyIb__gjK3Y0P_Wy5a819ll77WXrlWmqqcYfGzMqxxBbZOEGvWAxBML2usZhS6-T_rSNOJmZQRxxIXZ8Pt5kBUe1zVqn4Ffh6bQaQPuPTxEtuhZGsZasxUonMXfKh5JUjUnztLjjU2D9_8oO-XcEbahZlWjILhZePMxbM"
+}

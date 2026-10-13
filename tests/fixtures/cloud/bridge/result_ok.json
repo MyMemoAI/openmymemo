@@ -1,0 +1,17 @@
+{
+  "type": "result",
+  "id": "9e1d2c3b4a5f60718293a4b5c6d7e8f9",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "# What I know about Sam\n…"
+      }
+    ],
+    "structuredContent": {
+      "chars": 812,
+      "truncated": false
+    },
+    "isError": false
+  }
+}
