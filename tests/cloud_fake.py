@@ -13,6 +13,7 @@ import secrets
 import socket
 import threading
 import time
+import uuid
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
@@ -83,6 +84,7 @@ class FakeService:
         self.link_response = response
         self.welcome = fixture("bridge/welcome.json")
         self.codes: dict[str, dict] = {}  # authorization codes the "consent page" issued
+        self.issued = False  # a device was linked through this fake (linking again replaces it)
         self.authorize_params: list[dict] = []
         self.link_requests: list[dict] = []
         self.unlinks: list[str | None] = []
@@ -188,6 +190,19 @@ class FakeService:
                     or body.get("redirect_uri") != issued["redirect_uri"] or body.get("key_alg") != "x25519"
                     or len(unb64u(body.get("public_key", ""))) != 32):
                 return JSONResponse({"error": "invalid_request", "error_description": "Bad link request"}, 400)
+            if self.issued or any(not c.closed.is_set() for c in self.conns):
+                # Linking again replaces the device: a new id and token, and the old socket is told so with 4409
+                # (CLOSE_REPLACED in mymemo-service src/platform/openmymemo/bridge.py).
+                device_id, self.token = str(uuid.uuid4()), "omd_TEST_ONLY_" + secrets.token_urlsafe(24)
+                self.link_response = {**self.link_response, "device_id": device_id, "device_token": self.token}
+                self.welcome = {**self.welcome, "device_id": device_id}
+                for conn in self.conns:
+                    if not conn.closed.is_set():
+                        try:
+                            await conn.ws.close(4409, "replaced")
+                        except RuntimeError:
+                            pass
+            self.issued, self.device_known = True, True
             return JSONResponse(self.link_response)
 
         @app.delete("/openmymemo/device")

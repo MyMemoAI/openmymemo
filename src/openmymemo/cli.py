@@ -646,18 +646,30 @@ def connector_remove(ctx: typer.Context, connector_id: str) -> None:
 
 # ---- MyMemo Cloud -----------------------------------------------------------------------------------
 
+# The ports the Mac app looks at and starts its server on (desktop/src-tauri/src/core.rs `PORTS`): 8787 and the next nine.
+PANEL_PORTS = range(DEFAULT_PORT, DEFAULT_PORT + 10)
+
+
 def _panel_for(vault_root: Path, port: int) -> str | None:
-    """The panel serving this folder on `port`, if one is running (it then runs MyMemo Cloud too)."""
+    """The panel serving this folder, if one is running (it then runs MyMemo Cloud too): on `port`, or on any of
+    the ports the Mac app uses. A panel for another folder is never used."""
     import json
     import urllib.request
 
-    url = f"http://127.0.0.1:{port}"
-    try:
-        req = urllib.request.Request(f"{url}/api/state", headers={"X-OpenMyMemo": "1"})
-        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req, timeout=2) as resp:
-            return url if json.load(resp).get("vault") == str(vault_root) else None
-    except Exception:
-        return None
+    from .cloud import same_folder
+
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    for p in dict.fromkeys([port, *PANEL_PORTS]):
+        url = f"http://127.0.0.1:{p}"
+        try:
+            req = urllib.request.Request(f"{url}/api/state", headers={"X-OpenMyMemo": "1"})
+            with opener.open(req, timeout=1) as resp:
+                served = json.load(resp).get("vault")
+        except Exception:
+            continue
+        if isinstance(served, str) and same_folder(served, vault_root):
+            return url
+    return None
 
 
 def _panel_call(panel: str, method: str, path: str) -> dict:

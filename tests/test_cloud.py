@@ -467,6 +467,68 @@ def test_4409_means_another_openmymemo_took_over(vault, fake, clouds):
     fake.connection(1)
 
 
+def test_linking_again_from_another_process_replaces_the_connection_and_keeps_the_web_apps(vault, fake, clouds,
+                                                                                            monkeypatch):
+    monkeypatch.setenv("OPENMYMEMO_CLOUD_URL", fake.base)
+    c, conn = online(vault, fake, clouds)
+    call(conn, fixture("bridge/call.json"))
+    old = cloud.load_link()
+
+    def browser(url: str) -> None:  # `openmymemo cloud link` without a panel: its own listener takes the callback
+        back = fake.authorize(url)
+        threading.Thread(target=lambda: urllib.request.urlopen(back, timeout=10).read(), daemon=True).start()
+
+    outcome = cloud.link_with_listener(vault, browser)
+    assert outcome.link is not None and outcome.link.device_id != old.device_id
+    assert conn.closed.wait(5) and conn.client_close == 4409  # the service replaced the old device
+    assert cloud.load_link().device_id == outcome.link.device_id
+    wait_until(lambda: c.status()["online"])  # the running panel picks up the new link
+    new = fake.connection()
+    assert new is not conn and new.headers["authorization"] == f"Bearer {outcome.link.device_token}"
+    assert [x.id for x in Connectors(vault).list()] == ["cloud-chatgpt"]  # nothing revoked
+    assert call(new, fixture("bridge/call.json"))["result"]["isError"] is False
+
+
+def test_the_cli_finds_a_panel_for_this_folder_on_the_mac_apps_ports(vault, tmp_path, monkeypatch):
+    import re
+    import socket
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    from openmymemo import cli as cli_module
+
+    core = (Path(__file__).parent.parent / "desktop/src-tauri/src/core.rs").read_text()
+    lo, hi = re.search(r"pub const PORTS: Range<u16> = (\d+)\.\.(\d+);", core).groups()
+    assert cli_module.PANEL_PORTS == range(int(lo), int(hi))  # the same ports as the Mac app
+
+    served = {"vault": str(tmp_path / "another-folder")}
+
+    class State(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            body = json.dumps(served).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), State)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    port = server.server_address[1]
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        nothing = s.getsockname()[1]
+    try:
+        monkeypatch.setattr(cli_module, "PANEL_PORTS", range(port, port + 1))
+        assert cli_module._panel_for(vault.root, nothing) is None  # a panel for another folder isn't used
+        served["vault"] = str(vault.root)
+        assert cli_module._panel_for(vault.root, nothing) == f"http://127.0.0.1:{port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 def test_4410_asks_to_link_again_and_keeps_the_link(vault, fake, clouds):
     c, conn = online(vault, fake, clouds)
     conn.close(4410, "key_id mismatch")
