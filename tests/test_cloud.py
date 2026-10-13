@@ -18,7 +18,7 @@ import pytest
 from cloud_fake import FakeService, fixture, wait_until
 from fastapi.testclient import TestClient
 
-from openmymemo import __version__, cloud
+from openmymemo import __version__, clients, cloud
 from openmymemo.cloud import Bridge, Cloud, Link, Timing
 from openmymemo.connectors import Connectors
 from openmymemo.mcp_server import build_server
@@ -269,6 +269,21 @@ def test_unlinking_while_mymemo_is_unreachable_still_forgets_the_link(vault):
     linked(vault, "http://127.0.0.1:9")
     assert "couldn't be told" in cloud.unlink() and cloud.load_link() is None
     assert cloud.unlink() == "This computer isn't linked to MyMemo Cloud."
+
+
+def test_the_catalog_lists_mymemo_cloud(vault, fake, panel):
+    api, _ = panel
+    row = next(r for r in clients.catalog(vault) if r["id"] == clients.CLOUD)
+    assert row["method"] == "account" and row["description"] == "Use your memory in ChatGPT and claude.ai on the web"
+    assert row["connected"] is False
+    assert clients.connect(vault, clients.CLOUD).status == "manual"
+    linked(vault, fake.base)
+    Connectors(vault).ensure("cloud-chatgpt", "ChatGPT (web)", kind="cloud")
+    row = next(r for r in clients.catalog(vault) if r["id"] == clients.CLOUD)
+    assert row["connected"] is True and row["via"] == "account"
+    listed = api.get("/api/clients", headers=H).json()
+    assert listed["custom"] == []  # web apps are listed under MyMemo Cloud, not as apps added by name
+    assert any(a["id"] == clients.CLOUD for a in listed["apps"])
 
 
 # ---- relayed calls ----------------------------------------------------------------------------------------------

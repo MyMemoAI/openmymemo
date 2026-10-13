@@ -11,6 +11,8 @@ Each app is connected one of three ways:
 * ``cli``    OpenMyMemo runs the app's own ``mcp add`` command, with a timeout; on any failure the person gets
              the command to run instead. Claude Code's ``~/.claude.json`` is its live state and is never edited.
 * ``manual`` a snippet to paste, plus an install link where the app has one.
+* ``account`` MyMemo Cloud (product-design.md §16): not an app on this computer but a sign-in that lets AI apps on
+             the web reach the folder; it is linked and unlinked in ``cloud.py`` (``openmymemo cloud link``).
 
 An app is ``file`` or ``cli`` only once its config location and schema have been checked against its current
 documentation; the URL is next to each entry. Everything that touches the computer goes through an ``Env``,
@@ -141,7 +143,7 @@ def plain(cmd: list[str]) -> dict:
 class Client:
     id: str  # also the connector id
     name: str
-    method: str  # file | cli | manual
+    method: str  # file | cli | manual | account
     docs: str  # the documentation this entry was checked against
     site: str | None = None  # where to get the app
     bundles: tuple[str, ...] = ()  # macOS app bundles (globs allowed)
@@ -163,9 +165,11 @@ class Client:
     session: bool = False  # a CLI: "start a new session" rather than "restart the app"
     restart_as: str = ""  # what to restart, when it isn't `name`
     note: str = ""
+    description: str = ""  # one line about what it is, where the name alone doesn't say
 
 
 OTHER = "other"  # the generic entry: any other MCP app, added by name
+CLOUD = "mymemo-cloud"  # MyMemo Cloud: AI apps on the web, through the person's MyMemo account
 
 
 def display_name(app_id: str) -> str | None:
@@ -479,6 +483,8 @@ def _last_seen(vault: Vault) -> dict[str, str]:
 def app_status(vault: Vault, client: Client, env: Env, known: dict | None = None,
                seen: dict[str, str] | None = None) -> dict:
     """One app as the panel and `openmymemo apps` show it."""
+    if client.method == "account":
+        return _account_status(vault, client)
     known = known if known is not None else {c.id: c for c in Connectors(vault)._load()}
     seen = seen if seen is not None else _last_seen(vault)
     connector = known.get(client.id)
@@ -497,7 +503,23 @@ def app_status(vault: Vault, client: Client, env: Env, known: dict | None = None
         "revoked": bool(connector and connector.revoked_at),
         "in_use": active and client.id in seen,
         "last_seen": seen.get(client.id) if active else None,
-        "has_connector": active,
+        "has_connector": active, "description": client.description or None,
+    }
+
+
+def _account_status(vault: Vault, client: Client) -> dict:
+    """MyMemo Cloud: "connected" means this computer is linked for this folder. Its web apps are connectors of
+    their own (``cloud-chatgpt``, …), listed by ``/api/cloud``."""
+    from . import cloud
+
+    link = cloud.load_link()
+    linked = link is not None and link.serves(vault.root)
+    return {
+        "id": client.id, "name": client.name, "method": client.method, "docs": client.docs, "site": client.site,
+        "note": client.note or None, "session": False, "restart_name": client.name, "installed": False,
+        "connected": linked, "via": "account" if linked else None, "plugin": None, "broken": False,
+        "revoked": False, "in_use": False, "last_seen": None, "has_connector": False,
+        "description": client.description or None,
     }
 
 
@@ -681,6 +703,9 @@ def connect(vault: Vault, app_id: str, env: Env | None = None) -> Result:
     client = get(app_id)
     env = env or Env.current()
     cmd = _command(vault, client)
+    if client.method == "account":
+        return Result("manual", "MyMemo Cloud links this computer to your MyMemo account: Sign in on the Connectors "
+                                "page, or run `openmymemo cloud link`.")
     if client.id == OTHER:
         return Result("manual", "Give the app a name of your own: `openmymemo connector add \"App name\"` (add --http "
                                 "for an HTTP config with a token), or \"Add another app\" in the panel. Or paste this "
@@ -724,6 +749,8 @@ def disconnect(vault: Vault, app_id: str, env: Env | None = None) -> Result:
     """Take our entry out of the app's config (and Codex's hook), and revoke its connector."""
     client = get(app_id)
     env = env or Env.current()
+    if client.method == "account":
+        return Result("manual", "Unlink MyMemo Cloud on the Connectors page, or run `openmymemo cloud unlink`.")
     if client.id == OTHER:
         return Result("manual", "Apps added by name are removed one by one: `openmymemo connector remove <id>`, "
                                 "or Remove in the panel.")
@@ -976,3 +1003,10 @@ CLIENTS: list[Client] = [
 CLIENTS.append(
     Client(OTHER, "Other MCP app", "manual", docs="https://modelcontextprotocol.io/docs/develop/connect-local-servers",
            snippet=lambda cmd: json.dumps({"mcpServers": {ENTRY: plain(cmd)}}, indent=2, ensure_ascii=False)))
+
+# ChatGPT and claude.ai on the web reach only public MCP servers; MyMemo Cloud relays them here (§16).
+CLIENTS.append(
+    Client(CLOUD, "MyMemo Cloud", "account",
+           docs="https://github.com/MyMemoAI/openmymemo/blob/main/docs/product-design.md#16-mymemo-cloud-an-optional-"
+                "connector-for-ai-apps-on-the-web-2026-10-12-design",
+           site="https://mymemo.ai", description="Use your memory in ChatGPT and claude.ai on the web"))
