@@ -36,13 +36,13 @@ function parseHash(): { route: Route | null; param: string | null } {
 const current = ref(parseHash());
 
 /**
- * With no route: the first-run guide while the folder hasn't had it (`onboarded`), otherwise Changes when
- * something waits or changed since the user last looked, otherwise Memories.
+ * With no route: Changes when something waits or changed since the user last looked, otherwise the first-run
+ * guide while the folder hasn't had it (`onboarded`; "Get started" offers it either way), otherwise Memories.
  */
 function settleHome() {
   if (current.value.route !== null || !store.state) return;
   const route: Route =
-    store.state.settings.onboarded === false ? "welcome" : toReview.value > 0 ? "changes" : "memories";
+    toReview.value > 0 ? "changes" : store.state.settings.onboarded === false ? "welcome" : "memories";
   history.replaceState(null, "", `#/${route}`);
   current.value = { route, param: null };
 }

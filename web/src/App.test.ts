@@ -1,6 +1,6 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { State } from "./api";
+import type { Proposal, State } from "./api";
 import App from "./App.vue";
 import { store } from "./store";
 
@@ -12,13 +12,23 @@ function state(onboarded: boolean): State {
   };
 }
 
+/** A change an AI app made that the person hasn't looked at yet: the digest. */
+const unreviewed: Proposal = {
+  id: "p1", connector_id: "claude-desktop", connector_name: "Claude Desktop", op: "add", content: "Lives in Lyon",
+  topic: "identity", memory_id: null, kind: "fact", reason: null, evidence: null, created_at: "2026-10-12T00:00:00Z",
+  status: "applied", hold: null, decided_at: "2026-10-12T00:00:00Z", reviewed_at: null, final_content: "Lives in Lyon",
+  final_topic: "identity", applied_memory_id: "m1", applied_version: 1, before_content: null, before_topic: null,
+  original_op: null, similarity: null, conflict: false, can_undo: true,
+};
+
 const { api } = vi.hoisted(() => ({
   api: {
     state: vi.fn(),
     memories: vi.fn(async () => []),
-    proposals: vi.fn(async () => []),
+    proposals: vi.fn(async (_q?: { unreviewed?: boolean }): Promise<Proposal[]> => []),
     connectors: vi.fn(async () => []),
     patchSettings: vi.fn(async () => ({})),
+    apps: vi.fn(async () => ({ system: "darwin", apps: [], custom: [] })), // ConnectApps in the guide
   },
 }));
 vi.mock("./api", () => ({ api }));
@@ -27,6 +37,7 @@ describe("the home page", () => {
   let wrapper: ReturnType<typeof mount> | undefined;
   beforeEach(() => {
     vi.clearAllMocks();
+    api.proposals.mockImplementation(async () => []);
     store.state = null;
   });
   afterEach(() => {
@@ -46,6 +57,13 @@ describe("the home page", () => {
     const w = await open("", false);
     expect(location.hash).toBe("#/welcome");
     expect(w.text()).toContain("Welcome to OpenMyMemo");
+    expect(w.find('nav a[href="#/welcome"]').text()).toBe("Get started");
+  });
+
+  it("is Changes when an AI app changed something, even before the guide, which Get started still offers", async () => {
+    api.proposals.mockImplementation(async (q) => (q?.unreviewed ? [unreviewed] : []));
+    const w = await open("", false);
+    expect(location.hash).toBe("#/changes");
     expect(w.find('nav a[href="#/welcome"]').text()).toBe("Get started");
   });
 
