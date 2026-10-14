@@ -139,7 +139,7 @@ function forget(id: string) {
   store.memories = store.memories.filter((x) => x.id !== id);
 }
 
-async function saveAbout() {
+async function saveAbout(next: Step = "done") {
   if (saving.value) return; // a second Enter, or key repeat, while the first save or its refresh is on its way
   saving.value = true;
   const from = location.hash; // where the person was; if they move on meanwhile, the save doesn't move them back
@@ -193,7 +193,7 @@ async function saveAbout() {
   }
   const done = [saved && tn("onb.about.saved", saved), archived && tn("onb.about.archived", archived)].filter(Boolean);
   if (done.length) toast(done.join(" · "));
-  if (!disposed && location.hash === from) go("done");
+  if (!disposed && location.hash === from) go(next);
 }
 
 function onFieldEnter(e: KeyboardEvent, i: number) {
@@ -201,6 +201,12 @@ function onFieldEnter(e: KeyboardEvent, i: number) {
   e.preventDefault();
   if (i < FIELDS.length - 1) root.value?.querySelector<HTMLInputElement>(`input[name="${FIELDS[i + 1].id}"]`)?.focus();
   else saveAbout();
+}
+
+/** The step bar: moving on past "About you" saves what was typed there, as Next does, instead of dropping it. */
+function jump(s: Step) {
+  if (step.value === "about" && unsaved.value && STEPS.indexOf(s) > index.value) saveAbout(s);
+  else go(s);
 }
 
 function next() {
@@ -223,7 +229,7 @@ function next() {
             class="flex w-full flex-col gap-1.5 rounded-md py-1 text-left"
             :aria-label="t('onb.stepLabel', { n: i + 1, name: t(`onb.step.${s}`) })"
             :aria-current="s === step ? 'step' : undefined"
-            @click="go(s)"
+            @click="jump(s)"
           >
             <span class="h-1 w-full rounded-full" :class="i === index ? 'bg-accent' : i < index ? 'bg-accent/35' : 'bg-fill-strong'" />
             <span class="hidden truncate text-xs sm:block" :class="i === index ? 'font-semibold text-ink' : 'text-muted'">

@@ -250,6 +250,18 @@ describe("the first-run guide", () => {
     w.unmount();
   });
 
+  it("saves what was typed when moving on with the step bar", async () => {
+    const w = mount(WelcomeView, { props: { initialStep: "about" } });
+    await w.get('input[name="name"]').setValue("Sam");
+    const bar = w.findAll("nav li button");
+    await bar[bar.length - 1].trigger("click"); // "Done" in the step bar
+    await flushPromises();
+    expect(api.addMemory).toHaveBeenCalledWith({ topic: "identity", content: "Prefers to be called Sam.", kind: "preference" });
+    expect(visibleStep(w)).toEqual(["done"]);
+    await w.findAll("nav li button")[0].trigger("click"); // going back never saves
+    expect(api.addMemory).toHaveBeenCalledTimes(1);
+  });
+
   it("saves once when Enter is pressed again while the first save is on its way", async () => {
     let finish: () => void = () => {};
     api.addMemory.mockImplementationOnce(async (body: { topic?: string; content: string }) => {
