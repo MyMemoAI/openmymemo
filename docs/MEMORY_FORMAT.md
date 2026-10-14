@@ -207,7 +207,7 @@ onboarded: true
 
 `require_approval` (default `false` in version 2, `true` in version 1): when on, every AI change waits for the person. When off, additions and changes to AI-written memories apply at once and are listed for review; changes to **protected** memories — those whose latest version was written by the person (`last_actor` in §6.3 is `user`, `file` or `import:*`) — and anything in a private topic still wait.
 
-`onboarded` (optional): whether the person has finished or skipped the first-run guide. New folders are created with `false`. When the key is missing, a folder that has any memory or any connector (revoked ones included) counts as `true`, any other as `false`. Readers that don't show a guide ignore it.
+`onboarded` (optional, written once the first-run guide of product-design.md §15.3 is in): whether the person has finished or skipped the first-run guide. New folders are created with `false`. When the key is missing, a folder that has any memory or any connector (revoked ones included) counts as `true`, any other as `false`. Readers that don't show a guide ignore it.
 
 Unknown keys are preserved.
 
