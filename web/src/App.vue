@@ -17,8 +17,9 @@ import ContextView from "./views/ContextView.vue";
 import ImportView from "./views/ImportView.vue";
 import MemoriesDesktopView from "./views/MemoriesDesktopView.vue";
 import MemoriesView from "./views/MemoriesView.vue";
+import WelcomeView from "./views/WelcomeView.vue";
 
-const ROUTES = ["memories", "changes", "context", "connectors", "activity", "import"] as const;
+const ROUTES = ["memories", "changes", "context", "connectors", "activity", "import", "welcome"] as const;
 type Route = (typeof ROUTES)[number];
 /** Old names that links in the wild (MCP results, docs) still use. */
 const ALIASES: Record<string, Route> = { review: "changes" };
@@ -34,10 +35,14 @@ function parseHash(): { route: Route | null; param: string | null } {
 
 const current = ref(parseHash());
 
-/** With no route, open Changes when something waits or changed since the user last looked, otherwise Memories. */
+/**
+ * With no route: Changes when something waits or changed since the user last looked, otherwise the first-run
+ * guide while the folder hasn't had it (`onboarded`; "Get started" offers it either way), otherwise Memories.
+ */
 function settleHome() {
   if (current.value.route !== null || !store.state) return;
-  const route: Route = toReview.value > 0 ? "changes" : "memories";
+  const route: Route =
+    toReview.value > 0 ? "changes" : store.state.settings.onboarded === false ? "welcome" : "memories";
   history.replaceState(null, "", `#/${route}`);
   current.value = { route, param: null };
 }
@@ -83,6 +88,8 @@ onBeforeUnmount(() => {
 type NavItem = { id: Route; label: string; icon: IconName; badge?: number | null; alert?: boolean };
 
 const nav = computed<NavItem[]>(() => [
+  // "Get started" until the first-run guide is finished or skipped.
+  ...(store.state?.settings.onboarded === false ? [{ id: "welcome", label: t("onb.nav"), icon: "star" } as const] : []),
   { id: "memories", label: t("nav.memories"), icon: "memories", badge: store.state?.counts.active || null },
   { id: "changes", label: t("nav.changes"), icon: "changes", badge: toReview.value || null, alert: toReview.value > 0 },
   { id: "context", label: t("nav.context"), icon: "eye" },
@@ -123,6 +130,7 @@ const moreActive = computed(() => moreItems.value.some((n) => n.id === current.v
             <ConnectorsView v-else-if="current.route === 'connectors'" :initial-connector="current.param" />
             <ActivityView v-else-if="current.route === 'activity'" />
             <ImportView v-else-if="current.route === 'import'" />
+            <WelcomeView v-else-if="current.route === 'welcome'" :initial-step="current.param" />
           </div>
         </main>
       </template>
@@ -183,10 +191,12 @@ const moreActive = computed(() => moreItems.value.some((n) => n.id === current.v
           <ConnectorsView v-else-if="current.route === 'connectors'" :initial-connector="current.param" />
           <ActivityView v-else-if="current.route === 'activity'" />
           <ImportView v-else-if="current.route === 'import'" />
+          <WelcomeView v-else-if="current.route === 'welcome'" :initial-step="current.param" />
         </template>
 
         <footer class="mx-auto mt-12 max-w-[820px] text-xs text-muted">
           {{ t("app.tagline") }} · <span class="font-mono break-all">{{ store.state?.vault }}</span> · v{{ store.state?.version }}
+          · <a href="#/welcome" class="underline-offset-2 hover:underline">{{ t("app.guide") }}</a>
         </footer>
       </main>
     </div>

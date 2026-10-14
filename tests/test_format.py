@@ -160,8 +160,8 @@ def test_migration_keeps_the_v1_approval_behaviour(tmp_path, settings, expected)
     (root / ".openmymemo" / "settings.yaml").write_text(settings, encoding="utf-8")
     vault = Vault(root)
     vault.topics()  # the first read migrates
-    assert vault.settings() == {"require_approval": expected}
-    assert Vault.create(tmp_path / "new").settings() == {"require_approval": False}  # new vaults: off
+    assert vault.settings() == {"require_approval": expected, "onboarded": True}  # it has memories: no guide
+    assert Vault.create(tmp_path / "new").settings() == {"require_approval": False, "onboarded": False}  # new vaults: off
 
 
 # ---- §3.2 / §6.2 groups and privacy come from the file ---------------------------------------------

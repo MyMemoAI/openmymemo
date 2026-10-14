@@ -50,6 +50,21 @@ def test_memory_crud_over_api(vault, api):
     assert api.get("/api/memories/zzzzz/history", headers=H).status_code == 404
 
 
+def test_update_and_archive_refuse_a_memory_that_moved_on(vault, api):
+    m = api.post("/api/memories", headers=H, json={"topic": "identity", "content": "Prefers Sam"}).json()
+    assert m["version"] == 1
+    vault.update(m["id"], content="Prefers Sammy")  # say, edited in the Markdown file meanwhile
+    r = api.patch(f"/api/memories/{m['id']}", headers=H, json={"content": "Prefers Samuel", "expected_version": 1})
+    assert r.status_code == 409 and "changed meanwhile" in r.json()["detail"]
+    r = api.post(f"/api/memories/{m['id']}/archive", headers=H, json={"expected_version": 1})
+    assert r.status_code == 409
+    assert vault.get(m["id"]).content == "Prefers Sammy" and vault.get(m["id"]).status == "active"
+    r = api.patch(f"/api/memories/{m['id']}", headers=H, json={"content": "Prefers Samuel", "expected_version": 2})
+    assert r.status_code == 200 and r.json()["version"] == 3
+    assert api.post(f"/api/memories/{m['id']}/archive", headers=H, json={"expected_version": 3}).status_code == 200
+    assert api.post(f"/api/memories/{m['id']}/archive", headers=H).status_code == 200  # no body: as before
+
+
 def test_import_preview_commit_and_export(vault, api):
     items = api.post("/api/import/preview", headers=H,
                      json={"source": "chatgpt", "text": "用户在 Acme 担任 CTO\n删除\n用户喜欢科幻小说"}).json()
@@ -178,11 +193,24 @@ def test_http_mcp_end_to_end_with_panel_approval(vault, live):
 
 
 def test_settings_api_toggles_approval(vault, api):
-    assert api.get("/api/state", headers=H).json()["settings"] == {"require_approval": False}
-    assert api.patch("/api/settings", headers=H, json={"require_approval": True}).json() == {"require_approval": True}
+    assert api.get("/api/state", headers=H).json()["settings"] == {"require_approval": False, "onboarded": False}
+    assert api.patch("/api/settings", headers=H, json={"require_approval": True}).json() == {
+        "require_approval": True, "onboarded": False}
     assert vault.settings()["require_approval"] is True
     assert api.patch("/api/settings", json={"require_approval": False}).status_code == 403  # guard still applies
     assert vault.settings()["require_approval"] is True
+
+
+def test_settings_api_exposes_and_sets_onboarded(vault, api):
+    """The first-run guide: shown while `onboarded` is false, which finishing or skipping it sets to true."""
+    assert api.get("/api/settings", headers=H).json()["onboarded"] is False
+    r = api.patch("/api/settings", headers=H, json={"onboarded": True})
+    assert r.status_code == 200 and r.json() == {"require_approval": False, "onboarded": True}
+    assert api.get("/api/state", headers=H).json()["settings"]["onboarded"] is True
+    assert api.patch("/api/settings", headers=H, json={"require_approval": True}).json()["onboarded"] is True
+    assert api.patch("/api/settings", headers=H, json={"onboarded": "maybe"}).status_code == 422
+    assert api.patch("/api/settings", json={"onboarded": False}).status_code == 403  # guard still applies
+    assert vault.settings() == {"require_approval": True, "onboarded": True}
 
 
 def test_digest_review_undo_and_edit_over_api(vault, api):

@@ -25,7 +25,7 @@ def test_init_creates_default_taxonomy(vault):
     assert "group: ways\n---\n" in text and "private" not in text
     assert "private: true" in (vault.root / "memories" / "health.md").read_text()
     assert [g["name"] for g in vault._topics_cfg["groups"]][0] == "Who I am"
-    assert vault.settings() == {"require_approval": False} and vault.settings_path.exists()
+    assert vault.settings() == {"require_approval": False, "onboarded": False} and vault.settings_path.exists()
     assert vault.memory_md_path.exists()
     with pytest.raises(VaultError):
         Vault.create(vault.root)

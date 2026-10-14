@@ -258,7 +258,10 @@ const filePath = computed(() => (current.value ? `${store.state?.vault}/memories
     <div v-else class="card px-6 py-16 text-center">
       <p class="text-lg font-semibold">{{ t("mem.emptyAll") }}</p>
       <p class="mx-auto mt-1 max-w-md text-sm text-muted">{{ t("mem.emptyAllHint") }}</p>
-      <a href="#/import" class="btn btn-primary mt-5">{{ t("mem.importCta") }}</a>
+      <div class="mt-5 flex flex-wrap justify-center gap-2">
+        <a href="#/import" class="btn btn-primary">{{ t("mem.importCta") }}</a>
+        <a href="#/welcome" class="btn">{{ t("onb.showGuide") }}</a>
+      </div>
     </div>
 
     <p v-if="current" class="text-[13px] text-muted">
