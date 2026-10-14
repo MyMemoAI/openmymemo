@@ -178,4 +178,4 @@ def test_plugin_style_stdio_launch_creates_vault_and_serves_panel(tmp_path):
     assert prop.structured_content["status"] == "applied"
     assert prop.structured_content["review_url"] == f"http://127.0.0.1:{port}/#/changes"
     assert state["vault"] == str(root) and state["counts"]["unreviewed"] == 1 and state["counts"]["pending"] == 0
-    assert state["settings"] == {"require_approval": False}  # a fresh vault starts with the new default
+    assert state["settings"] == {"require_approval": False, "onboarded": False}  # a fresh vault starts with the new default

@@ -34,6 +34,10 @@ async function run(fn: () => unknown) {
 const reveal = () => run(() => shell.reveal(vault.value));
 const chooseVault = () => run(() => shell.chooseVault());
 const toggleAutostart = () => run(() => shell.setAutostart(!app.value?.autostart));
+function openGuide() {
+  location.hash = "#/welcome";
+  emit("close");
+}
 const toggleNotifications = () => run(() => shell.setNotifications(!app.value?.notifications));
 const setAppearance = (a: Appearance) => run(() => shell.setAppearance(a));
 const revealLog = () => app.value && run(() => shell.reveal(app.value!.log));
@@ -112,6 +116,9 @@ const revealLog = () => app.value && run(() => shell.reveal(app.value!.log));
       <section class="space-y-1.5" :aria-label="t('desk.help')">
         <h3 class="label px-1">{{ t("desk.help") }}</h3>
         <div class="card divide-y divide-sep">
+          <button type="button" class="flex w-full items-center gap-2 px-4.5 py-3 text-left font-semibold" @click="openGuide">
+            <span class="flex-1">{{ t("set.openGuide") }}</span><AppIcon name="star" :size="14" class="text-muted" />
+          </button>
           <button v-if="native && app" type="button" class="flex w-full items-center gap-2 px-4.5 py-3 text-left font-semibold" @click="revealLog">
             <span class="flex-1">{{ t("desk.log") }}</span><AppIcon name="file" :size="14" class="text-muted" />
           </button>

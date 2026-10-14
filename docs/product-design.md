@@ -427,7 +427,7 @@ Not done yet: automatic updates, an Intel build, Windows and Linux, and a first 
 
 ## 15. Two ways in, one-click connections, a first-run guide (2026-10-12)
 
-Status: §15.1 is built by the one-click connections change; §15.2 (the Mac app as an installer) and §15.3 (the first-run guide, including the `onboarded` setting in MEMORY_FORMAT.md §6.1) are the spec for their own changes and describe behaviour only once those land.
+Status: built (§15.1 one-click connections, §15.2 the Mac app as an installer, §15.3 the first-run guide).
 
 The Mac app becomes the way in for everyone who doesn't live in a terminal; the command line stays the way in for developers. Both use the same folder, core and panel (§3), so this section adds no second implementation.
 
@@ -474,8 +474,8 @@ No sample data is ever written into a person's folder; `scripts/demo_vault.py` s
 
 1. **Welcome** — what OpenMyMemo is in three lines (a folder on this computer; AI apps read it and add to it; you see every change and can undo it) and where the folder is.
 2. **Connect your AI apps** — the installed apps from the catalog with a Connect button each (the same component as on the Connectors page).
-3. **Bring your memory** — copy the prompt to ask ChatGPT, Claude or Gemini for what they remember, paste the answer, preview, import (the existing import flow, into `from-<source>`).
-4. **A few things about you** (optional) — what AI should call you, what you do, how you like answers. Saved as your own memories in Identity, Work and How to work with me, so they are protected from the start (§5.5).
+3. **Bring your memory** — copy the prompt to ask ChatGPT, Claude or Gemini for what they remember, paste the answer, preview, import (the existing import flow, into `from-<source>`; "Other" imports a one-per-line list into `from-text`).
+4. **A few things about you** (optional) — what AI should call you, what you do, how you like answers. Saved as your own memories in Identity, Work and How to work with me, so they are protected from the start (§5.5). Each answer becomes one statement around the person's own words — "Prefers to be called …", "Work: …", "Answer style: …" — shown under the field before it is saved. Going back and changing an answer updates the memory the guide saved for it (or the identical one it found and kept), and clearing it archives that memory (restorable, §5.5), unless someone changed it meanwhile; an answer is never saved twice.
 5. **Done** — what happens next: try "what do you remember about me?" in a connected app; AI changes show up in Changes; the folder is yours.
 
-When it shows: `onboarded` in `settings.yaml` (MEMORY_FORMAT.md §6.1). New folders are created with `onboarded: false`. A folder without the key counts as onboarded if it has any memory or any connector (so people upgrading never see it); otherwise as not onboarded, and the panel writes `false` when it opens the guide, so connecting an app in step 2 doesn't end the guide early. Finishing or skipping writes `true`. The guide can be reopened from Settings and from the Memories page.
+When it shows: `onboarded` in `settings.yaml` (MEMORY_FORMAT.md §6.1). New folders are created with `onboarded: false`. A folder without the key counts as onboarded if it has any memory or any connector (so people upgrading never see it); otherwise as not onboarded, and the panel writes `false` when it opens the guide, so connecting an app in step 2 doesn't end the guide early. Finishing or skipping writes `true`; reopening a finished guide doesn't reset it. Until then "Get started" heads the navigation, and the panel opened without an address goes to the guide, except that Changes comes first when an AI app has changed something or something waits (a folder a plugin created with `--init` may have weeks of changes before the panel is first opened). The guide can be reopened from Settings (the Mac app), from the panel's footer and from the empty Memories page. Each step has its own address (`#/welcome/import`), so the back button goes back a step. `scripts/demo_vault.py` marks its folder onboarded, since a demo is about the panel itself.
