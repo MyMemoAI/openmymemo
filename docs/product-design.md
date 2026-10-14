@@ -1,6 +1,6 @@
 # OpenMyMemo product design
 
-> Status: v0.2 implemented (2026-10-08), except the PyPI release and the first installs in the real apps. §13 lists what changed against v0.1 and what is still open; §14 describes the Mac app (2026-10-10); §15 the two ways in, one-click connections and the first-run guide (2026-10-12, in progress); [MEMORY_FORMAT.md](./MEMORY_FORMAT.md) is the normative description of the folder. Differences between v0.1 and the original draft are in §12.
+> Status: v0.2 implemented (2026-10-08), except the PyPI release and the first installs in the real apps. §13 lists what changed against v0.1 and what is still open; §14 describes the Mac app (2026-10-10); §15 the two ways in, one-click connections and the first-run guide (2026-10-12); §16 the optional MyMemo Cloud connector (2026-10-12, design); [MEMORY_FORMAT.md](./MEMORY_FORMAT.md) is the normative description of the folder. Differences between v0.1 and the original draft are in §12.
 > Scope: the **local, open-source** version. Cloud hosting is explicitly out of scope for now.
 
 ## 0. In one sentence
@@ -24,7 +24,7 @@ OpenMyMemo is **an AI memory folder that lives on your own computer**, plus a sm
 ## 3. Name and positioning
 
 - Project / repo: **OpenMyMemo** (`MyMemoAI/openmymemo`); CLI `openmymemo`; default folder `~/OpenMyMemo/`.
-- Relationship to MyMemo: an independent product with no dependency on MyMemo accounts or services. MyMemo may later read the memory as an ordinary connector, on equal footing with Claude. Not in this phase.
+- Relationship to MyMemo: an independent product with no dependency on MyMemo accounts or services. MyMemo may later read the memory as an ordinary connector, on equal footing with Claude. The first such connector is MyMemo Cloud (§16): optional, off until the person signs in, and it relays AI apps on the web to the folder.
 - Name collisions: Mem0's "OpenMemory MCP" and CaviraOSS's "OpenMemory" already exist, so we don't use "OpenMemory". One-line distinction: *they give agents a memory; we give people control of theirs.*
 - The product (panel, CLI, docs) is English only. Memories themselves can be in any language; classification and search handle English and Chinese.
 - **Who it is for.** Consumers are the goal; developers come first. Developers who use two or more AI apps (Claude Code, Cursor, Codex) feel the pain today, can install a CLI, and will be the open-source community. Consumers need a way in with nothing to install and nothing to configure. Both get the same folder, the same core and the same MCP server, with two shells on top:
@@ -176,7 +176,7 @@ Tool names use a `memory_` prefix, following MyMemo's MCP conventions (`structur
 - Authentication: stdio is local by nature; identity comes from `--connector <id>` (first use creates a connector with default permissions). Local HTTP uses one `omm_` token per connector; `connectors.yaml` stores only its SHA-256, and the panel can rotate it. Same "store the hash, show the token once" approach as MyMemo's MCP.
 - Protecting the local panel: binding to 127.0.0.1 isn't enough, because any web page in the user's browser can call localhost. Every request must carry a localhost `Host` (defeats DNS rebinding); panel API calls must also carry an `X-OpenMyMemo` header and, if present, a localhost `Origin` (a cross-site page can't add custom headers without a CORS preflight we never grant); `/mcp` requires a connector token.
 
-claude.ai and chatgpt.com (web and desktop apps) can only reach public MCP servers, so they are not covered in this phase. On the OpenAI side, Codex works today over stdio. Two later routes, neither needing a cloud service: (a) a browser extension acting as a localhost bridge — inject the summary into the page and pull the page's "Manage memories" list back; (b) the user runs their own Cloudflare Tunnel / Tailscale. This is the consumer shell in §10.
+claude.ai and chatgpt.com (web and desktop apps) can only reach public MCP servers, so they are not covered by the local server. The optional MyMemo Cloud connector (§16, 2026-10-12) relays them to the folder for people who sign in with a MyMemo account; the two routes below remain for people who don't. On the OpenAI side, Codex works today over stdio. Two later routes, neither needing a cloud service: (a) a browser extension acting as a localhost bridge — inject the summary into the page and pull the page's "Manage memories" list back; (b) the user runs their own Cloudflare Tunnel / Tailscale. This is the consumer shell in §10.
 
 ### 5.4.1 Plugins
 
@@ -479,3 +479,87 @@ No sample data is ever written into a person's folder; `scripts/demo_vault.py` s
 5. **Done** — what happens next: try "what do you remember about me?" in a connected app; AI changes show up in Changes; the folder is yours.
 
 When it shows: `onboarded` in `settings.yaml` (MEMORY_FORMAT.md §6.1). New folders are created with `onboarded: false`. A folder without the key counts as onboarded if it has any memory or any connector (so people upgrading never see it); otherwise as not onboarded, and the panel writes `false` when it opens the guide, so connecting an app in step 2 doesn't end the guide early. Finishing or skipping writes `true`; reopening a finished guide doesn't reset it. Until then "Get started" heads the navigation, and the panel opened without an address goes to the guide, except that Changes comes first when an AI app has changed something or something waits (a folder a plugin created with `--init` may have weeks of changes before the panel is first opened). The guide can be reopened from Settings (the Mac app), from the panel's footer and from the empty Memories page. Each step has its own address (`#/welcome/import`), so the back button goes back a step. `scripts/demo_vault.py` marks its folder onboarded, since a demo is about the panel itself.
+
+## 16. MyMemo Cloud: an optional connector for AI apps on the web (2026-10-12, design)
+
+ChatGPT on the web and claude.ai can only reach MCP servers on the public internet (§5.4), so until now nothing they learn reaches the folder. MyMemo Cloud closes that gap with a relay that a person turns on by signing in with their MyMemo account. It is an optional connector, the way §3 always anticipated MyMemo: off by default, listed in the catalog next to Claude and Cursor, with the same permissions, activity log and revocation as every other app. Nothing else in OpenMyMemo depends on it, and everything works without it.
+
+Decided by the product owner on 2026-10-12: (1) the cloud is an optional connector, and the non-negotiables in AGENTS.md change by one sentence instead of being dropped; (2) when the computer is offline, writes wait in a queue encrypted to the computer's key, so the service can't read what it stores, and reads fail (option "b"; the service never keeps a readable copy of the memory at rest, though like any MCP server it sees each call in memory as it passes through); (3) subscribers aren't billed per call for the memory tools for now; (4) the offline queue is for Ultra subscriptions and AppSumo tier 3 only.
+
+### 16.1 What changes in the principles
+
+- AGENTS.md, "Local only": no cloud storage, sync, accounts or telemetry — **except the optional MyMemo Cloud connector (§16), which does nothing until the person signs in and never holds memory in readable form at rest.**
+- AGENTS.md, "No dependency on MyMemo services": the core never depends on them; the MyMemo Cloud connector is the one optional piece that talks to MyMemo, and removing it changes nothing else.
+- §3 (relationship to MyMemo) and §5.4 (web apps) point here. Principle 1 in §2 still holds: the folder is the only source of truth; the cloud relays and, offline, queues encrypted proposals.
+
+### 16.2 How it works
+
+```
+ChatGPT (web) ─┐   remote MCP + OAuth (MyMemo account)
+claude.ai ─────┼──▶ MyMemo service  /openmymemo/mcp
+               │        │  routes the call to the person's linked computer
+               │        ▼
+               │    bridge connection (WebSocket, opened by the computer; no inbound port)
+               │        │
+               └──────▶ OpenMyMemo on the computer ── same tools as local MCP ──▶ proposals.py ──▶ the folder
+                         (the process that serves the panel)
+```
+
+- **The web side** (the MyMemo service, closed source): one remote MCP endpoint for everyone, `/openmymemo/mcp`, Streamable HTTP. OAuth 2.1 with PKCE (S256) identifies the MyMemo member: Protected Resource Metadata (RFC 9728) on the endpoint, authorization server metadata with RFC 9207 `iss`, and Client ID Metadata Documents, which both claude.ai and ChatGPT prefer, with Dynamic Client Registration only as a fallback (it is deprecated in the 2026-07-28 MCP authorization spec). Clients and redirect URIs are allow-listed at first. The person signs in with their MyMemo account and consents once per app on a page in the MyMemo web app; the service itself has no browser session. The tools and their schemas are exactly the local ones (§5.4): `memory_context`, `memory_search`, `memory_get`, `memory_propose`, `memory_proposals`, so skills and prompts carry over. `initialize` and `tools/list` must answer while the computer is offline: the computer sends its tool descriptors when it connects (a cloud variant that mentions `queued` and leaves out the panel's localhost link), and the service keeps those descriptors — never memory.
+- **The local side** (OpenMyMemo): the bridge runs in the process that serves the panel for the folder (`openmymemo serve`, the Mac app's server, or a plugin's MCP process serving the panel; one per folder, §14). It keeps one outbound WebSocket to the service, answers relayed tool calls by running the same code the stdio and HTTP MCP use, and reconnects with backoff.
+- **Identity of web apps locally:** each OAuth client becomes its own local connector — `cloud-chatgpt`, `cloud-claude`, or `cloud-<slug>` for others, derived by the service from the client's redirect host, never from the name a client claims — shown as "ChatGPT (web)", "Claude (web)", …, created on first use with the defaults (all topics except private ones, `write: propose`). Read scope, writing mode, blocked topics, "what AI sees" and revocation work as for any app. A revoked connector answers every relayed call with "revoked", and the service passes that on.
+- **Writes** always become proposals locally and follow the connector's writing mode exactly as for a local app (§5.5): with the default `write: propose`, additions apply and show up in the digest while changes to memories the person wrote wait; with `write: auto`, those changes apply too and stay undoable; anything private always waits. The cloud never applies anything itself.
+
+### 16.3 Two modes
+
+| | Live relay | Offline queue |
+| --- | --- | --- |
+| Who | Every paid tier (Pro, Ultra, AppSumo and Oncely) | Ultra subscriptions and AppSumo tier 3 only; AppSumo and Oncely tiers 1–2 get live relay |
+| Computer online | Every call is relayed and answered by the computer within 20 s; nothing is stored | Same |
+| Computer offline: reads (`memory_context`, `memory_search`, `memory_get`, `memory_proposals`) | Fail with a plain message: "OpenMyMemo isn't running on your computer right now" | Fail the same way (decision 2) |
+| Computer offline: `memory_propose` | Fails the same way | Queued: the service encrypts it to the computer's public key on arrival and stores the ciphertext; the AI gets `status: "queued"` with a `queue_id` and no `proposal_id`. That is a receipt, not an acceptance: the connector's permissions are only checked on the computer, so it may still be turned down there |
+| Kept on the service | Nothing beyond request metadata | Encrypted proposals, for at most 30 days, deleted once the computer confirms it stored them |
+
+- **Encryption of the queue:** when linking, the computer creates an X25519 key pair and registers the public key. The service encrypts each queued proposal to it with HPKE (RFC 9180: X25519, HKDF-SHA256, ChaCha20-Poly1305, from `cryptography`, which both sides already have) before writing anything to storage. Plaintext exists on the service only in memory while a call passes through, as for any MCP server; it is never logged. The guarantee is about data at rest: only the computer can open what is stored, but the service does see each write as it arrives.
+- **Draining:** on reconnect the computer receives queued items in order, opens each, files it through `proposals.py` as that connector with the original time, and acknowledges by queue id. The queue id is derived on the service from the AI's own `idempotency_key` when it sent one (an HMAC, so the raw key isn't stored in the clear) and random otherwise; it names the row and the acknowledgement. The AI's own key travels inside the sealed item (the arguments are sealed whole) and becomes the proposal's `idempotency_key` locally, falling back to the queue id when the AI sent none. So a replayed item is a duplicate, and so is the same request retried live with the same key once the computer is back. An item turned down on the computer (the app was revoked, is read-only or blocked from the topic, or the item is malformed) is acknowledged as `rejected` and deleted, never retried; the refusal is recorded in the activity log. At most 500 items or 4 MB per computer. Items it can't open (a key that changed) are reported and dropped.
+- `memory_propose`'s result gains one status, `queued`, only ever returned by the cloud, with the `queue_id`. A proposal filed from the queue keeps that `queue_id`, and `memory_proposals` returns it with each proposal, so the AI can match its receipt to the proposal once it is pending, applied or rejected. An item turned down while draining never becomes a proposal. A receipt without a match therefore means only that its outcome isn't known yet: the item may still be queued or being filed, may have been turned down, or may sit outside the newest proposals `memory_proposals` lists (at most 100). The AI must not take it as a refusal, nor send the write again under a new key; retrying with the same `idempotency_key` is always safe, since it returns the proposal already filed.
+- **A relayed call that times out** has an unknown outcome: the AI is told so and pointed to `memory_proposals`; a timed-out `memory_propose` is never retried through the queue. Results are capped at 512 KB, requests at 64 KB.
+
+### 16.4 Linking a computer
+
+- **From the panel** (catalog entry "MyMemo Cloud — use your memory in ChatGPT and claude.ai on the web", method `account`) or **the CLI** (`openmymemo cloud link | status | unlink`).
+- **Flow:** the panel opens the browser at MyMemo's link page with a PKCE challenge and a loopback redirect (`http://127.0.0.1:<port>/cloud/callback`, RFC 8252); the person signs in to MyMemo; the callback's code and the verifier are exchanged for a device token (`omd_…`, stored on the service only as a SHA-256, like the existing MCP tokens), and the public key is registered. The callback route checks the `state` and accepts only that one exchange; the panel API guard is otherwise unchanged.
+- **Where the link lives:** per computer, not in the folder — the folder may be synced to other machines or kept in git. `~/Library/Application Support/OpenMyMemo/cloud.json` on macOS (`$XDG_CONFIG_HOME/openmymemo/` elsewhere), mode 0600: the device token, the private key, the folder it serves and the account it belongs to. If the folder moves, the panel asks to re-link.
+- **One linked computer per account** at first. Linking another one replaces it; several computers come later (open question 1). Re-linking (another computer, or a new key after the folder moved) first drains the queue to the current computer; if that computer can't come online, the panel says how many queued proposals would be lost before it goes ahead.
+- **Unlinking** (panel, CLI, or the MyMemo website) deletes the device token, the public key and the queue on the service, and the local `cloud.json` — at once from the panel or CLI; when it was done on the website while the computer was off, at the next connection attempt, and only on MyMemo's own word: a close 4401 from the service, or a 401 `invalid_token` from `GET /openmymemo/device`, which the computer asks after any refused handshake. A bare 403, which a proxy or firewall in front of the service can also send, never deletes the link (it holds the private key). The `cloud-*` connectors stay as revoked tombstones, as for any app (§5.5). The web apps' OAuth grants survive an unlink, so after linking again ChatGPT and claude.ai are still connected but turned away until the person allows each one again in the panel (an explicit re-grant, §5.5).
+
+### 16.5 Setting up the web apps
+
+After linking, the panel shows the endpoint URL and short steps per app. The steps are checked against the vendors' current docs when this is built, since they move:
+- The URL is shown with a copy button: claude.ai needs it exactly, without a trailing slash.
+- **ChatGPT:** custom connectors need Developer Mode (in Settings; where it lives moves), then a connector with the URL and OAuth. ChatGPT asks before running a tool that writes. Which ChatGPT plans allow write tools in custom connectors is not settled: some sources limit full MCP to Business, Enterprise and Edu and make others read-only. Check this in ChatGPT itself before promising writes from ChatGPT to everyone. A listing in ChatGPT's app directory (Apps SDK) would remove the Developer Mode step later.
+- **claude.ai:** Settings → Connectors → Add custom connector with the URL; Claude signs in through OAuth using its published client identity.
+
+### 16.6 Status in the panel
+
+The MyMemo Cloud row on the Connectors page shows: signed in as, online or offline, the plan's modes, how many proposals are queued (from the service), the last relayed call, and the web apps using it, each a normal connector row underneath. Activity from the cloud is recorded in `activity.jsonl` like any other read or write, with the connector id.
+
+### 16.7 Limits, billing, abuse
+
+- Memory tools are not charged against MyMemo's MCP call credits for subscribers (decision 3); they are rate limited per member (a starting point: 60 calls a minute, 5,000 a day) and capped at 64 KB per request, as the existing `/mcp` is.
+- Free accounts can't link; the panel says which plan includes what.
+- The service keeps per-call metadata for operations and abuse (member, client, tool, time, size, outcome), never arguments or results.
+
+### 16.8 Built where
+
+- **OpenMyMemo** (this repo): `src/openmymemo/cloud.py` (link state, the WebSocket bridge, relayed calls through the existing tool code, queue draining), the callback route and `/api/cloud/*` in `web.py`, `openmymemo cloud …` in `cli.py`, the catalog entry and panel row, tests against a fake service. It adds two dependencies: `websockets` (the standard library has no WebSocket client) and `cryptography>=48` declared directly (HPKE; it is already installed through `mcp`).
+- **The MyMemo service** (closed source): the OAuth authorization server for MCP clients, `/openmymemo/mcp`, device linking, the bridge endpoint, the encrypted queue, entitlements and limits. This repo depends only on the wire protocol, pinned by the fixtures in `tests/fixtures/cloud/`.
+- **The MyMemo web app** (closed source): the consent page for the OAuth flow and a MyMemo Cloud section in account settings (linked computer, unlink, queued count).
+- **Order:** the service's OAuth and endpoint with live relay, and the local bridge (phase 1); the offline queue (phase 2); the ChatGPT app directory listing (later).
+
+### 16.9 Open questions
+
+1. Several computers per account: route reads to the most recently active one and queue writes for all, or let the person pick one per web app?
+2. Should a web app's connector default to fewer topics than local apps (e.g. only "How I work" and "Who I am") until the person widens it?
+3. Mobile ChatGPT and Claude apps use the same connectors; anything specific to check there?
+4. MCP elicitation for in-chat approval (§5.4) applies here too once the web apps support it.

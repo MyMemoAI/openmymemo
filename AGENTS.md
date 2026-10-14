@@ -4,11 +4,11 @@ A local-first, open-source AI memory folder with an approval panel. [docs/produc
 
 ## Non-negotiables
 
-- Local only: no cloud storage, sync, accounts or telemetry. The server listens on `127.0.0.1` only.
+- Local only: no cloud storage, sync, accounts or telemetry, except the optional MyMemo Cloud connector (product-design.md §16), which does nothing until the person signs in and never holds memory in readable form at rest. The server listens on `127.0.0.1` only.
 - All user data is plain text: `memories/*.md` is the source of truth for memory content; metadata, history, activity, proposals and settings under `.openmymemo/` are plain text too. Don't introduce a database.
 - Every AI write goes through a proposal (`proposals.py`) and never edits files directly. A change that applies without the user (the default, or a connector set to `auto`) must stay undoable, must never write into a private topic, and must never silently change a memory the user wrote last (`last_actor`); the table in product-design.md §5.5 is normative.
 - Works with zero external dependencies: anything that needs a model endpoint is optional and degrades instead of failing.
-- No dependency on MyMemo services, accounts or databases. Code and UI patterns may be borrowed from MyMemo's own apps; runtime coupling may not.
+- No dependency on MyMemo services, accounts or databases. The MyMemo Cloud connector is the one optional piece that talks to MyMemo; everything else works without it, and removing it changes nothing else. Code and UI patterns may be borrowed from MyMemo's own apps; other runtime coupling may not.
 - Don't weaken the panel API guard (`guard` in `web.py`: Host, Origin, `X-OpenMyMemo` header) or the `/mcp` token check.
 
 ## Commands
