@@ -699,10 +699,9 @@ def test_a_busy_service_is_given_the_time_it_asks_for(status, vault, fake, cloud
     c = Cloud(vault, 8787, FAST)
     clouds.append(c)
     c.start()
-    wait_until(lambda: fake.handshakes)
-    first = time.monotonic()
-    wait_until(lambda: len(fake.handshakes) >= 2)
-    assert time.monotonic() - first >= 0.85  # FAST alone backs off in milliseconds
+    wait_until(lambda: len(fake.handshake_times) >= 2)
+    # Measured where the requests arrive, not by polling for them: FAST alone backs off in milliseconds.
+    assert fake.handshake_times[1] - fake.handshake_times[0] >= 0.95
     assert cloud.load_link() is not None and c.status()["reason"] == "offline"  # never taken as a refusal
     fake.busy = None
     c.reconnect()
