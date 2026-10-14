@@ -427,6 +427,8 @@ Not done yet: signing and notarization (builds are signed ad hoc, so macOS asks 
 
 ## 15. Two ways in, one-click connections, a first-run guide (2026-10-12)
 
+Status: §15.1 is built by the one-click connections change; §15.2 (the Mac app as an installer) and §15.3 (the first-run guide, including the `onboarded` setting in MEMORY_FORMAT.md §6.1) are the spec for their own changes and describe behaviour only once those land.
+
 The Mac app becomes the way in for everyone who doesn't live in a terminal; the command line stays the way in for developers. Both use the same folder, core and panel (§3), so this section adds no second implementation.
 
 - **The app:** download `OpenMyMemo-<version>.dmg` from the GitHub release, drag it to Applications, open it. A short guide connects the AI apps already on the Mac with one click each and brings existing memory over. No terminal, no config files, no Python to install.
