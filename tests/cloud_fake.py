@@ -89,6 +89,7 @@ class FakeService:
         self.link_requests: list[dict] = []
         self.unlinks: list[str | None] = []
         self.handshakes: list[dict[str, str]] = []
+        self.handshake_times: list[float] = []  # when each upgrade request arrived (monotonic)
         self.conns: list[FakeConn] = []
         self.refuse_upgrades = 0  # how many upgrades to answer with HTTP 403 even for a device it knows
         self.busy: tuple[int, str] | None = None  # (status, Retry-After) for every upgrade: 429 or 503
@@ -226,6 +227,7 @@ class FakeService:
             self.loop = asyncio.get_running_loop()
             headers = {k.lower(): v for k, v in ws.headers.items()}
             self.handshakes.append(headers)
+            self.handshake_times.append(time.monotonic())
             if self.busy:  # handshake.json: 429 or 503, with Retry-After, before the upgrade
                 await ws.send_denial_response(Response(status_code=self.busy[0], headers={"Retry-After": self.busy[1]}))
                 return
