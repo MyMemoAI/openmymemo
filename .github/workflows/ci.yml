@@ -12,28 +12,36 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Three jobs, one per kind of runner: Linux tests the oldest and newest Python we support, macOS tests the
+# middle one together with the Mac app, and the panel job checks the committed build and packs the extension.
 jobs:
-  test:
-    name: Tests (${{ matrix.os }}, Python ${{ matrix.python }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { os: ubuntu-latest, python: "3.11" }
-          - { os: ubuntu-latest, python: "3.13" }
-          - { os: macos-latest, python: "3.12" }
+  linux:
+    name: Python tests (Linux, 3.11 and 3.13)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - run: uv run --frozen --python 3.13 ruff check src tests scripts
+      - name: Tests on Python 3.11
+        run: uv run --frozen --python 3.11 pytest
+      - name: Tests on Python 3.13
+        run: uv run --frozen --python 3.13 pytest
+
+  macos:
+    name: macOS tests and Mac app (Python 3.12)
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
         with:
-          python-version: ${{ matrix.python }}
-      - run: uv sync --frozen
-      - run: uv run pytest
-      - run: uv run ruff check src tests scripts
+          python-version: "3.12"
+      - run: uv run --frozen pytest
+      - run: python3 scripts/stage_desktop.py  # the bundled core and uv, which the Tauri build checks for
+      - run: cargo test --locked
+        working-directory: desktop/src-tauri
 
   panel:
-    name: Panel build is committed
+    name: Panel build and extension
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -45,6 +53,7 @@ jobs:
           node-version: 22
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
+      - uses: astral-sh/setup-uv@v7
       - run: pnpm install --frozen-lockfile
         working-directory: web
       - run: pnpm build  # type-checks with vue-tsc first
@@ -58,26 +67,6 @@ jobs:
             echo "::error::The committed panel build is out of date. Run 'cd web && pnpm build' and commit src/openmymemo/static."
             exit 1
           fi
-
-  desktop:
-    name: Mac app tests
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
-      - run: python3 scripts/stage_desktop.py  # the bundled core and uv, which the Tauri build checks for
-      - run: cargo test --locked
-        working-directory: desktop/src-tauri
-
-  extension:
-    name: Claude Desktop extension packs
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
       - run: uv run --frozen python scripts/build_mcpb.py  # validates the manifest
       - uses: actions/upload-artifact@v7
         with:
