@@ -13,7 +13,7 @@ defineProps<{ title: string; subtitle?: string | null }>();
 <template>
   <header
     class="flex min-h-[52px] shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-sep py-2 pr-3"
-    :class="ui.sidebarHidden ? 'pl-[84px]' : 'pl-5'"
+    :class="ui.sidebarHidden ? 'pl-[92px]' : 'pl-5'"
     data-tauri-drag-region
     data-chrome
   >
