@@ -403,6 +403,20 @@ def test_reconnecting_keeps_the_environment_the_person_gave_our_server(vault, en
     assert tomllib.loads(config.read_text()) == {"mcp_servers": {"github": {"command": "gh"}}}
 
 
+def test_disconnect_turns_the_app_away_even_when_its_settings_cant_be_written(vault, env, monkeypatch):
+    assert clients.connect(vault, "cursor", env).status == "done"
+    assert Connectors(vault).get("cursor")
+
+    def refuse(*_a, **_k):
+        raise PermissionError(13, "Permission denied", str(env.home / ".cursor/mcp.json"))
+
+    monkeypatch.setattr(clients, "_replace", refuse)  # only the app's file: the vault still writes
+    off = clients.disconnect(vault, "cursor", env)
+    assert off.status == "error" and "turned off anyway" in off.message
+    with pytest.raises(Revoked):
+        Connectors(vault).ensure("cursor")
+
+
 def test_an_unwritable_config_is_a_plain_error(vault, env):
     path = env.home / ".cursor/mcp.json"
     path.parent.mkdir()
