@@ -197,6 +197,21 @@ class Connectors:
             c.token_hash = c.token_preview = None
             self._save(items)
 
+    def revoke(self, connector_id: str, name: str) -> None:
+        """Turn an app away from now on, whether or not it has registered yet (an installed plugin, a pasted
+        config): a live connector becomes a tombstone, and an app never seen gets one."""
+        with self.vault.lock():
+            items = self._load()
+            c = next((x for x in items if x.id == connector_id), None)
+            if c is None:
+                c = Connector(id=connector_id, name=name, created_at=now_iso())
+                items.append(c)
+            elif c.revoked_at:
+                return
+            c.revoked_at = now_iso()
+            c.token_hash = c.token_preview = None
+            self._save(items)
+
     @staticmethod
     def _new_token(c: Connector) -> str:
         token = "omm_" + secrets.token_urlsafe(24)
