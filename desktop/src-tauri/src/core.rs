@@ -256,9 +256,12 @@ fn collect_garbage(venvs: &Path, keep: &[&Path]) {
     let Ok(entries) = fs::read_dir(venvs) else { return };
     let day_ago = std::time::SystemTime::now() - Duration::from_secs(24 * 3600);
     for entry in entries.flatten() {
+        // Only real folders the app made: a symlink placed here is skipped, so its target is never deleted.
+        if !entry.file_type().map_or(false, |t| t.is_dir()) {
+            continue;
+        }
         let dir = entry.path();
-        let dir = fs::canonicalize(&dir).unwrap_or(dir);
-        if keep.iter().any(|k| fs::canonicalize(k).map_or(false, |k| k == dir)) {
+        if keep.iter().any(|k| fs::canonicalize(k).map_or(false, |k| fs::canonicalize(&dir).map_or(false, |d| d == k))) {
             continue;
         }
         let old = entry.metadata().and_then(|m| m.modified()).map_or(false, |t| t < day_ago);
@@ -853,6 +856,15 @@ mod tests {
         drop(held);
         collect_garbage(&root.join("support/venvs"), &[core.ready.as_deref().unwrap(), &previous]);
         assert!(!busy.exists());
+    }
+
+    #[test]
+    fn never_follows_a_symlink_out_of_the_environments_folder() {
+        let (_core, root) = fake_project("symlink", "9.1.0", "");
+        let outside = ready_env(&root, "../../elsewhere"); // a ready-looking folder outside venvs/
+        std::os::unix::fs::symlink(&outside, root.join("support/venvs/7.0.0-1")).unwrap();
+        collect_garbage(&root.join("support/venvs"), &[]);
+        assert!(outside.join(READY).exists(), "the symlink's target is left alone");
     }
 
     #[test]
