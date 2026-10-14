@@ -14,7 +14,7 @@ from .connectors import Connectors
 from .context import compile_context, search
 from .proposals import Proposals
 from .snippets import http_snippets, stdio_snippets
-from .vault import Vault, VaultError, vault_path
+from .vault import NotFound, Vault, VaultError, vault_path
 
 app = typer.Typer(help="OpenMyMemo — your AI memory as a local folder you own.", no_args_is_help=True,
                   add_completion=False, pretty_exceptions_enable=False)
@@ -71,8 +71,10 @@ def init(ctx: typer.Context) -> None:
         raise typer.Exit(1) from None
     typer.secho(f"Created {vault.root}", fg="green")
     typer.echo(f"  {len(vault.topics())} topics in {vault.memories_dir}")
-    typer.echo("Next:\n  openmymemo import chatgpt     # bring your ChatGPT memory home"
-               "\n  openmymemo connector add 'Claude Desktop'\n  openmymemo serve             # open the panel")
+    typer.echo("Next:\n  openmymemo apps               # the AI apps on this computer"
+               "\n  openmymemo connect <app>      # e.g. claude-desktop, cursor, codex"
+               "\n  openmymemo import chatgpt     # bring your ChatGPT memory home"
+               "\n  openmymemo serve              # open the panel")
 
 
 @app.command()
@@ -93,7 +95,7 @@ def status(ctx: typer.Context) -> None:
         lock = " (private)" if t["private"] else ""
         typer.echo(f"  {_pad(t['title'], 12)} {t['count']:>4}   {_pad(t['slug'], 20)}{lock}".rstrip())
     cons = Connectors(vault).list()
-    typer.echo("\nConnectors:" if cons else "\nNo connectors yet: openmymemo connector add 'Claude Desktop'")
+    typer.echo("\nConnectors:" if cons else "\nNo connectors yet: see `openmymemo apps`, then `openmymemo connect <app>`")
     for c in cons:
         last = next(iter(vault.activity(c.id, limit=1)), None)
         typer.echo(f"  {c.id:<18} {c.kind:<5} write={c.write:<7} last seen {last['at'] if last else 'never'}")
@@ -270,7 +272,9 @@ def context(ctx: typer.Context, connector: Annotated[str | None, typer.Option(he
             vault = Vault(ctx.obj["vault"])
             if not vault.is_initialized():
                 return
-            c = Connectors(vault).ensure(connector) if connector else None
+            from .clients import display_name
+
+            c = Connectors(vault).ensure(connector, display_name(connector)) if connector else None
             result = compile_context(vault, c, max_chars=max_chars)
             digest = _hook_digest_line(Proposals(vault).unreviewed())
             vault.log_activity(c.id if c else "user", "context", memory_ids=result["memory_ids"],
@@ -480,6 +484,88 @@ def serve(ctx: typer.Context, port: int = DEFAULT_PORT,
     if open_browser:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     uvicorn.run(create_app(vault, port=port), host="127.0.0.1", port=port, log_level="warning")
+
+
+# ---- AI apps ---------------------------------------------------------------------------------------
+
+def _ago(iso: str | None) -> str:
+    from datetime import UTC, datetime
+
+    if not iso:
+        return "-"
+    try:
+        secs = (datetime.now(UTC) - datetime.fromisoformat(iso)).total_seconds()
+    except ValueError:
+        return iso
+    for unit, size in (("d", 86400), ("h", 3600), ("min", 60)):
+        if secs >= size:
+            return f"{int(secs // size)} {unit} ago"
+    return "just now"
+
+
+@app.command("apps")
+def apps_(ctx: typer.Context) -> None:
+    """List the AI apps OpenMyMemo can connect: installed here, connected, in use."""
+    from . import clients
+
+    vault = _vault(ctx)
+    rows = clients.catalog(vault)
+    typer.secho(f"{'App':<34} {'Installed':<10} {'Connected':<18} In use", bold=True)
+    for r in sorted(rows, key=lambda r: not (r["installed"] or r["connected"])):
+        if r["id"] == clients.OTHER:
+            continue
+        connected = ("yes (plugin)" if r["via"] == "plugin" else "yes, broken" if r["broken"] else "yes"
+                     ) if r["connected"] else "access removed" if r["revoked"] else "no"
+        name = f"{r['name']} ({r['id']})"
+        typer.echo(f"{_pad(name, 34)} {'yes' if r['installed'] else 'no':<10} {connected:<18} "
+                   f"{_ago(r['last_seen']) if r['in_use'] else '-'}")
+    typer.echo("\nConnect one: openmymemo connect <app>    Any other MCP app: openmymemo connect other")
+
+
+def _print_result(result) -> None:
+    color = {"done": "green", "manual": "yellow", "error": "red"}[result.status]
+    typer.secho(result.message, fg=color, err=result.status == "error")
+    if result.snippet:
+        typer.echo(f"\n{result.snippet.rstrip()}\n")
+    if result.link:
+        typer.echo(f"{result.link['label']}: {result.link['url']}")
+    for step in result.steps:
+        typer.echo(f"- {step}")
+
+
+@app.command("connect")
+def connect_(ctx: typer.Context, app_id: Annotated[str, typer.Argument(metavar="APP", help="e.g. claude-desktop, "
+                                                                         "claude-code, codex, cursor, vscode")]) -> None:
+    """Connect an AI app: add OpenMyMemo to its settings and allow it to read your memory."""
+    from . import clients
+
+    vault = _vault(ctx, init=True)
+    try:
+        result = clients.connect(vault, app_id)
+    except VaultError as e:
+        typer.secho(f"{e}. Run `openmymemo apps` to see the list." if isinstance(e, NotFound) else str(e),
+                    fg="red", err=True)
+        raise typer.Exit(2 if isinstance(e, NotFound) else 1) from None
+    _print_result(result)
+    if result.status == "error":
+        raise typer.Exit(1)
+
+
+@app.command("disconnect")
+def disconnect_(ctx: typer.Context, app_id: Annotated[str, typer.Argument(metavar="APP")]) -> None:
+    """Disconnect an AI app: take OpenMyMemo out of its settings and revoke its access."""
+    from . import clients
+
+    vault = _vault(ctx)
+    try:
+        result = clients.disconnect(vault, app_id)
+    except VaultError as e:
+        typer.secho(f"{e}. Run `openmymemo apps` to see the list." if isinstance(e, NotFound) else str(e),
+                    fg="red", err=True)
+        raise typer.Exit(2 if isinstance(e, NotFound) else 1) from None
+    _print_result(result)
+    if result.status == "error":
+        raise typer.Exit(1)
 
 
 # ---- connectors ------------------------------------------------------------------------------------

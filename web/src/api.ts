@@ -111,6 +111,71 @@ export interface Connector {
   proposals: number;
 }
 
+/** An AI app from the catalog (src/openmymemo/clients.py) as it stands on this computer. */
+export interface AppStatus {
+  id: string;
+  name: string;
+  /** file: OpenMyMemo edits its settings; cli: it runs the app's own command; manual: the person pastes a snippet. */
+  method: "file" | "cli" | "manual";
+  docs: string;
+  site: string | null;
+  note: string | null;
+  /** A command-line app: "start a new session" rather than "restart". */
+  session: boolean;
+  /** What to restart (or start a new session of) after connecting, e.g. "Codex or the ChatGPT app". */
+  restart_name: string;
+  installed: boolean;
+  connected: boolean;
+  via: "config" | "plugin" | "connector" | null;
+  /** Our plugin in that app, e.g. "the OpenMyMemo extension", when that is how it is connected. */
+  plugin: string | null;
+  /** Its settings start OpenMyMemo from a path that no longer exists; connecting again fixes them. */
+  broken: boolean;
+  /** The person removed the app's access; its settings may still be there. */
+  revoked: boolean;
+  in_use: boolean;
+  last_seen: string | null;
+  has_connector: boolean;
+  connector: Connector | null;
+}
+
+export interface AppCatalog {
+  /** The server's platform: darwin, linux or win32. */
+  system: string;
+  apps: AppStatus[];
+  /** Connectors that aren't one of the catalog's apps (added by name). */
+  custom: Connector[];
+}
+
+export interface InstallLink {
+  label: string;
+  url: string;
+}
+
+export interface AppSetup {
+  id: string;
+  name: string;
+  snippet: string;
+  /** The file the snippet goes into, when there is one. */
+  path: string | null;
+  /** Where in the app to paste it, when it isn't a file. */
+  where: string | null;
+  docs: string;
+  link: InstallLink | null;
+}
+
+export interface ConnectResult {
+  /** done: nothing left but a restart; manual: the person finishes it with the snippet; error: it failed. */
+  status: "done" | "manual" | "error";
+  message: string;
+  changed: boolean;
+  restart: boolean;
+  path: string | null;
+  snippet: string | null;
+  link: InstallLink | null;
+  steps: string[];
+}
+
 export interface ConnectorCreated {
   connector: Connector;
   token: string | null;
@@ -218,6 +283,11 @@ export const api = {
   rotate: (id: string) => req<ConnectorCreated>("POST", `/api/connectors/${enc(id)}/rotate`),
   removeConnector: (id: string) => req<{ ok: boolean }>("DELETE", `/api/connectors/${enc(id)}`),
   snippets: (id: string) => req<Record<string, string>>("GET", `/api/connectors/${enc(id)}/snippets`),
+  apps: () => req<AppCatalog>("GET", "/api/clients"),
+  appSetup: (id: string) => req<AppSetup>("GET", `/api/clients/${enc(id)}/setup`),
+  connectApp: (id: string) => req<{ result: ConnectResult; app: AppStatus }>("POST", `/api/clients/${enc(id)}/connect`),
+  disconnectApp: (id: string) =>
+    req<{ result: ConnectResult; app: AppStatus }>("POST", `/api/clients/${enc(id)}/disconnect`),
   context: (connector: string | null, maxChars: number) =>
     req<ContextResult>("GET", `/api/context?max_chars=${maxChars}${connector ? `&connector=${enc(connector)}` : ""}`),
   activity: (connector?: string) =>

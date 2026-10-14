@@ -18,7 +18,15 @@ PANEL_PORT = 8787
 
 
 def command_for(vault_root: Path) -> list[str]:
-    """The absolute command that starts this installation's CLI against this vault."""
+    """The absolute command that starts this installation's CLI against this vault.
+
+    ``OPENMYMEMO_COMMAND`` wins when it names an existing file by its absolute path: an executable that
+    behaves exactly like the ``openmymemo`` CLI. The Mac app sets it to its launcher, so the configs it
+    writes into other apps never point into a bundle or a venv that may move (product-design.md §15.2).
+    """
+    override = os.environ.get("OPENMYMEMO_COMMAND", "").strip()
+    if override and Path(override).is_absolute() and Path(override).is_file():
+        return [override, "--vault", str(vault_root)]
     exe = shutil.which("openmymemo")
     argv0 = Path(sys.argv[0]) if sys.argv and sys.argv[0] else None
     if argv0 and argv0.name == "openmymemo" and argv0.exists():

@@ -1,6 +1,6 @@
 # OpenMyMemo product design
 
-> Status: v0.2 implemented (2026-10-08), except the PyPI release and the first installs in the real apps. §13 lists what changed against v0.1 and what is still open; §14 describes the Mac app (2026-10-10); [MEMORY_FORMAT.md](./MEMORY_FORMAT.md) is the normative description of the folder. Differences between v0.1 and the original draft are in §12.
+> Status: v0.2 implemented (2026-10-08), except the PyPI release and the first installs in the real apps. §13 lists what changed against v0.1 and what is still open; §14 describes the Mac app (2026-10-10); §15 the two ways in, one-click connections and the first-run guide (2026-10-12, in progress); [MEMORY_FORMAT.md](./MEMORY_FORMAT.md) is the normative description of the folder. Differences between v0.1 and the original draft are in §12.
 > Scope: the **local, open-source** version. Cloud hosting is explicitly out of scope for now.
 
 ## 0. In one sentence
@@ -424,3 +424,54 @@ Pulled forward from the consumer shells (§10) so that people who never open a t
 | Not in the app | "Delete" from the artboard: memories are archived, never deleted, because history is append-only (§5.5, §6) | Undo and history must keep working |
 
 Not done yet: signing and notarization (builds are signed ad hoc, so macOS asks once to open them), automatic updates, an Intel build, Windows and Linux, and a first launch without a network connection (Python is downloaded then).
+
+## 15. Two ways in, one-click connections, a first-run guide (2026-10-12)
+
+Status: §15.1 is built by the one-click connections change; §15.2 (the Mac app as an installer) and §15.3 (the first-run guide, including the `onboarded` setting in MEMORY_FORMAT.md §6.1) are the spec for their own changes and describe behaviour only once those land.
+
+The Mac app becomes the way in for everyone who doesn't live in a terminal; the command line stays the way in for developers. Both use the same folder, core and panel (§3), so this section adds no second implementation.
+
+- **The app:** download `OpenMyMemo-<version>.dmg` from the GitHub release, drag it to Applications, open it. A short guide connects the AI apps already on the Mac with one click each and brings existing memory over. No terminal, no config files, no Python to install.
+- **The command line:** `uv tool install`, the plugins, `openmymemo connect <app>`, editing the files. It isn't fenced in: everything the app does is available from the CLI, and the folder format (MEMORY_FORMAT.md) is the interface.
+
+### 15.1 AI apps: a catalog and one-click connect
+
+| Area | Decision | Why |
+| --- | --- | --- |
+| Catalog | `src/openmymemo/clients.py` lists the AI apps OpenMyMemo knows. Each entry: an id (also its connector id: `claude-desktop`, `claude-code`, `codex`, `cursor`, `vscode`, … — the ids the plugins already use), a display name, how to detect it on this computer (app bundle, config folder, or command on `PATH` and the usual install folders, since an app launched from the Finder has no shell `PATH`), and how to connect it: **file** (OpenMyMemo edits the app's own MCP config file at a fixed path), **cli** (it runs the app's own `mcp add` command), or **manual** (a snippet to paste, plus an install link where the app has one). A config location and schema goes in as `file` or `cli` only once it has been checked against the app's current documentation; anything unverified is `manual`. A generic "Other MCP app" entry gives the raw stdio and HTTP configs. | Pasting JSON is where people give up; the apps that matter most should take one click |
+| Status | Per app: **installed** (detected here), **connected** (its config has an `openmymemo` entry, or a plugin of ours is installed), **in use** (its connector has read memory: `last_seen` from `activity.jsonl`). The panel lists installed apps first. | People need to see what is wired up and whether it works |
+| Connect | Writes an entry named `openmymemo` that runs `<command> mcp --connector <id> --panel-port 8787` (§5.4.1), creates the connector with default permissions (re-granting it if it was revoked), and for Codex also installs the session hook (`codex.py`) and shows the one-time trust step. Then it tells the person to restart that app. | One action does everything an app needs |
+| Safety of writes | Only the fixed config path of that app is touched. The file is parsed and written back atomically with only the `openmymemo` key changed; before the first change a backup `<file>.openmymemo-backup` is kept. A file that doesn't parse as plain JSON (VS Code's and Zed's JSONC with comments, a broken file) is never rewritten: the person gets the snippet to paste instead. Claude Code's `~/.claude.json` is its live state and is never edited; `claude mcp add` is used. Tests point every writer at a temporary home. | Other apps' settings are the person's; breaking them costs more trust than the feature earns |
+| Disconnect | Removes only the `openmymemo` entry (and Codex's hook) and revokes the connector (§5.5 tombstone). Removing a connector in the panel offers to remove the entry too. | Revoking access shouldn't leave a broken server in the app's list |
+| Where | Panel (Connectors page and the first-run guide), behind the same API guard as every other write; CLI `openmymemo apps`, `openmymemo connect <app>`, `openmymemo disconnect <app>`. | Both shells, one implementation |
+| The command written into configs | `snippets.command_for()`: the `OPENMYMEMO_COMMAND` environment variable when set — the absolute path of an executable that behaves exactly like the `openmymemo` CLI — otherwise the installed CLI, as before. The Mac app sets it to its launcher (§15.2) for the server it starts. | Configs written by the app must not point into a venv or a bundle path that moves |
+
+As built (2026-10-12), where the table left a choice open:
+
+- **The catalog** (checked against each app's docs that day; the URL is next to each entry in `clients.py`): **file** — Claude Desktop, Codex (CLI, IDE extension and the ChatGPT app share `~/.codex/config.toml`), Cursor, VS Code, Gemini CLI, Zed, Cline (`~/.cline/data/settings/`, shared by its extension and CLI since 4.0), LM Studio, Kiro, opencode, GitHub Copilot CLI, Qwen Code, Amp; **cli** — Claude Code; **manual** — Windsurf (now Devin Desktop, whose pages disagree on the config path), Goose (YAML, and its install link only runs a fixed list of commands), Trae, Cherry Studio, JetBrains AI Assistant, Warp, Antigravity, and "Other MCP app". Install links where an app has one: Cursor, VS Code, LM Studio, Kiro, Trae, Cherry Studio.
+- **Codex** gets its table appended to `config.toml` as text, not through `codex mcp add`: a server started from the Finder has no `codex` on `PATH`, and ChatGPT-app users may have no CLI at all. The table is added only when `tomllib` shows it is absent (or replaces our own older one), taken out again line for line, and both are checked by parsing that nothing else changed; anything else (an inline `mcp_servers = {…}`, a broken file) gets the snippet.
+- **Writes** (`appfiles.py`, for app configs and Codex's `hooks.json` alike) follow `vault._atomic_write` (a temporary file in the same folder, then a rename), and because these are other apps' files they also keep the file's permissions from the temporary file's first byte (some hold API keys), write through a symlink to the real file (dotfile repositories) and keep the one-time backup. Connecting again keeps an `env` the person added to our entry. A broken `hooks.json` doesn't stop Codex from being connected or disconnected; the result says the hook is missing.
+- **Plugins:** an app that already has our plugin (the `.mcpb` extension listed in Claude Desktop's `extensions-installations.json`, the Claude Code plugin in `~/.claude/plugins/installed_plugins.json` unless `enabledPlugins` turns it off, the Codex plugin cache) counts as connected and gets no second config entry; Connect only grants its connector (and, for Codex, installs the hook in plugin mode). Disconnect revokes it and says where to remove the plugin.
+- **Manual apps:** "Set up" shows the snippet; it re-grants a revoked connector (so the pasted config works) but creates none, so an app isn't shown as connected before anything was pasted — its first call registers it. Status reads the app's config where its location is known, comments allowed.
+- **Status** also reports `revoked` (the entry is still in the app but access was removed; Connect re-grants) and `broken` (the entry runs a program by an absolute path that no longer exists; Connect rewrites it). Connectors an app registers on first use get the app's name from the catalog.
+- **Panel API:** `GET /api/clients` (catalog with status, connector summaries for connected apps, and connectors added by name), `GET /api/clients/{id}/setup`, `POST /api/clients/{id}/connect`, `POST /api/clients/{id}/disconnect`; each action returns `{status: done | manual | error, message, path, snippet, link, steps}` and the app's new status. `openmymemo connect` creates the memory folder when it is missing.
+
+### 15.2 The Mac app as an installer
+
+| Area | Decision | Why |
+| --- | --- | --- |
+| Launcher | The app writes a small `sh` launcher at `~/Library/Application Support/ai.mymemo.openmymemo/bin/openmymemo` on every start and passes its path to the server as `OPENMYMEMO_COMMAND`. AI apps' configs point at the launcher, never into the bundle. It must keep working when the app was first opened from the disk image and then dragged to Applications, when the app moved, when the app isn't running (an AI app may start it at login), and while the first start is still downloading Python. | The MCP command is what other apps keep; it has to outlive app moves and updates |
+| Download | The release workflow builds `OpenMyMemo-<version>-arm64.dmg` on macOS and attaches it to the GitHub release next to the `.mcpb` and the wheel. With the Apple Developer secrets in the repository it is signed with a Developer ID and notarized; without them it is signed ad hoc, and the README says how to open it the first time (macOS 15: System Settings → Privacy & Security → Open Anyway). | One file to download, one drag |
+| First start | The setup page says what is happening while Python is downloaded (about a minute, once) and what to do if there is no network. | The only wait in the whole flow should be explained |
+
+### 15.3 The first-run guide
+
+No sample data is ever written into a person's folder; `scripts/demo_vault.py` stays a developer tool. Instead, an empty folder opens on a short guide (`#/welcome`, in both the web and the Mac layout), every step skippable:
+
+1. **Welcome** — what OpenMyMemo is in three lines (a folder on this computer; AI apps read it and add to it; you see every change and can undo it) and where the folder is.
+2. **Connect your AI apps** — the installed apps from the catalog with a Connect button each (the same component as on the Connectors page).
+3. **Bring your memory** — copy the prompt to ask ChatGPT, Claude or Gemini for what they remember, paste the answer, preview, import (the existing import flow, into `from-<source>`).
+4. **A few things about you** (optional) — what AI should call you, what you do, how you like answers. Saved as your own memories in Identity, Work and How to work with me, so they are protected from the start (§5.5).
+5. **Done** — what happens next: try "what do you remember about me?" in a connected app; AI changes show up in Changes; the folder is yours.
+
+When it shows: `onboarded` in `settings.yaml` (MEMORY_FORMAT.md §6.1). New folders are created with `onboarded: false`. A folder without the key counts as onboarded if it has any memory or any connector (so people upgrading never see it); otherwise as not onboarded, and the panel writes `false` when it opens the guide, so connecting an app in step 2 doesn't end the guide early. Finishing or skipping writes `true`. The guide can be reopened from Settings and from the Memories page.
