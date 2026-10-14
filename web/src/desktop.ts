@@ -13,10 +13,19 @@ const internals = (window as unknown as { __TAURI_INTERNALS__?: { invoke: Invoke
 /** Inside the Mac app: true once the shell's commands are reachable (they aren't in a browser preview). */
 export const native = !!internals;
 
+export type Appearance = "system" | "light" | "dark";
+
 export interface AppSettings {
   vault: string;
   autostart: boolean;
+  appearance: Appearance;
+  /** A notification when an AI app changes something or something starts waiting. */
+  notifications: boolean;
   version: string;
+  /** The `openmymemo` command the app installs; AI apps' MCP configs run it. */
+  launcher: string;
+  /** The local server's log. */
+  log: string;
 }
 
 /** Commands the Mac shell implements (desktop/src-tauri/src/main.rs). */
@@ -24,6 +33,9 @@ export const shell = {
   reveal: (path: string) => internals?.invoke("reveal_path", { path }),
   settings: () => (internals ? (internals.invoke("app_settings") as Promise<AppSettings>) : Promise.resolve(null)),
   setAutostart: (enabled: boolean) => internals?.invoke("set_autostart", { enabled }),
+  /** The whole app follows it: windows, this panel (its CSS follows the window), menus and dialogs. */
+  setAppearance: (appearance: Appearance) => internals?.invoke("set_appearance", { appearance }),
+  setNotifications: (enabled: boolean) => internals?.invoke("set_notifications", { enabled }),
   /** Ask for another memory folder; the app restarts its server on it and reloads. */
   chooseVault: () => internals?.invoke("choose_vault"),
 };
