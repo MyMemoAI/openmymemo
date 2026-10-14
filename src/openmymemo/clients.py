@@ -740,9 +740,10 @@ def disconnect(vault: Vault, app_id: str, env: Env | None = None) -> Result:
             result = Result("manual", f"Remove the \"{ENTRY}\" entry from {path} yourself.", path=str(path))
     except Refused as e:
         result = Result("manual", f"{e} Remove the \"{ENTRY}\" entry yourself.", path=result.path)
-    except OSError as e:
-        return Result("error", f"OpenMyMemo couldn't change {client.name}'s settings: {e.strerror or e}.",
-                      path=e.filename and str(e.filename))
+    except OSError as e:  # the entry stays, but access is still revoked below: the app is turned away from now on
+        result = Result("error", f"OpenMyMemo couldn't change {client.name}'s settings: {e.strerror or e}. Its access "
+                                 f"to your memory is turned off anyway; remove the \"{ENTRY}\" entry yourself.",
+                        path=e.filename and str(e.filename))
     if client.id == "codex" and not env.windows:
         path = env.codex_home / "hooks.json"
         try:
