@@ -1,17 +1,15 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import { api, type ImportItem } from "../api";
+import { ref } from "vue";
+import { api } from "../api";
 import AppIcon from "../components/AppIcon.vue";
+import ImportPaste from "../components/ImportPaste.vue";
 import PageHeader from "../components/PageHeader.vue";
 import SortDialog from "../components/SortDialog.vue";
-import { prettyName, t, tn } from "../i18n";
-import { act, copy, store, toast, topicsBySlug, topicTitle } from "../store";
+import { t, tn } from "../i18n";
+import { copy, importTopicTitle, topicsBySlug, topicTitle } from "../store";
 
 const SOURCES = ["chatgpt", "claude", "gemini", "markdown", "json"] as const;
 const source = ref<(typeof SOURCES)[number]>("chatgpt");
-const text = ref("");
-const items = ref<ImportItem[] | null>(null);
-const busy = ref(false);
 /** After an import: how many landed in the from-<source> topic, and how many in topics the source named. */
 const done = ref<{ slug: string; n: number; named: number } | null>(null);
 const sorting = ref<string | null>(null);
@@ -20,40 +18,8 @@ const exportFormat = ref<"markdown" | "claude" | "chatgpt" | "json">("claude");
 const includePrivate = ref(false);
 const exported = ref("");
 
-const chosen = computed(() => items.value?.filter((i) => i.include).length ?? 0);
-/** Imports land in `from-<source>` ("From ChatGPT"), created on the first import from that source. */
-const importSlug = computed(() => `from-${source.value}`);
-const importTitle = (slug: string, src: string = source.value) =>
-  topicsBySlug.value[slug]?.title ?? `From ${prettyName(src)}`;
-
-async function preview() {
-  busy.value = true;
-  try {
-    items.value = await api.importPreview(source.value, text.value);
-    if (!items.value.length) toast(t("imp.nothing"), "error");
-  } catch (e) {
-    toast(e instanceof Error ? e.message : String(e), "error");
-  } finally {
-    busy.value = false;
-  }
-}
-
-async function commit() {
-  if (!items.value) return;
-  const included = items.value.filter((i) => i.include);
-  const named = included.filter((i) => i.topic && topicsBySlug.value[i.topic]).length;
-  const slug = importSlug.value;
-  const res = await act(() => api.importCommit(source.value, items.value!));
-  if (res) {
-    done.value = { slug, n: res.memory_ids.length - named, named };
-    items.value = null;
-    text.value = "";
-  }
-}
-
 function pickSource(s: (typeof SOURCES)[number]) {
   source.value = s;
-  items.value = null;
   done.value = null;
 }
 
@@ -92,7 +58,7 @@ function download() {
         <div class="flex gap-3">
           <AppIcon name="changes" :size="22" class="mt-px text-fresh" />
           <div class="space-y-0.5">
-            <p class="font-semibold">{{ tn("imp.done", done.n, { topic: importTitle(done.slug) }) }}</p>
+            <p class="font-semibold">{{ tn("imp.done", done.n, { topic: importTopicTitle(source) }) }}</p>
             <p v-if="done.named" class="text-[13px] text-muted">{{ tn("imp.doneNamed", done.named) }}</p>
             <p v-if="done.n" class="text-[13px] text-muted">{{ t("imp.doneHint") }}</p>
           </div>
@@ -108,37 +74,7 @@ function download() {
 
       <template v-else>
         <p class="text-[13px] text-muted">{{ t(`imp.help.${source}`) }}</p>
-        <template v-if="!items">
-          <textarea v-model="text" class="input min-h-48 bg-surface font-mono text-xs shadow-[0_0_0_1px_var(--color-line)]" :placeholder="t('imp.paste')" :aria-label="t('imp.paste')" />
-          <button class="btn btn-primary" :disabled="!text.trim() || busy" @click="preview">{{ t("imp.preview") }}</button>
-        </template>
-      </template>
-
-      <template v-if="items && items.length">
-        <p class="text-[13px] text-muted">{{ t("imp.into", { topic: importTitle(importSlug) }) }}</p>
-        <div class="card divide-y divide-sep">
-          <label v-for="(it, i) in items" :key="i" class="flex cursor-pointer items-start gap-3 px-4.5 py-3" :class="it.include ? '' : 'opacity-50'">
-            <input v-model="it.include" type="checkbox" class="check mt-0.5" />
-            <div class="min-w-0 flex-1">
-              <div class="text-[15px] break-words">{{ it.content }}</div>
-              <div class="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted">
-                <span v-if="it.topic && topicsBySlug[it.topic]" class="chip"><AppIcon name="arrowRight" :size="11" />{{ topicTitle(it.topic) }}</span>
-                <select v-model="it.kind" class="chip cursor-pointer appearance-none border-0 outline-none [field-sizing:content]" :aria-label="t('mem.kinds')">
-                  <option v-for="k in store.state?.kinds" :key="k" :value="k">{{ t(`kind.${k}`) }}</option>
-                </select>
-                <span v-if="it.created_at">{{ it.created_at }}</span>
-                <span v-if="it.duplicate_of" class="chip font-semibold">{{ t("imp.duplicate") }}</span>
-                <span v-else-if="it.similar_content" class="truncate text-wait-ink">
-                  {{ t("imp.similar", { text: it.similar_content }) }}
-                </span>
-              </div>
-            </div>
-          </label>
-        </div>
-        <div class="flex gap-2">
-          <button class="btn btn-primary" :disabled="!chosen" @click="commit">{{ t("imp.commit", { n: chosen }) }}</button>
-          <button class="btn" @click="items = null">{{ t("common.cancel") }}</button>
-        </div>
+        <ImportPaste :source="source" @imported="done = $event" />
       </template>
       <SortDialog v-if="sorting" :topic="sorting" @close="sorting = null" />
     </section>

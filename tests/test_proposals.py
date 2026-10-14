@@ -28,7 +28,7 @@ def edit_file(path, old, new):
 
 def test_additions_apply_at_once_and_wait_in_the_digest(setup):
     vault, _, claude, props = setup
-    assert vault.settings() == {"require_approval": False}
+    assert vault.settings()["require_approval"] is False
     r = props.propose(claude, "add", content="用户正在评估把 iOS 端迁到 SwiftUI", reason="user said so",
                       evidence="我们打算把 iOS 迁到 SwiftUI")
     assert r["status"] == "applied" and r["hold"] is None and r["topic"] == "projects"

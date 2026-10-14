@@ -36,6 +36,7 @@ Goes running every morning at 6.
 
 def main(path: str) -> None:
     v = Vault.create(path)
+    v.update_settings(onboarded=True)  # a demo shows the panel itself, not the first-run guide
     transfer.commit(v, transfer.plan(v, transfer.parse("chatgpt", CHATGPT_PASTE)), "chatgpt")
     suggested = [(r["memory_id"], r["topic"]) for r in transfer.sort_plan(v) if r["topic"]]
     transfer.sort_commit(v, suggested[:-2])  # the user sorted most of the import; two are still in From ChatGPT
