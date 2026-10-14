@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OpenMyMemo</title>
 <style>
-  /* Shown while the app starts its local server; main.rs fills in the status. Same tokens as the panel. */
+  /* Shown while the app sets up and starts its local server; main.rs fills in the status. Same tokens as the panel. */
   :root { --ground: #ffffff; --ink: #1d1d1f; --muted: #6e6e73; --track: rgb(0 0 0 / 0.08); --accent: #0071e3; --danger: #c0392b; color-scheme: light dark; }
   @media (prefers-color-scheme: dark) {
     :root { --ground: #1e1e1f; --ink: #f5f5f7; --muted: #98989d; --track: rgb(255 255 255 / 0.12); --accent: #0a84ff; --danger: #ff6961; }
@@ -23,12 +23,15 @@
   .bar { width: 160px; height: 4px; border-radius: 999px; background: var(--track); overflow: hidden; }
   .bar span { display: block; width: 40%; height: 100%; border-radius: inherit; background: var(--accent); animation: slide 1.2s ease-in-out infinite; }
   @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
-  body.error .bar { display: none; }
+  body.error .bar, body.offline .bar { display: none; }
+  .actions { display: none; gap: 8px; justify-content: center; flex-wrap: wrap; }
+  body.error .actions, body.offline .actions { display: flex; }
   button {
-    display: none; min-height: 32px; padding: 0 14px; border: 0; border-radius: 8px; background: var(--accent); color: #fff;
-    font: inherit; font-weight: 600; cursor: default;
+    display: inline-flex; align-items: center; min-height: 32px; padding: 0 14px; border: 0; border-radius: 8px;
+    background: var(--accent); color: #fff; font: inherit; font-weight: 600; cursor: default;
   }
-  body.error button { display: inline-flex; align-items: center; }
+  button.secondary { background: var(--track); color: var(--ink); }
+  body.offline #choose { display: none; }
   body.error #status { color: var(--danger); }
   #detail { font-size: 12px; }
 </style>
@@ -41,20 +44,34 @@
     <div class="bar" aria-hidden="true"><span></span></div>
     <p id="status" role="status">Starting…</p>
     <p id="detail"></p>
-    <button type="button" id="choose">Choose another folder…</button>
+    <div class="actions">
+      <button type="button" id="retry">Retry</button>
+      <button type="button" id="choose" class="secondary">Choose another folder…</button>
+    </div>
   </main>
   <script>
-    window.__setStatus = (status, detail, error) => {
+    // kind: "" while working, "error" (Retry or another folder), "offline" (no internet during the first start: Retry).
+    window.__setStatus = (status, detail, kind) => {
       document.getElementById("status").textContent = status;
       document.getElementById("detail").textContent = detail || "";
-      document.body.classList.toggle("error", !!error);
+      document.body.classList.toggle("error", kind === "error");
+      document.body.classList.toggle("offline", kind === "offline");
     };
+    // Try again now rather than after the app's own back-off (main.rs retry_start).
+    document.getElementById("retry").addEventListener("click", async () => {
+      window.__setStatus("Trying again…", "", "");
+      try {
+        await window.__TAURI_INTERNALS__.invoke("retry_start");
+      } catch (e) {
+        window.__setStatus("OpenMyMemo couldn't start", String(e), "error");
+      }
+    });
     // When the memory folder can't be used, pick another one; the app restarts on it (main.rs choose_vault).
     const choose = async () => {
       try {
         await window.__TAURI_INTERNALS__.invoke("choose_vault");
       } catch (e) {
-        window.__setStatus("That folder can't be used", String(e), true);
+        window.__setStatus("That folder can't be used", String(e), "error");
       }
     };
     document.getElementById("choose").addEventListener("click", choose);

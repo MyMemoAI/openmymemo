@@ -245,3 +245,51 @@ def test_serve_init_creates_a_missing_or_empty_vault_and_refuses_other_folders(t
     r = runner.invoke(app, ["--vault", str(tmp_path / "other"), "serve", "--no-open", "--port", str(port)])
     assert r.exit_code == 1 and "openmymemo init" in r.output  # without --init nothing is created
     assert not (tmp_path / "other").exists() and len(served) == 3
+
+
+def test_a_process_from_a_mac_app_environment_holds_its_lock(tmp_path, monkeypatch):
+    import os
+
+    import pytest
+
+    fcntl = pytest.importorskip("fcntl")
+    from openmymemo import cli
+
+    other = tmp_path / "project/.venv"
+    other.mkdir(parents=True)
+    cli._hold_environment(str(other))
+    assert not (other / cli.ENV_LOCK).exists()
+
+    env = tmp_path / "venvs/9.0.0-1"
+    env.mkdir(parents=True)
+    monkeypatch.setattr(cli, "_env_lock", None)
+    cli._hold_environment(str(env))
+    try:
+        assert cli._env_lock is not None
+        fd = os.open(env / cli.ENV_LOCK, os.O_RDONLY)
+        try:
+            with pytest.raises(BlockingIOError):  # what the app's clean-up tries (core.rs)
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        finally:
+            os.close(fd)
+    finally:
+        os.close(cli._env_lock)
+
+
+def test_openmymemo_command_is_what_configs_get_when_the_mac_app_sets_it(tmp_path, monkeypatch):
+    """The Mac app runs the server from a versioned venv that is cleaned up later; configs must name its launcher."""
+    from openmymemo.snippets import command_for, stdio_command
+
+    launcher = tmp_path / "bin" / "openmymemo"
+    venv_cli = tmp_path / "venvs" / "0.2.3-1700" / "bin" / "openmymemo"
+    venv_cli.parent.mkdir(parents=True)
+    venv_cli.write_text("#!/bin/sh\n")
+    monkeypatch.setattr("sys.argv", [str(venv_cli)])
+    monkeypatch.setenv("OPENMYMEMO_COMMAND", str(launcher))
+    assert command_for(tmp_path / "v")[0] == str(venv_cli.resolve())  # a launcher that isn't there is ignored
+    launcher.parent.mkdir()
+    launcher.write_text("#!/bin/sh\n")
+    assert command_for(tmp_path / "v") == [str(launcher), "--vault", str(tmp_path / "v")]
+    assert stdio_command(tmp_path / "v", "cursor")[:4] == [str(launcher), "--vault", str(tmp_path / "v"), "mcp"]
+    monkeypatch.setenv("OPENMYMEMO_COMMAND", "openmymemo")  # not absolute: ignored
+    assert command_for(tmp_path / "v")[0] == str(venv_cli.resolve())

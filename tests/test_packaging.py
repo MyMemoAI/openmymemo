@@ -28,8 +28,10 @@ def test_versions_match_everywhere():
 
 
 def test_mac_app_grants_exactly_the_commands_the_panel_calls():
-    # The panel is a remote origin to Tauri: each command needs the ACL manifest and the capability.
-    panel = set(re.findall(r'invoke\("([a-z_]+)"', (ROOT / "web/src/desktop.ts").read_text()))
+    # The panel is a remote origin to Tauri: each command needs the ACL manifest and the capability. The
+    # bundled setup page (desktop/splash) calls some too.
+    pages = (ROOT / "web/src/desktop.ts").read_text() + (ROOT / "desktop/splash/index.html").read_text()
+    panel = set(re.findall(r'invoke\("([a-z_]+)"', pages))
     build = (ROOT / "desktop/src-tauri/build.rs").read_text()
     declared = set(re.findall(r'"([a-z_]+)"', re.search(r"commands\(&\[(.*?)\]\)", build, re.S).group(1)))
     caps = load("desktop/src-tauri/capabilities/default.json")
