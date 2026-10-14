@@ -274,3 +274,22 @@ def test_a_process_from_a_mac_app_environment_holds_its_lock(tmp_path, monkeypat
             os.close(fd)
     finally:
         os.close(cli._env_lock)
+
+
+def test_openmymemo_command_is_what_configs_get_when_the_mac_app_sets_it(tmp_path, monkeypatch):
+    """The Mac app runs the server from a versioned venv that is cleaned up later; configs must name its launcher."""
+    from openmymemo.snippets import command_for, stdio_command
+
+    launcher = tmp_path / "bin" / "openmymemo"
+    venv_cli = tmp_path / "venvs" / "0.2.3-1700" / "bin" / "openmymemo"
+    venv_cli.parent.mkdir(parents=True)
+    venv_cli.write_text("#!/bin/sh\n")
+    monkeypatch.setattr("sys.argv", [str(venv_cli)])
+    monkeypatch.setenv("OPENMYMEMO_COMMAND", str(launcher))
+    assert command_for(tmp_path / "v")[0] == str(venv_cli.resolve())  # a launcher that isn't there is ignored
+    launcher.parent.mkdir()
+    launcher.write_text("#!/bin/sh\n")
+    assert command_for(tmp_path / "v") == [str(launcher), "--vault", str(tmp_path / "v")]
+    assert stdio_command(tmp_path / "v", "cursor")[:4] == [str(launcher), "--vault", str(tmp_path / "v"), "mcp"]
+    monkeypatch.setenv("OPENMYMEMO_COMMAND", "openmymemo")  # not absolute: ignored
+    assert command_for(tmp_path / "v")[0] == str(venv_cli.resolve())
