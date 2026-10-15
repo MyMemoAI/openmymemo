@@ -111,3 +111,24 @@ def test_doctor_doesnt_guess_the_folder_of_an_http_entry(tmp_path):
     write_cursor({"url": "http://127.0.0.1:8787/mcp", "headers": {"Authorization": "Bearer x"}})
     assert doctor._entry_folder({"url": "http://127.0.0.1:8787/mcp"}) is None
     assert by_area(doctor.apps(custom))["Cursor"].level != "warn"
+
+
+def test_doctor_rejects_state_files_the_vault_cant_use(vault):
+    for path, text in ((vault.state_dir / "meta.json", "null"), (vault.state_dir / "meta.json", '{"memories": []}'),
+                       (vault.topics_path, "- a list"), (vault.connectors_path, "connectors: {}")):
+        good = path.read_text()
+        path.write_text(text)
+        assert by_area(doctor.run(vault.root, 1, no_panel))["Memory folder"].level == "fail", (path.name, text)
+        path.write_text(good)
+    vault.settings_path.write_text("")  # an empty YAML file reads as the defaults
+    assert all(c.level != "fail" for c in doctor.folder(vault.root)[0])
+
+
+def test_doctor_counts_what_the_vault_reads_as_topics(vault):
+    vault.add("work", "Leads the Atlas migration")
+    (vault.memories_dir / "notes.md").write_text("---\ntype: document\ntitle: Notes\n---\n\n- Not a memory item\n")
+    (vault.memories_dir / "log.md").write_text("- Reserved name\n")
+    (vault.memories_dir / "Bad Name.md").write_text("- Not a slug\n")
+    topics, memories = len(vault.topics()), len(vault.memories())
+    assert by_area(doctor.folder(vault.root)[0])["Memory folder"].message.endswith(
+        f"{memories} memories in {topics} topics")

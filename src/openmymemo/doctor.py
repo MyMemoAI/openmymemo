@@ -61,8 +61,13 @@ def _count(vault: Vault) -> tuple[int, int]:
     (adding ids, migrating old files): a diagnosis must not change what it diagnoses."""
     from .mdfile import MemoryFile
 
-    files = sorted(vault.memories_dir.glob("*.md"))
-    return len(files), sum(len(MemoryFile(f.read_text(encoding="utf-8")).items) for f in files)
+    topics = memories = 0
+    for path in vault._topic_paths():  # the same files, and the same types, the vault reads as topics
+        mf = MemoryFile(path.read_text(encoding="utf-8"))
+        if mf.frontmatter_type in (None, "topic"):
+            topics += 1
+            memories += len(mf.items)
+    return topics, memories
 
 
 def folder(root: Path) -> tuple[list[Check], Vault | None]:
@@ -89,6 +94,12 @@ def folder(root: Path) -> tuple[list[Check], Vault | None]:
     return checks, (None if any(c.level == "fail" for c in checks) else vault)
 
 
+# The top-level shape each state file must have for the vault to read it: a mapping, with these keys (when
+# present) of these types. An empty YAML file is fine (it reads as defaults); JSON must be an object.
+SHAPES = {"topics.yaml": {"groups": list}, "connectors.yaml": {"connectors": list}, "settings.yaml": {},
+          "meta.json": {"memories": dict}}
+
+
 def _parses(path: Path) -> bool:
     import json
 
@@ -99,7 +110,11 @@ def _parses(path: Path) -> bool:
         data = json.loads(text) if path.suffix == ".json" else yaml.safe_load(text)
     except (OSError, UnicodeDecodeError, ValueError, yaml.YAMLError):
         return False
-    return data is None or isinstance(data, dict)
+    if data is None:
+        return path.suffix != ".json"
+    if not isinstance(data, dict):
+        return False
+    return all(data.get(key) is None or isinstance(data[key], kind) for key, kind in SHAPES[path.name].items())
 
 
 def _port_free(port: int) -> bool:
