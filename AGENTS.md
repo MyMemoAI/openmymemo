@@ -33,6 +33,7 @@ python3 scripts/stage_desktop.py && (cd desktop/src-tauri && cargo test)  # Mac 
 | `src/openmymemo/vault.py` | The vault: sync (editor edits → meta/history), add/update/archive/restore/rollback, settings, locking |
 | `src/openmymemo/topics.py` | The 14 default topics, groups, classification keywords |
 | `docs/MEMORY_FORMAT.md` | The folder format; change it before changing what the code reads or writes |
+| `docs/distribution.md`, `llms-install.md` | Where OpenMyMemo is published and listed, the shared listing details, and the setup guide AI agents such as Cline follow |
 | `src/openmymemo/textutil.py` | Similarity, search scoring, rule-based classification |
 | `src/openmymemo/connectors.py` | Connector permissions, tokens, revocation tombstones |
 | `src/openmymemo/clients.py` | The catalog of AI apps (product-design.md §15.1): detection, status, one-click connect and disconnect by editing an app's MCP config (JSON or Codex TOML) or running its `mcp add`, and the manual snippets |
