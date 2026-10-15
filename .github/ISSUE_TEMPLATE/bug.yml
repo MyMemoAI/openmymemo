@@ -1,0 +1,70 @@
+name: Something doesn't work
+description: A bug, a crash, an app that won't connect or a confusing error.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. Please **don't paste your memories** or anything else personal from your memory folder; a public issue is visible to everyone. For a security problem, use [private reporting](https://github.com/MyMemoAI/openmymemo/security/advisories/new) instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. …
+        2. …
+  - type: dropdown
+    id: how
+    attributes:
+      label: How you use OpenMyMemo
+      multiple: true
+      options:
+        - Mac app
+        - Command line (uv tool / uvx)
+        - Claude Desktop extension
+        - Claude Code plugin
+        - Codex plugin
+        - Gemini CLI extension
+        - Connected with "openmymemo connect" or the panel
+        - MyMemo Cloud
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: app
+    attributes:
+      label: AI app involved
+      placeholder: e.g. Cursor 1.x, Claude Desktop, none
+  - type: input
+    id: version
+    attributes:
+      label: OpenMyMemo version
+      description: "`openmymemo --version`, or Settings in the Mac app."
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: e.g. macOS 15.4 (Apple silicon), Windows 11, Ubuntu 24.04
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: "`openmymemo doctor` output"
+      description: OpenMyMemo 0.2.5 and later. It checks the setup without printing your memories. Look it over before posting; it shows file paths, which can include your user name.
+      render: text
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error messages or logs
+      description: The Mac app's log is `~/Library/Logs/ai.mymemo.openmymemo/core.log`. Remove anything personal.
+      render: text
