@@ -23,8 +23,8 @@ You need [uv](https://docs.astral.sh/uv/), and for the panel Node 22 with pnpm 1
 uv sync                                  # Python dependencies
 uv run pytest                            # tests
 uv run ruff check src tests scripts      # lint
-cd web && pnpm install && pnpm test      # panel tests
-cd web && pnpm build                     # rebuild the panel into src/openmymemo/static/ (committed)
+(cd web && pnpm install && pnpm test)    # panel tests
+(cd web && pnpm build)                   # rebuild the panel into src/openmymemo/static/ (committed)
 ```
 
 Try your change against a scratch folder, never your real memory: `uv run python scripts/demo_vault.py /tmp/omm-demo`, then `uv run openmymemo --vault /tmp/omm-demo serve`. The README's [Development](./README.md#development) section covers panel development and the Mac app.
