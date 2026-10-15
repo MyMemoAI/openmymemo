@@ -852,3 +852,24 @@ def test_cli_connect_creates_a_missing_vault(tmp_path, env):
     folder = tmp_path / "fresh"
     out = runner.invoke(app, ["--vault", str(folder), "connect", "cursor"])
     assert out.exit_code == 0 and (folder / "memories").is_dir()
+
+
+def test_a_backup_left_readable_by_an_older_version_is_made_private(tmp_path):
+    """Older versions copied the config's mode onto the backup; the next change to that config tightens it."""
+    path = tmp_path / "mcp.json"
+    path.write_text('{"key": "secret"}')
+    copy = tmp_path / "mcp.json.openmymemo-backup"
+    copy.write_text('{"key": "old secret"}')
+    copy.chmod(0o644)
+    appfiles.backup(path)
+    assert stat.S_IMODE(copy.stat().st_mode) == 0o600 and copy.read_text() == '{"key": "old secret"}'
+
+    # A symlink in its place is never followed: what it points to keeps its mode.
+    other = tmp_path / "elsewhere.txt"
+    other.write_text("not ours")
+    other.chmod(0o644)
+    link_target = tmp_path / "settings.json"
+    link_target.write_text("{}")
+    (tmp_path / "settings.json.openmymemo-backup").symlink_to(other)
+    appfiles.backup(link_target)
+    assert stat.S_IMODE(other.stat().st_mode) == 0o644
