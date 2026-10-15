@@ -1,0 +1,65 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.MyMemoAI/openmymemo",
+  "title": "OpenMyMemo",
+  "description": "Your AI memory as a local folder you own. Every app shares it; you see and can undo each change.",
+  "repository": {
+    "url": "https://github.com/MyMemoAI/openmymemo",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/MyMemoAI/openmymemo",
+  "version": "0.2.3",
+  "icons": [
+    {
+      "src": "https://raw.githubusercontent.com/MyMemoAI/openmymemo/main/integrations/icons/icon-512.png",
+      "mimeType": "image/png",
+      "sizes": [
+        "512x512"
+      ]
+    }
+  ],
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "openmymemo",
+      "version": "0.2.3",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        },
+        {
+          "type": "named",
+          "name": "--connector",
+          "description": "The name this app gets in the OpenMyMemo panel, where you set what it may read and write.",
+          "default": "mcp-app",
+          "isRequired": true
+        },
+        {
+          "type": "positional",
+          "value": "--init",
+          "description": "Create the memory folder on first use."
+        },
+        {
+          "type": "named",
+          "name": "--panel-port",
+          "description": "Also serve the review panel at http://127.0.0.1:<port> while this app runs.",
+          "format": "number",
+          "default": "8787"
+        }
+      ],
+      "environmentVariables": [
+        {
+          "name": "OPENMYMEMO_HOME",
+          "description": "Your memory folder. Leave it empty for ~/OpenMyMemo; use the same folder in every app to share one memory.",
+          "format": "filepath"
+        }
+      ]
+    }
+  ]
+}

@@ -19,6 +19,8 @@ def test_versions_match_everywhere():
     version = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
     assert load(".claude-plugin/plugin.json")["version"] == version
     assert load("plugin.json")["version"] == version
+    assert load("server.json")["version"] == version
+    assert [p["version"] for p in load("server.json")["packages"]] == [version]
     assert load("integrations/claude-desktop/manifest.json")["version"] == version
     assert load("web/package.json")["version"] == version
     assert load("desktop/package.json")["version"] == version
@@ -83,3 +85,14 @@ def test_the_privacy_policy_is_where_directories_look_for_it():
     policies = load("integrations/claude-desktop/manifest.json")["privacy_policies"]
     assert policies == ["https://github.com/MyMemoAI/openmymemo/blob/main/PRIVACY.md"]
     assert policies[0] in readme and (ROOT / "PRIVACY.md").is_file()
+
+
+def test_the_mcp_registry_can_verify_the_pypi_package():
+    """The registry accepts server.json only if the PyPI package's README (its description there) names it."""
+    server = load("server.json")
+    assert server["name"] == "io.github.MyMemoAI/openmymemo"
+    assert len(server["description"]) <= 100
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
+    assert [(p["registryType"], p["identifier"]) for p in server["packages"]] == [("pypi", project["name"])]
+    assert project["readme"] == "README.md"
+    assert f"<!-- mcp-name: {server['name']} -->" in (ROOT / "README.md").read_text()
