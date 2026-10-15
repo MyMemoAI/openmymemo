@@ -72,3 +72,42 @@ def test_doctor_flags_an_app_whose_program_is_gone(vault, tmp_path):
     assert cursor.level == "fail" and cursor.fix == "Run `openmymemo connect cursor` again."
     result = runner.invoke(app, ["--vault", str(vault.root), "doctor", "--port", "1"])
     assert result.exit_code == 1 and "no longer exists" in result.output
+
+
+def snapshot(root: Path) -> dict[str, bytes]:
+    return {str(p.relative_to(root)): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
+
+
+def test_doctor_changes_nothing_in_the_folder(vault):
+    vault.add("work", "Leads the Atlas migration")
+    with (vault.memories_dir / "work.md").open("a", encoding="utf-8") as f:
+        f.write("- Written in an editor, no id yet\n")  # Vault.sync() would add an id and record it
+    before = snapshot(vault.root)
+    checks = doctor.run(vault.root, 1, no_panel)
+    assert snapshot(vault.root) == before
+    assert "2 memories" in by_area(checks)["Memory folder"].message
+
+
+def test_doctor_reports_damaged_files_instead_of_crashing(vault):
+    vault.topics_path.write_text("groups: [")
+    (vault.state_dir / "meta.json").write_text("{not json")
+    result = runner.invoke(app, ["--vault", str(vault.root), "doctor", "--port", "1"])
+    assert result.exit_code == 1
+    assert "topics.yaml is damaged" in result.output and "meta.json is damaged" in result.output
+    assert "groups: [" not in result.output and "not json" not in result.output
+
+
+def test_doctor_reports_a_check_that_breaks(vault, monkeypatch):
+    def broken(_vault):
+        raise RuntimeError("secret detail")
+
+    monkeypatch.setattr(doctor, "apps", broken)
+    checks = by_area(doctor.run(vault.root, 1, no_panel))
+    assert checks["AI apps"].level == "fail" and "secret detail" not in checks["AI apps"].message
+
+
+def test_doctor_doesnt_guess_the_folder_of_an_http_entry(tmp_path):
+    custom = Vault.create(tmp_path / "custom")
+    write_cursor({"url": "http://127.0.0.1:8787/mcp", "headers": {"Authorization": "Bearer x"}})
+    assert doctor._entry_folder({"url": "http://127.0.0.1:8787/mcp"}) is None
+    assert by_area(doctor.apps(custom))["Cursor"].level != "warn"

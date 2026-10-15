@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import __version__
-from .vault import Vault, VaultError
+from .vault import Vault
 
 LEVELS = ("ok", "info", "warn", "fail")
 
@@ -56,6 +56,15 @@ def program() -> list[Check]:
     return checks
 
 
+def _count(vault: Vault) -> tuple[int, int]:
+    """Topic files and memory lines, parsed from the files without `Vault.sync()`, which would rewrite them
+    (adding ids, migrating old files): a diagnosis must not change what it diagnoses."""
+    from .mdfile import MemoryFile
+
+    files = sorted(vault.memories_dir.glob("*.md"))
+    return len(files), sum(len(MemoryFile(f.read_text(encoding="utf-8")).items) for f in files)
+
+
 def folder(root: Path) -> tuple[list[Check], Vault | None]:
     vault = Vault(root)
     if not root.exists():
@@ -65,15 +74,32 @@ def folder(root: Path) -> tuple[list[Check], Vault | None]:
         return [Check("Memory folder", "fail", f"{root} isn't an OpenMyMemo folder yet.",
                       "Run `openmymemo init`, or pass the folder you use with --vault.")], None
     try:
-        topics = vault.topics()
-    except (VaultError, OSError) as e:
-        return [Check("Memory folder", "fail", f"{root} can't be read: {e}")], None
-    count = sum(t["count"] for t in topics)
-    checks = [Check("Memory folder", "ok", f"{root}: {count} memories in {len(topics)} topics")]
+        topics, count = _count(vault)
+    except (OSError, UnicodeDecodeError, ValueError):
+        return [Check("Memory folder", "fail", f"the topic files in {vault.memories_dir} can't be read.",
+                      "Check that they are readable UTF-8 Markdown; `openmymemo status` names the problem.")], None
+    checks = [Check("Memory folder", "ok", f"{root}: {count} memories in {topics} topics")]
+    for path in (vault.topics_path, vault.connectors_path, vault.meta_path, vault.settings_path):
+        if path.exists() and not _parses(path):
+            checks.append(Check("Memory folder", "fail", f"{path.relative_to(root)} is damaged and can't be read.",
+                                "Restore it from a backup or from git if you keep the folder there."))
     if not os.access(vault.memories_dir, os.W_OK):
         checks.append(Check("Memory folder", "fail", f"{vault.memories_dir} isn't writable, so nothing can be saved.",
                             "Check the folder's permissions."))
-    return checks, vault
+    return checks, (None if any(c.level == "fail" for c in checks) else vault)
+
+
+def _parses(path: Path) -> bool:
+    import json
+
+    import yaml
+
+    try:
+        text = path.read_text(encoding="utf-8")
+        data = json.loads(text) if path.suffix == ".json" else yaml.safe_load(text)
+    except (OSError, UnicodeDecodeError, ValueError, yaml.YAMLError):
+        return False
+    return data is None or isinstance(data, dict)
 
 
 def _port_free(port: int) -> bool:
@@ -94,12 +120,14 @@ def panel(root: Path, port: int, panel_for: Callable[[Path, int], str | None]) -
                   f"Close what uses it, or run `openmymemo serve --port {port + 1}`.")]
 
 
-def _entry_folder(entry: dict) -> Path:
+def _entry_folder(entry: dict) -> Path | None:
     """The memory folder an app's config entry starts OpenMyMemo with: --vault, else OPENMYMEMO_HOME, else the
-    default."""
+    default. None for an HTTP entry, which names no folder."""
     from .vault import vault_path
 
     cmd = entry.get("command", entry.get("cmd"))
+    if not cmd:
+        return None  # an HTTP entry (`url`): the server it points at decides the folder
     args = [*(cmd if isinstance(cmd, list) else [cmd]), *(entry.get("args") or [])]
     args = [a for a in args if isinstance(a, str)]
     for i, a in enumerate(args):
@@ -160,12 +188,23 @@ def cloud(vault: Vault) -> list[Check]:
     return [Check("MyMemo Cloud", "ok", "linked for this folder. `openmymemo cloud status` shows the connection.")]
 
 
+def _guarded(area: str, check: Callable[[], list[Check]]) -> list[Check]:
+    """One check that breaks (a damaged file, an app's unreadable settings) is reported, not a traceback that
+    loses the whole report. The exception's text is left out: it can quote the file."""
+    try:
+        return check()
+    except Exception as e:
+        return [Check(area, "fail", f"couldn't be checked ({type(e).__name__}).",
+                      "Run `openmymemo status` and `openmymemo apps` to see the error.")]
+
+
 def run(root: Path, port: int, panel_for: Callable[[Path, int], str | None]) -> list[Check]:
     checks = program()
-    found, vault = folder(root)
+    found = _guarded("Memory folder", lambda: folder(root)[0])
     checks += found
-    checks += panel(root, port, panel_for)
-    if vault is not None:
-        checks += apps(vault)
-        checks += cloud(vault)
+    checks += _guarded("Panel", lambda: panel(root, port, panel_for))
+    if not any(c.level == "fail" for c in found):
+        vault = Vault(root)
+        checks += _guarded("AI apps", lambda: apps(vault))
+        checks += _guarded("MyMemo Cloud", lambda: cloud(vault))
     return checks
