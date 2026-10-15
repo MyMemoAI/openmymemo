@@ -50,7 +50,8 @@
         ],
         "type": "object",
         "title": "memory_contextOutput"
-      }
+      },
+      "title": "Read memory"
     },
     {
       "annotations": {
@@ -96,7 +97,8 @@
         "type": "object",
         "additionalProperties": true,
         "title": "memory_searchDictOutput"
-      }
+      },
+      "title": "Search memory"
     },
     {
       "annotations": {
@@ -125,7 +127,8 @@
         "type": "object",
         "additionalProperties": true,
         "title": "memory_getDictOutput"
-      }
+      },
+      "title": "Get memories"
     },
     {
       "annotations": {
@@ -249,7 +252,8 @@
         "type": "object",
         "additionalProperties": true,
         "title": "memory_proposeDictOutput"
-      }
+      },
+      "title": "Propose a memory change"
     },
     {
       "annotations": {
@@ -294,7 +298,8 @@
         "type": "object",
         "additionalProperties": true,
         "title": "memory_proposalsDictOutput"
-      }
+      },
+      "title": "Check proposed changes"
     }
   ],
   "instructions": "OpenMyMemo holds the user's long-term memory: facts, preferences, instructions and ongoing work they\nchose to share with AI assistants. The user owns it, sees every change and can undo it.\n\n- At the start of a conversation, call memory_context and use it quietly; don't recite it back.\n- When you learn something durable about the user (a new fact, a changed preference, a goal, a standing\n  instruction), call memory_propose with a short reason and the user's own words as evidence.\n- To correct a memory, propose an update with its id; to retire one, propose an archive.\n- Don't propose one-off task details, guesses, or anything the user asked you not to remember.\n- What happens next: your additions, and corrections of memories an AI wrote, apply right away; the\n  user sees them in their OpenMyMemo digest and can undo them. Changes to memories the user wrote\n  themselves, and anything in a private topic, wait for the user (everything waits if they chose to\n  approve each change).\n- Never ask the user to approve anything in the chat. If it helps, tell them in one line what happened.\n"
