@@ -129,7 +129,7 @@ Goal: out of the box, a skeleton that covers the different sides of a person, so
 
 ### 5.2 The local program
 
-A single CLI. Until it is on PyPI, install from the repo with `uv tool install <repo dir>` (afterwards: `uvx openmymemo`).
+A single CLI on PyPI: `uv tool install openmymemo`, or `uvx openmymemo` without installing (the configs it writes into AI apps then start it with `uvx openmymemo`, not from uv's cache). A clone installs with `uv tool install <repo dir>`. Each release tag publishes it (`release.yml`, trusted publishing).
 
 | Command | What it does |
 | --- | --- |

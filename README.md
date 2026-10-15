@@ -2,11 +2,11 @@
 
 Your AI memory as a plain folder on your own computer. See exactly what models remember about you; let Claude, Codex, Cursor or any MCP app share it, so what you tell one the others know too, and see every change they make, with one click to undo. If an account gets banned, a vendor shuts down or you switch models, your memory comes with you.
 
-> v0.2. Product design and status: [docs/product-design.md](./docs/product-design.md). The folder format, for any tool that wants to read or write it: [docs/MEMORY_FORMAT.md](./docs/MEMORY_FORMAT.md).
+> v0.2. Product design and status: [docs/product-design.md](https://github.com/MyMemoAI/openmymemo/blob/main/docs/product-design.md). The folder format, for any tool that wants to read or write it: [docs/MEMORY_FORMAT.md](https://github.com/MyMemoAI/openmymemo/blob/main/docs/MEMORY_FORMAT.md).
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/panel-memories-dark.png">
-  <img alt="The OpenMyMemo panel: memories grouped by topic, each showing where it came from, and a note that AI apps made changes to review" src="docs/images/panel-memories-light.png">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/MyMemoAI/openmymemo/main/docs/images/panel-memories-dark.png">
+  <img alt="The OpenMyMemo panel: memories grouped by topic, each showing where it came from, and a note that AI apps made changes to review" src="https://raw.githubusercontent.com/MyMemoAI/openmymemo/main/docs/images/panel-memories-light.png">
 </picture>
 
 ## Why I built this
@@ -39,12 +39,13 @@ The app also installs an `openmymemo` command, which the AI apps it connects run
 
 ### The command line
 
-For developers, and anyone who prefers a terminal. Nothing is fenced in: everything the app does is a command, and the folder format ([docs/MEMORY_FORMAT.md](./docs/MEMORY_FORMAT.md)) is the interface. Requires [uv](https://docs.astral.sh/uv/). Not on PyPI yet, so install from the repo:
+For developers, and anyone who prefers a terminal. Nothing is fenced in: everything the app does is a command, and the folder format ([docs/MEMORY_FORMAT.md](https://github.com/MyMemoAI/openmymemo/blob/main/docs/MEMORY_FORMAT.md)) is the interface. Requires [uv](https://docs.astral.sh/uv/):
 
 ```bash
-git clone https://github.com/MyMemoAI/openmymemo.git
-uv tool install ./openmymemo
+uv tool install openmymemo                   # from PyPI; `uv tool upgrade openmymemo` updates it
 ```
+
+`uvx openmymemo …` runs it without installing; the AI apps it connects then start it with `uvx openmymemo` too. For the latest code, install from a clone instead: `uv tool install ./openmymemo`.
 
 ```bash
 openmymemo init                              # create ~/OpenMyMemo with 14 default topics
@@ -121,7 +122,7 @@ Tools AI apps see: `memory_context`, `memory_search`, `memory_get`, `memory_prop
 
 ## What happens when an AI writes
 
-![The Changes page: an AI's change to a memory you wrote and an addition to a private topic wait for you, with Accept, Edit and accept, and Reject](docs/images/panel-changes.png)
+![The Changes page: an AI's change to a memory you wrote and an addition to a private topic wait for you, with Accept, Edit and accept, and Reject](https://raw.githubusercontent.com/MyMemoAI/openmymemo/main/docs/images/panel-changes.png)
 
 - **An addition applies right away.** It is marked as new until you look at it: on the panel's Changes page, in `openmymemo review`, or in the one-line summary at the start of your next Claude Code or Codex session.
 - **A change to a memory you wrote, imported or approved yourself waits for you.** So does anything in a private topic (`health` and `finance` by default). AI never silently changes what you wrote.
@@ -141,7 +142,7 @@ Tools AI apps see: `memory_context`, `memory_search`, `memory_get`, `memory_prop
 └── .openmymemo/         # settings, metadata, history, activity, proposals — all plain text
 ```
 
-Each topic file starts with YAML frontmatter (`type`, `title`, `description`, `group`, `private`). Edit `memories/*.md` in any editor: a new line is a new memory, a deleted line is archived, a line moved to another file changes topic. OpenMyMemo adds the `^id` and records the change in history on its next read. Other tools can read and write the folder by following [docs/MEMORY_FORMAT.md](./docs/MEMORY_FORMAT.md).
+Each topic file starts with YAML frontmatter (`type`, `title`, `description`, `group`, `private`). Edit `memories/*.md` in any editor: a new line is a new memory, a deleted line is archived, a line moved to another file changes topic. OpenMyMemo adds the `^id` and records the change in history on its next read. Other tools can read and write the folder by following [docs/MEMORY_FORMAT.md](https://github.com/MyMemoAI/openmymemo/blob/main/docs/MEMORY_FORMAT.md).
 
 Upgrading from v0.1: open the folder once with v0.2. The files get their frontmatter, nothing else in them changes, and your approval setting is kept as it was.
 
@@ -149,7 +150,7 @@ Upgrading from v0.1: open the folder once with v0.2. The files get their frontma
 
 The server listens on 127.0.0.1 only. The panel API checks `Host`, `Origin` and a header that cross-site pages can't add; `/mcp` requires a connector token. The `health` and `finance` topics are hidden from every AI by default, and AI changes to private topics always wait for you, whatever the approval switch or an app's write mode says.
 
-Found a vulnerability? Please report it privately as described in [SECURITY.md](./SECURITY.md).
+Found a vulnerability? Please report it privately as described in [SECURITY.md](https://github.com/MyMemoAI/openmymemo/blob/main/SECURITY.md).
 
 ## Privacy Policy
 
