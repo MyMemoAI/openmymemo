@@ -30,6 +30,10 @@ def test_tools_are_listed_with_annotations(vault):
     assert set(names) == {"memory_context", "memory_search", "memory_get", "memory_propose", "memory_proposals"}
     assert names["memory_context"].annotations.read_only_hint is True
     assert names["memory_propose"].annotations.read_only_hint is False
+    # App directories (Claude's among them) require a title and readOnlyHint or destructiveHint on every tool.
+    for t in names.values():
+        assert t.title and t.title[0].isupper(), t.name
+        assert t.annotations.read_only_hint is True or t.annotations.destructive_hint is not None, t.name
     assert set(names["memory_propose"].input_schema["properties"]["op"]["enum"]) == {"add", "update", "archive"}
     assert [p.name for p in prompts.prompts] == ["recall"]
     assert [str(r.uri) for r in resources.resources] == ["openmymemo://context"]

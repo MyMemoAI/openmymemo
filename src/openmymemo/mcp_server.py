@@ -104,7 +104,7 @@ def build_server(vault: Vault, *, stdio_connector: str | None = None, panel_url:
         except VaultError as e:
             raise ToolError(str(e)) from e
 
-    @srv.tool(annotations=READ_ONLY)
+    @srv.tool(title="Read memory", annotations=READ_ONLY)
     async def memory_context(ctx: Context, topics: list[str] | None = None, max_chars: int = 8000) -> str:
         """Get the user's memory as Markdown: who they are, how they want you to work, what they're doing.
 
@@ -116,7 +116,7 @@ def build_server(vault: Vault, *, stdio_connector: str | None = None, panel_url:
         vault.log_activity(c.id, "context", memory_ids=result["memory_ids"], chars=result["chars"])
         return result["text"]
 
-    @srv.tool(annotations=READ_ONLY)
+    @srv.tool(title="Search memory", annotations=READ_ONLY)
     async def memory_search(ctx: Context, query: str, topics: list[str] | None = None,
                             limit: int = 10) -> dict[str, Any]:
         """Search the user's memory by keywords (any language). Returns matching memories with their ids."""
@@ -127,7 +127,7 @@ def build_server(vault: Vault, *, stdio_connector: str | None = None, panel_url:
         vault.log_activity(c.id, "search", query=query, memory_ids=[r["id"] for r in rows])
         return {"results": rows}
 
-    @srv.tool(annotations=READ_ONLY)
+    @srv.tool(title="Get memories", annotations=READ_ONLY)
     async def memory_get(ctx: Context, ids: list[str]) -> dict[str, Any]:
         """Fetch specific memories by id, with their topic, kind, source and timestamps."""
         c = who(ctx)
@@ -189,11 +189,12 @@ def build_server(vault: Vault, *, stdio_connector: str | None = None, panel_url:
             out["review_url"] = f"{panel_url}/#/changes"
         return out
 
-    srv.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True,
+    srv.tool(title="Propose a memory change",
+             annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True,
                                          openWorldHint=False),
              description=memory_propose.__doc__.rstrip() + CLOUD_QUEUED if relayed else None)(memory_propose)
 
-    @srv.tool(annotations=READ_ONLY)
+    @srv.tool(title="Check proposed changes", annotations=READ_ONLY)
     async def memory_proposals(
         ctx: Context,
         status: Literal["pending", "accepted", "edited_accepted", "rejected", "expired", "applied", "undone"]
