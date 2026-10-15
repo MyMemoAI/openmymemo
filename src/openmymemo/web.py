@@ -28,7 +28,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel
 
 from . import __version__, clients, transfer
-from .cloud import CALLBACK_HEADERS, Cloud, callback_page
+from .cloud import CALLBACK_HEADERS, Cloud, CloudError, SettingLocked, callback_page
 from .connectors import Connector, Connectors
 from .context import compile_context
 from .mcp_server import build_server
@@ -149,6 +149,11 @@ class TopicIn(BaseModel):
 class SettingsPatch(BaseModel):
     require_approval: bool | None = None
     onboarded: bool | None = None
+
+
+class CloudSettingsPatch(BaseModel):
+    show: bool | None = None
+    service: str | None = None  # "" goes back to MyMemo's own
 
 
 class TopicPatch(BaseModel):
@@ -398,6 +403,15 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
 
     @api.get("/api/cloud")
     def get_cloud() -> dict:
+        return cloud_status()
+
+    @api.patch("/api/cloud/settings")
+    def patch_cloud_settings(body: CloudSettingsPatch) -> dict:
+        """Show or hide MyMemo Cloud, and choose its service (product-design.md §16.11)."""
+        try:
+            cloud.update_settings(show=body.show, service=body.service)
+        except CloudError as e:
+            raise HTTPException(409 if isinstance(e, SettingLocked) else 400, str(e)) from None
         return cloud_status()
 
     @api.post("/api/cloud/link")

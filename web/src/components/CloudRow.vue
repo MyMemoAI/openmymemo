@@ -128,6 +128,7 @@ async function unlink() {
     status.value = res.cloud;
     showSetup.value = false;
     toast(res.message);
+    if (!res.cloud.shown) store.cloudVersion++; // hidden in Settings: the Connectors page drops it now
     await refresh();
   } catch (e) {
     toast(e instanceof Error ? e.message : String(e), "error");
