@@ -58,7 +58,8 @@ def backup(path: Path) -> None:
             shutil.copyfileobj(src, f)
             f.flush()
             os.fsync(f.fileno())
-        shutil.copystat(source, tmp)  # the original's own permissions and times, now that it is all there
+        shutil.copystat(source, tmp)  # the original's times, now that it is all there
+        os.chmod(tmp, 0o600)  # but readable by this user only, whatever the original allows (PRIVACY.md)
         os.replace(tmp, copy)
     except BaseException:
         tmp.unlink(missing_ok=True)

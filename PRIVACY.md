@@ -20,7 +20,7 @@ Everything below is stored only on your computer. OpenMyMemo never uploads it.
   - pending and decided changes proposed by AI apps, with the reason and quote the app gave;
   - the list of connected apps and their permissions. Connector tokens are stored only as a hash.
   - an activity log of what each app did: when it read your memory, which memories it read, the text of its searches, its proposals and their outcome, and imports.
-- **Backups of other apps' settings:** before it first edits an AI app's MCP configuration file to connect it, OpenMyMemo keeps a copy next to that file (`<file>.openmymemo-backup`). Only you can read the copy, but it contains whatever that file held, which may include other secrets.
+- **Backups of other apps' settings:** before it first edits an AI app's MCP configuration file to connect it, OpenMyMemo keeps a copy next to that file (`<file>.openmymemo-backup`). The copy is readable by you only, whatever the original file allows, but it contains whatever that file held, which may include other secrets.
 - **The Mac app** keeps these under `~/Library`:
   - its settings: your memory folder's location, the appearance and notifications switches;
   - the Python it runs on and a download cache;
@@ -36,7 +36,7 @@ Everything below is stored only on your computer. OpenMyMemo never uploads it.
 
 ## What AI apps receive
 
-When you connect an AI app, it can read memories in the topics you allow and propose changes. Additions apply right away and show up for you to review and undo. Changes to memories you wrote yourself, and anything in a private topic, always wait for you.
+When you connect an AI app, it can read memories in the topics you allow and propose changes. By default, additions apply right away and show up for you to review and undo, and changes to memories you wrote yourself wait for you. If you let an app write directly (its write mode "auto"), its changes apply at once, including changes to memories you wrote and while approval is on. Anything in a private topic always waits for you, whatever an app's write mode.
 
 What an app reads, it sends to its own model provider as part of your conversation. That provider's privacy policy then applies, not this one. You decide per app which topics it may read; private topics are excluded by default. You can see exactly what an app receives on the "What AI sees" page or with `openmymemo context --connector <id>`.
 
@@ -77,7 +77,7 @@ What the MyMemo service stores and how long it keeps it is governed by [MyMemo's
 ## Your choices
 
 - Read, edit, export or delete your memories at any time. They are plain files in a folder you own.
-- Choose for each app which topics it may read and whether it may write. Remove an app's access, or turn approval on so that every change waits for you.
+- Choose for each app which topics it may read and whether it may write. Remove an app's access, or turn approval on so that every change from an app that proposes (the default) waits for you; an app you let write directly still applies its changes at once, except in private topics.
 - Disconnect an app, which removes OpenMyMemo from its settings. Unlink MyMemo Cloud, or leave it hidden.
 - To remove everything:
   1. Delete the memory folder.
