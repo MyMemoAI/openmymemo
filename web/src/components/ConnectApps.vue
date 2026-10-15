@@ -4,6 +4,7 @@ import { api, type AppCatalog, type AppStatus, type Connector, type ConnectorCre
 import { relTime, t } from "../i18n";
 import { copy, refresh, store, toast } from "../store";
 import AppIcon from "./AppIcon.vue";
+import CloudRow from "./CloudRow.vue";
 import ModalDialog from "./ModalDialog.vue";
 import ConnectNote from "./ConnectNote.vue";
 import SnippetTabs from "./SnippetTabs.vue";
@@ -12,7 +13,8 @@ import SnippetTabs from "./SnippetTabs.vue";
  * The AI apps OpenMyMemo knows (src/openmymemo/clients.py), each with one action: Connect, Disconnect, or
  * "Set up" for apps that need a snippet pasted. Loads its own data. `compact` (the first-run guide) lists the
  * apps on this computer and folds the rest; the Connectors page passes a `manage` slot, shown under a
- * connected app's row when its permissions are opened.
+ * connected app's row when its permissions are opened. MyMemo Cloud (the catalog's `account` entry) has a section
+ * of its own, "On the web", with the web apps using it underneath (CloudRow); the first-run guide leaves it out.
  */
 const props = defineProps<{ compact?: boolean; open?: string | null }>();
 const emit = defineEmits<{ connected: [id: string]; disconnected: [id: string]; manage: [id: string | null] }>();
@@ -28,12 +30,16 @@ const busy = reactive<Record<string, boolean>>({});
 const results = reactive<Record<string, ConnectResult>>({});
 const showAll = ref(false);
 
+const cloudRow = ref<InstanceType<typeof CloudRow> | null>(null);
+const setCloudRow = (el: unknown) => (cloudRow.value = el as InstanceType<typeof CloudRow> | null);
+
 let loadedAt = 0;
 /** Bumped by every load and every action, so an answer that was asked for earlier can't overwrite a newer one. */
 let seq = 0;
 async function load() {
   const mine = ++seq;
   loadedAt = Date.now();
+  void cloudRow.value?.reload();
   try {
     const data = await api.apps();
     if (mine !== seq) return;
@@ -68,7 +74,9 @@ function live(a: AppStatus): AppStatus {
 }
 
 const mac = computed(() => catalog.value?.system === "darwin");
-const apps = computed(() => (catalog.value?.apps ?? []).filter((a) => a.id !== OTHER).map(live));
+const apps = computed(() => (catalog.value?.apps ?? []).filter((a) => a.id !== OTHER && a.method !== "account").map(live));
+/** MyMemo Cloud, when this installation's catalog has it. */
+const cloud = computed(() => (props.compact ? null : catalog.value?.apps.find((a) => a.method === "account") ?? null));
 const other = computed(() => catalog.value?.apps.find((a) => a.id === OTHER) ?? null);
 const here = (a: AppStatus) => a.installed || a.connected || a.has_connector;
 const nearby = computed(() => apps.value.filter(here));
@@ -211,80 +219,90 @@ defineExpose({ addOther, disconnect, reload: load });
       {{ failed ? t("apps.loadError") : t("common.loading") }}
     </div>
 
-    <section v-for="s in sections" :key="s.id" class="space-y-2">
-      <h3 v-if="!compact" class="label px-1">{{ s.title }}</h3>
-      <div class="card divide-y divide-sep overflow-hidden">
-        <p v-if="s.empty" class="px-4.5 py-4 text-[13px] text-muted">{{ s.empty }}</p>
+    <template v-for="(s, i) in sections" :key="s.id">
+      <section class="space-y-2">
+        <h3 v-if="!compact" class="label px-1">{{ s.title }}</h3>
+        <div class="card divide-y divide-sep overflow-hidden">
+          <p v-if="s.empty" class="px-4.5 py-4 text-[13px] text-muted">{{ s.empty }}</p>
 
-        <template v-for="a in s.apps" :key="a.id">
-          <div class="flex items-center gap-3 px-4.5 py-3">
-            <span class="avatar size-[34px] text-sm" :class="{ 'avatar-on': a.connected }" aria-hidden="true">{{ a.name.slice(0, 1) }}</span>
-            <div class="min-w-0 flex-1">
-              <div class="truncate font-semibold">{{ a.name }}<span v-if="a.note" class="font-normal text-muted"> · {{ a.note }}</span></div>
-              <div class="flex items-center gap-1.5 text-[13px] text-muted">
-                <span class="dot" :class="DOT[status(a).tone]" aria-hidden="true" />
-                <span class="truncate">{{ status(a).text }}</span>
+          <template v-for="a in s.apps" :key="a.id">
+            <div class="flex items-center gap-3 px-4.5 py-3">
+              <span class="avatar size-[34px] text-sm" :class="{ 'avatar-on': a.connected }" aria-hidden="true">{{ a.name.slice(0, 1) }}</span>
+              <div class="min-w-0 flex-1">
+                <div class="truncate font-semibold">{{ a.name }}<span v-if="a.note" class="font-normal text-muted"> · {{ a.note }}</span></div>
+                <div class="flex items-center gap-1.5 text-[13px] text-muted">
+                  <span class="dot" :class="DOT[status(a).tone]" aria-hidden="true" />
+                  <span class="truncate">{{ status(a).text }}</span>
+                </div>
               </div>
+              <a v-if="a.site && !here(a)" :href="a.site" target="_blank" rel="noopener" class="btn btn-quiet btn-sm max-sm:hidden">{{ t("apps.get") }}</a>
+              <button
+                v-if="$slots.manage && a.connector"
+                class="btn btn-quiet btn-sm"
+                :aria-expanded="open === a.id"
+                :aria-label="t('apps.manageNamed', { name: a.name })"
+                @click="toggleManage(a.id)"
+              >
+                <AppIcon name="sliders" :size="14" /><span class="max-sm:hidden">{{ t("apps.manage") }}</span>
+              </button>
+              <button
+                class="btn btn-sm"
+                :class="{ 'btn-primary': a.installed && (action(a) === 'connect' || action(a) === 'reconnect') }"
+                :disabled="busy[a.id]"
+                :aria-expanded="action(a) === 'setup' ? !!results[a.id] : undefined"
+                @click="primary(a)"
+              >{{ t(`apps.${action(a)}`) }}</button>
             </div>
-            <a v-if="a.site && !here(a)" :href="a.site" target="_blank" rel="noopener" class="btn btn-quiet btn-sm max-sm:hidden">{{ t("apps.get") }}</a>
-            <button
-              v-if="$slots.manage && a.connector"
-              class="btn btn-quiet btn-sm"
-              :aria-expanded="open === a.id"
-              :aria-label="t('apps.manageNamed', { name: a.name })"
-              @click="toggleManage(a.id)"
-            >
-              <AppIcon name="sliders" :size="14" /><span class="max-sm:hidden">{{ t("apps.manage") }}</span>
-            </button>
-            <button
-              class="btn btn-sm"
-              :class="{ 'btn-primary': a.installed && (action(a) === 'connect' || action(a) === 'reconnect') }"
-              :disabled="busy[a.id]"
-              :aria-expanded="action(a) === 'setup' ? !!results[a.id] : undefined"
-              @click="primary(a)"
-            >{{ t(`apps.${action(a)}`) }}</button>
-          </div>
-          <ConnectNote v-if="results[a.id]" :app="a" :result="results[a.id]" @close="delete results[a.id]" />
-          <div v-if="$slots.manage && a.connector && open === a.id" class="bg-sunken">
-            <slot name="manage" :app="a" :connector="a.connector" />
-          </div>
-        </template>
+            <ConnectNote v-if="results[a.id]" :app="a" :result="results[a.id]" @close="delete results[a.id]" />
+            <div v-if="$slots.manage && a.connector && open === a.id" class="bg-sunken">
+              <slot name="manage" :app="a" :connector="a.connector" />
+            </div>
+          </template>
 
-        <template v-for="c in s.custom" :key="c.id">
-          <div class="flex items-center gap-3 px-4.5 py-3">
-            <span class="avatar avatar-on size-[34px] text-sm" aria-hidden="true">{{ c.name.slice(0, 1) }}</span>
-            <div class="min-w-0 flex-1">
-              <div class="truncate font-semibold">{{ c.name }}</div>
-              <div class="flex items-center gap-1.5 text-[13px] text-muted">
-                <span class="dot" :class="c.last_seen ? 'bg-fresh' : 'bg-faint'" aria-hidden="true" />
-                <span class="truncate">{{ c.last_seen ? t("apps.inUse", { time: relTime(c.last_seen) }) : t("apps.addedByName") }}</span>
+          <template v-for="c in s.custom" :key="c.id">
+            <div class="flex items-center gap-3 px-4.5 py-3">
+              <span class="avatar avatar-on size-[34px] text-sm" aria-hidden="true">{{ c.name.slice(0, 1) }}</span>
+              <div class="min-w-0 flex-1">
+                <div class="truncate font-semibold">{{ c.name }}</div>
+                <div class="flex items-center gap-1.5 text-[13px] text-muted">
+                  <span class="dot" :class="c.last_seen ? 'bg-fresh' : 'bg-faint'" aria-hidden="true" />
+                  <span class="truncate">{{ c.last_seen ? t("apps.inUse", { time: relTime(c.last_seen) }) : t("apps.addedByName") }}</span>
+                </div>
               </div>
+              <button
+                v-if="$slots.manage"
+                class="btn btn-quiet btn-sm"
+                :aria-expanded="open === c.id"
+                :aria-label="t('apps.manageNamed', { name: c.name })"
+                @click="toggleManage(c.id)"
+              >
+                <AppIcon name="sliders" :size="14" /><span class="max-sm:hidden">{{ t("apps.manage") }}</span>
+              </button>
             </div>
-            <button
-              v-if="$slots.manage"
-              class="btn btn-quiet btn-sm"
-              :aria-expanded="open === c.id"
-              :aria-label="t('apps.manageNamed', { name: c.name })"
-              @click="toggleManage(c.id)"
-            >
-              <AppIcon name="sliders" :size="14" /><span class="max-sm:hidden">{{ t("apps.manage") }}</span>
-            </button>
-          </div>
-          <div v-if="$slots.manage && open === c.id" class="bg-sunken">
-            <slot name="manage" :app="null" :connector="c" />
-          </div>
-        </template>
+            <div v-if="$slots.manage && open === c.id" class="bg-sunken">
+              <slot name="manage" :app="null" :connector="c" />
+            </div>
+          </template>
 
-        <div v-if="s.other" class="flex items-center gap-3 px-4.5 py-3">
-          <span class="avatar size-[34px] text-muted" aria-hidden="true"><AppIcon name="plus" :size="16" /></span>
-          <div class="min-w-0 flex-1">
-            <div class="truncate font-semibold">{{ t("apps.other") }}</div>
-            <div class="truncate text-[13px] text-muted">{{ t("apps.otherShort") }}</div>
+          <div v-if="s.other" class="flex items-center gap-3 px-4.5 py-3">
+            <span class="avatar size-[34px] text-muted" aria-hidden="true"><AppIcon name="plus" :size="16" /></span>
+            <div class="min-w-0 flex-1">
+              <div class="truncate font-semibold">{{ t("apps.other") }}</div>
+              <div class="truncate text-[13px] text-muted">{{ t("apps.otherShort") }}</div>
+            </div>
+            <button class="btn btn-sm" @click="addOther">{{ t("apps.setup") }}</button>
           </div>
-          <button class="btn btn-sm" @click="addOther">{{ t("apps.setup") }}</button>
         </div>
-      </div>
-    </section>
+      </section>
+      <section v-if="i === 0 && cloud" class="space-y-2">
+        <h3 class="label px-1">{{ t("cloud.section") }}</h3>
+        <div class="card overflow-hidden">
+          <CloudRow :ref="setCloudRow" :open="open" @manage="(id) => emit('manage', id)">
+            <template v-if="$slots.manage" #manage="scope"><slot name="manage" v-bind="scope" /></template>
+          </CloudRow>
+        </div>
+      </section>
+    </template>
 
     <button v-if="compact && catalog && elsewhere.length" class="btn btn-link btn-sm" :aria-expanded="showAll" @click="showAll = !showAll">
       {{ showAll ? t("apps.showFewer") : t("apps.showAll", { n: elsewhere.length }) }}

@@ -1,0 +1,13 @@
+{
+  "device_id": "5f0c6d0e-3b7a-4c1e-9a64-2f1d8e7c9b10",
+  "device_token": "omd_TEST_ONLY_not_a_real_token_0000000000",
+  "member": {
+    "display_name": "Sam",
+    "email_masked": "s***@example.com"
+  },
+  "plan": {
+    "tier": "ultra",
+    "live": true,
+    "queue": true
+  }
+}

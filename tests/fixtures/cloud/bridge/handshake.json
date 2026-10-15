@@ -1,0 +1,16 @@
+{
+  "method": "GET",
+  "path": "/openmymemo/bridge",
+  "headers": {
+    "Authorization": "Bearer omd_TEST_ONLY_not_a_real_token_0000000000",
+    "Sec-WebSocket-Protocol": "openmymemo-bridge.v1"
+  },
+  "rules": [
+    "the device token is checked before the upgrade is accepted; a refusal is a plain HTTP status: 401 for a missing, bad or revoked device token, 403 for an Origin header or a missing subprotocol, 404 while the service has the feature off, 429 (with Retry-After) while two handshakes for the same device token are still waiting for hello, 503 (with Retry-After) for transient failures",
+    "no refusal by itself makes the computer unlink: after a 401 or 403 (which a proxy or firewall in front of the service can also send) it probes GET /openmymemo/device with the device token and forgets the link only when that answers exactly 401 {\"error\": \"invalid_token\"}; anything else keeps the link and backs off",
+    "any request with an Origin header is rejected",
+    "the service echoes the openmymemo-bridge.v1 subprotocol",
+    "a plan without live relay is accepted, then closed with 4403",
+    "first frame from the computer is hello; the service answers welcome"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "code": "omc_SplxlOBeZQQYbYS6WxSbIA",
+  "code_verifier": "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+  "redirect_uri": "http://127.0.0.1:8787/cloud/callback",
+  "public_key": "uJlVhjwyb0eHqjZxtmVSCoSicdR_0lrKaPUQ1mLczm0",
+  "key_alg": "x25519",
+  "app_version": "0.3.0"
+}

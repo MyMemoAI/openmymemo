@@ -98,7 +98,8 @@ export interface SortRow {
 export interface Connector {
   id: string;
   name: string;
-  kind: "stdio" | "http";
+  /** cloud: a web app reaching the folder through MyMemo Cloud (cloud-chatgpt, cloud-claude, …). */
+  kind: "stdio" | "http" | "cloud";
   read_topics: string[] | "all";
   include_private: boolean;
   write: "none" | "propose" | "auto";
@@ -115,8 +116,13 @@ export interface Connector {
 export interface AppStatus {
   id: string;
   name: string;
-  /** file: OpenMyMemo edits its settings; cli: it runs the app's own command; manual: the person pastes a snippet. */
-  method: "file" | "cli" | "manual";
+  /**
+   * file: OpenMyMemo edits its settings; cli: it runs the app's own command; manual: the person pastes a snippet;
+   * account: MyMemo Cloud, a sign-in rather than an app (see CloudStatus).
+   */
+  method: "file" | "cli" | "manual" | "account";
+  /** One line about what it is, where the name alone doesn't say. */
+  description?: string | null;
   docs: string;
   site: string | null;
   note: string | null;
@@ -126,7 +132,7 @@ export interface AppStatus {
   restart_name: string;
   installed: boolean;
   connected: boolean;
-  via: "config" | "plugin" | "connector" | null;
+  via: "config" | "plugin" | "connector" | "account" | null;
   /** Our plugin in that app, e.g. "the OpenMyMemo extension", when that is how it is connected. */
   plugin: string | null;
   /** Its settings start OpenMyMemo from a path that no longer exists; connecting again fixes them. */
@@ -176,6 +182,56 @@ export interface ConnectResult {
   steps: string[];
 }
 
+/** The MyMemo service's plan as it was at linking (and at each connection). */
+export interface CloudPlan {
+  tier?: string;
+  /** Live relay: calls reach this computer while it is online. */
+  live?: boolean;
+  /** Offline queue: writes wait, encrypted, while it is offline. */
+  queue?: boolean;
+}
+
+/** A web app using MyMemo Cloud: a connector of its own, or a tombstone once its access was removed. */
+export interface CloudApp {
+  id: string;
+  name: string;
+  revoked: boolean;
+  last_seen: string | null;
+  connector: Connector | null;
+}
+
+/** MyMemo Cloud on this computer (GET /api/cloud). */
+export interface CloudStatus {
+  linked: boolean;
+  /** The MyMemo service, and the URL ChatGPT and claude.ai need, exactly. */
+  service: string;
+  endpoint: string;
+  /** A sign-in was started here and the browser hasn't come back yet. */
+  pending: boolean;
+  /** Why the last sign-in didn't link this computer. */
+  link_error: string | null;
+  folder: string | null;
+  /** The link serves the folder this panel shows. */
+  this_folder: boolean;
+  /** Who this computer is linked to: MyMemo's display name and masked email ("s***@example.com"). */
+  account: { display_name: string; email_masked: string } | null;
+  plan: CloudPlan | null;
+  linked_at: string | null;
+  state: "connecting" | "online" | "waiting" | "stopped";
+  /**
+   * offline (reconnecting) · refused (turned away, but MyMemo didn't say the link is gone; retrying) · plan (the
+   * plan doesn't include it; checked hourly) · replaced (another OpenMyMemo took
+   * over) · key (link again) · unlinked · closed · folder (linked to another folder) · not_running.
+   */
+  reason: string | null;
+  online: boolean;
+  close_code: number | null;
+  last_call_at: string | null;
+  /** Proposals waiting in MyMemo Cloud's encrypted queue, as of the last connection. */
+  queued: number | null;
+  apps: CloudApp[];
+}
+
 export interface ConnectorCreated {
   connector: Connector;
   token: string | null;
@@ -185,7 +241,8 @@ export interface ConnectorCreated {
 export interface Activity {
   at: string;
   connector: string;
-  action: "context" | "search" | "get" | "propose" | "import";
+  /** link: this computer was linked to MyMemo Cloud (connector "mymemo-cloud"), to `account` / `email_masked`. */
+  action: "context" | "search" | "get" | "propose" | "import" | "link";
   query?: string;
   memory_ids?: string[];
   proposal_id?: string;
@@ -193,6 +250,8 @@ export interface Activity {
   result?: string;
   chars?: number;
   source?: string;
+  account?: string;
+  email_masked?: string;
 }
 
 export interface HistoryRow {
@@ -298,6 +357,12 @@ export const api = {
   connectApp: (id: string) => req<{ result: ConnectResult; app: AppStatus }>("POST", `/api/clients/${enc(id)}/connect`),
   disconnectApp: (id: string) =>
     req<{ result: ConnectResult; app: AppStatus }>("POST", `/api/clients/${enc(id)}/disconnect`),
+  cloud: () => req<CloudStatus>("GET", "/api/cloud"),
+  /** Start signing in: returns MyMemo's page to open in the browser. */
+  cloudLink: () => req<{ url: string }>("POST", "/api/cloud/link"),
+  cloudUnlink: () => req<{ message: string; cloud: CloudStatus }>("DELETE", "/api/cloud"),
+  cloudReconnect: () => req<CloudStatus>("POST", "/api/cloud/reconnect"),
+  cloudAllow: (id: string) => req<CloudStatus>("POST", `/api/cloud/apps/${enc(id)}/allow`),
   context: (connector: string | null, maxChars: number) =>
     req<ContextResult>("GET", `/api/context?max_chars=${maxChars}${connector ? `&connector=${enc(connector)}` : ""}`),
   activity: (connector?: string) =>

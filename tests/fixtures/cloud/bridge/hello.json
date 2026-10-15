@@ -1,0 +1,301 @@
+{
+  "type": "hello",
+  "v": 1,
+  "app_version": "0.3.0",
+  "key_id": "a095e17e05019955",
+  "max_inflight": 4,
+  "tools": [
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Get the user's memory as Markdown: who they are, how they want you to work, what they're doing.\n\nCall this once at the start of a conversation. `topics` limits it to some topic slugs;\n`max_chars` caps its length (most important memories come first).",
+      "inputSchema": {
+        "properties": {
+          "topics": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Topics"
+          },
+          "max_chars": {
+            "default": 8000,
+            "title": "Max Chars",
+            "type": "integer"
+          }
+        },
+        "type": "object",
+        "title": "memory_contextArguments"
+      },
+      "name": "memory_context",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "title": "memory_contextOutput"
+      }
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Search the user's memory by keywords (any language). Returns matching memories with their ids.",
+      "inputSchema": {
+        "properties": {
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "topics": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Topics"
+          },
+          "limit": {
+            "default": 10,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object",
+        "title": "memory_searchArguments"
+      },
+      "name": "memory_search",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "memory_searchDictOutput"
+      }
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Fetch specific memories by id, with their topic, kind, source and timestamps.",
+      "inputSchema": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "type": "object",
+        "title": "memory_getArguments"
+      },
+      "name": "memory_get",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "memory_getDictOutput"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Add, correct or retire a memory of the user's. Returns at once; it never waits for the user.\n\n- op=\"add\": `content` is one self-contained statement about the user, written in the third person\n  or as the user would say it (e.g. \"Prefers answers in Chinese\"). Optional `topic` is a topic slug\n  from memory_context; leave it out to let OpenMyMemo file it.\n- op=\"update\": `memory_id` plus the full corrected `content`.\n- op=\"archive\": `memory_id` of a memory that is no longer true.\n`reason` says why; `evidence` quotes what the user said. Reuse an `idempotency_key` when retrying.\n\nReturns `status`:\n- \"applied\": saved now. The user sees it in their OpenMyMemo digest and can undo it.\n- \"pending\": waiting for the user, and `hold` says why: \"protected\" (they wrote that memory\n  themselves), \"private\" (it is in a private topic) or \"approval\" (they review every change first).\n- \"duplicate\": they already have this memory; nothing was saved.\nAn add that resembles an existing memory becomes an update of that memory (see `note`).\nDon't ask the user to approve anything in the chat. Through MyMemo Cloud, when the person's computer is offline the status can also be \"queued\": the change is kept encrypted and filed when the computer is back.",
+      "inputSchema": {
+        "properties": {
+          "op": {
+            "enum": [
+              "add",
+              "update",
+              "archive"
+            ],
+            "title": "Op",
+            "type": "string"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Content"
+          },
+          "memory_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Memory Id"
+          },
+          "topic": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Topic"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "fact",
+                  "preference",
+                  "ongoing",
+                  "instruction",
+                  "event"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Kind"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reason"
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Evidence"
+          },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Idempotency Key"
+          }
+        },
+        "required": [
+          "op"
+        ],
+        "type": "object",
+        "title": "memory_proposeArguments"
+      },
+      "name": "memory_propose",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "memory_proposeDictOutput"
+      }
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "List the proposals this app made and what happened to them, so you don't repeat rejected or undone ones.\n\nStatuses: applied (saved; the user may still undo it), pending (waiting for the user; `hold` says\nwhy), accepted or edited_accepted (the user approved it, perhaps reworded), rejected, undone, expired.",
+      "inputSchema": {
+        "properties": {
+          "status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "pending",
+                  "accepted",
+                  "edited_accepted",
+                  "rejected",
+                  "expired",
+                  "applied",
+                  "undone"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Status"
+          },
+          "limit": {
+            "default": 20,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "type": "object",
+        "title": "memory_proposalsArguments"
+      },
+      "name": "memory_proposals",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "memory_proposalsDictOutput"
+      }
+    }
+  ],
+  "instructions": "OpenMyMemo holds the user's long-term memory: facts, preferences, instructions and ongoing work they\nchose to share with AI assistants. The user owns it, sees every change and can undo it.\n\n- At the start of a conversation, call memory_context and use it quietly; don't recite it back.\n- When you learn something durable about the user (a new fact, a changed preference, a goal, a standing\n  instruction), call memory_propose with a short reason and the user's own words as evidence.\n- To correct a memory, propose an update with its id; to retire one, propose an archive.\n- Don't propose one-off task details, guesses, or anything the user asked you not to remember.\n- What happens next: your additions, and corrections of memories an AI wrote, apply right away; the\n  user sees them in their OpenMyMemo digest and can undo them. Changes to memories the user wrote\n  themselves, and anything in a private topic, wait for the user (everything waits if they chose to\n  approve each change).\n- Never ask the user to approve anything in the chat. If it helps, tell them in one line what happened.\n"
+}

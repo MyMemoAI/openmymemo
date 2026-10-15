@@ -1,0 +1,4 @@
+{
+  "url": "https://api.mymemo.ai/openmymemo/oauth/authorize?response_type=code&client_id=openmymemo-desktop&redirect_uri=http%3A%2F%2F127.0.0.1%3A8787%2Fcloud%2Fcallback&resource=https%3A%2F%2Fapi.mymemo.ai%2Fopenmymemo%2Fbridge&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256&state=af0ifjsldkj&device_name=Sam%E2%80%99s%20MacBook%20Air",
+  "note": "The host comes from configuration (OPENMYMEMO_CLOUD_URL on the computer); tests use a local service."
+}

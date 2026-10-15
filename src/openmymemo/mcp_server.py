@@ -1,13 +1,14 @@
 """The MCP server AI apps talk to: read the user's memory, propose changes.
 
-The same server runs over stdio (``openmymemo mcp --connector claude-desktop``) and over local HTTP
-(``openmymemo serve``, bearer token per connector). Every call is attributed to a connector so the
-user can see who read what. Every write is a proposal: most apply at once and land in the user's
+The same server runs over stdio (``openmymemo mcp --connector claude-desktop``), over local HTTP
+(``openmymemo serve``, bearer token per connector) and, for web apps, relayed by MyMemo Cloud (``cloud.py``,
+connector ``cloud-<slug>``). Every call is attributed to a connector so the user can see who read what. Every write is a proposal: most apply at once and land in the user's
 digest, where they can be undone; the rest wait for the user (see ``proposals.py``).
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any, Literal
 
 import anyio
@@ -17,7 +18,7 @@ from mcp_types import ToolAnnotations
 
 from . import __version__
 from .clients import display_name
-from .connectors import Connector, Connectors, Revoked
+from .connectors import Connector, Connectors
 from .context import compile_context, search
 from .proposals import Proposals
 from .vault import Vault, VaultError
@@ -44,6 +45,10 @@ account. During our conversation, whenever you learn something about me that wil
 month, call memory_propose (with a reason and my words as evidence). I'll see the changes in
 OpenMyMemo and undo anything I don't want, so don't ask me to approve them here."""
 
+# What the cloud variant of memory_propose adds to its description: only the cloud ever answers "queued".
+CLOUD_QUEUED = (' Through MyMemo Cloud, when the person\'s computer is offline the status can also be "queued": '
+                "the change is kept encrypted and filed when the computer is back.")
+
 Kind = Literal["fact", "preference", "ongoing", "instruction", "event"]
 READ_ONLY = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
 
@@ -57,13 +62,19 @@ def _token_from(headers) -> str | None:
     return None
 
 
-def build_server(vault: Vault, *, stdio_connector: str | None = None, panel_url: str | None = None) -> MCPServer:
+def build_server(vault: Vault, *, stdio_connector: str | None = None, panel_url: str | None = None,
+                 relayed: Callable[[], Connector] | None = None) -> MCPServer:
+    """The MCP server. `relayed` makes the MyMemo Cloud variant: it names the connector of the call being
+    relayed, `memory_propose` mentions the cloud's "queued" status, and results carry no link to this
+    computer's panel."""
     connectors = Connectors(vault)
     proposals = Proposals(vault)
     srv = MCPServer("OpenMyMemo", title="OpenMyMemo", instructions=INSTRUCTIONS, version=__version__,
                     website_url="https://github.com/MyMemoAI/openmymemo")
 
     def who(ctx: Context | None) -> Connector:
+        if relayed is not None:
+            return relayed()
         headers = None
         if ctx is not None:
             try:
@@ -81,7 +92,7 @@ def build_server(vault: Vault, *, stdio_connector: str | None = None, panel_url:
         if stdio_connector:
             try:
                 return connectors.ensure(stdio_connector, display_name(stdio_connector))
-            except Revoked as e:
+            except VaultError as e:  # revoked, or an id it may not have (cloud-… is kept for web apps)
                 raise ToolError(str(e)) from e
         raise ToolError("No connector configured for this OpenMyMemo server.")
 
@@ -141,8 +152,6 @@ def build_server(vault: Vault, *, stdio_connector: str | None = None, panel_url:
         vault.log_activity(c.id, "get", memory_ids=[m["id"] for m in found])
         return {"memories": found, "missing": missing}
 
-    @srv.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True,
-                                          openWorldHint=False))
     async def memory_propose(
         ctx: Context,
         op: Literal["add", "update", "archive"],
@@ -174,9 +183,13 @@ def build_server(vault: Vault, *, stdio_connector: str | None = None, panel_url:
         c = who(ctx)
         out = await run(proposals.propose, c, op, content=content, memory_id=memory_id, topic=topic, kind=kind,
                         reason=reason, evidence=evidence, idempotency_key=idempotency_key)
-        if panel_url and out.get("status") in ("applied", "pending"):
+        if panel_url and relayed is None and out.get("status") in ("applied", "pending"):
             out["review_url"] = f"{panel_url}/#/changes"
         return out
+
+    srv.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True,
+                                         openWorldHint=False),
+             description=memory_propose.__doc__.rstrip() + CLOUD_QUEUED if relayed else None)(memory_propose)
 
     @srv.tool(annotations=READ_ONLY)
     async def memory_proposals(
@@ -221,8 +234,8 @@ def build_server(vault: Vault, *, stdio_connector: str | None = None, panel_url:
 def run_stdio(vault: Vault, connector_id: str, panel_port: int | None = None) -> None:
     try:
         Connectors(vault).ensure(connector_id, display_name(connector_id))
-    except Revoked:
-        pass  # still start, so the app gets a readable "revoked" error instead of a dead server
+    except VaultError:
+        pass  # still start, so the app gets a readable error ("revoked", …) instead of a dead server
     panel_url = None
     if panel_port:
         from .web import start_background_panel

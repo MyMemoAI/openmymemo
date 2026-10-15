@@ -23,6 +23,9 @@ connector_app = typer.Typer(help="Manage the AI apps that can read your memory."
 app.add_typer(connector_app, name="connector")
 setup_app = typer.Typer(help="Set up AI apps that need more than an MCP config.", no_args_is_help=True)
 app.add_typer(setup_app, name="setup")
+cloud_app = typer.Typer(help="MyMemo Cloud: use your memory in ChatGPT and claude.ai on the web (optional; needs a "
+                             "MyMemo account).", no_args_is_help=True)
+app.add_typer(cloud_app, name="cloud")
 
 DEFAULT_PORT = 8787
 
@@ -462,9 +465,7 @@ def serve(ctx: typer.Context, port: int = DEFAULT_PORT,
     import threading
     import webbrowser
 
-    import uvicorn
-
-    from .web import create_app
+    from .web import serve_panel
 
     vault = _vault(ctx, init)
     url = f"http://127.0.0.1:{port}"
@@ -484,7 +485,7 @@ def serve(ctx: typer.Context, port: int = DEFAULT_PORT,
     typer.secho(f"OpenMyMemo panel: {url}   MCP: {url}/mcp", fg="green")
     if open_browser:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
-    uvicorn.run(create_app(vault, port=port), host="127.0.0.1", port=port, log_level="warning")
+    serve_panel(vault, port)
 
 
 # ---- AI apps ---------------------------------------------------------------------------------------
@@ -515,12 +516,15 @@ def apps_(ctx: typer.Context) -> None:
     for r in sorted(rows, key=lambda r: not (r["installed"] or r["connected"])):
         if r["id"] == clients.OTHER:
             continue
-        connected = ("yes (plugin)" if r["via"] == "plugin" else "yes, broken" if r["broken"] else "yes"
+        connected = ("yes (plugin)" if r["via"] == "plugin" else "yes, broken" if r["broken"] else
+                     "linked" if r["via"] == "account" else "yes"
                      ) if r["connected"] else "access removed" if r["revoked"] else "no"
         name = f"{r['name']} ({r['id']})"
-        typer.echo(f"{_pad(name, 34)} {'yes' if r['installed'] else 'no':<10} {connected:<18} "
+        installed = "-" if r["method"] == "account" else "yes" if r["installed"] else "no"
+        typer.echo(f"{_pad(name, 34)} {installed:<10} {connected:<18} "
                    f"{_ago(r['last_seen']) if r['in_use'] else '-'}")
-    typer.echo("\nConnect one: openmymemo connect <app>    Any other MCP app: openmymemo connect other")
+    typer.echo("\nConnect one: openmymemo connect <app>    Any other MCP app: openmymemo connect other"
+               "\nChatGPT and claude.ai on the web: openmymemo cloud link (needs a MyMemo account)")
 
 
 def _print_result(result) -> None:
@@ -540,6 +544,8 @@ def connect_(ctx: typer.Context, app_id: Annotated[str, typer.Argument(metavar="
     """Connect an AI app: add OpenMyMemo to its settings and allow it to read your memory."""
     from . import clients
 
+    if app_id == clients.CLOUD:
+        return _cloud_link(ctx, DEFAULT_PORT, True)
     vault = _vault(ctx, init=True)
     try:
         result = clients.connect(vault, app_id)
@@ -557,6 +563,8 @@ def disconnect_(ctx: typer.Context, app_id: Annotated[str, typer.Argument(metava
     """Disconnect an AI app: take OpenMyMemo out of its settings and revoke its access."""
     from . import clients
 
+    if app_id == clients.CLOUD:
+        return _cloud_unlink(DEFAULT_PORT, yes=False)
     vault = _vault(ctx)
     try:
         result = clients.disconnect(vault, app_id)
@@ -635,6 +643,174 @@ def connector_remove(ctx: typer.Context, connector_id: str) -> None:
     """Revoke a connector's access."""
     Connectors(_vault(ctx)).remove(connector_id)
     typer.echo(f"Revoked {connector_id}. Its MCP calls will now fail; `connector add --id {connector_id}` re-grants.")
+
+
+# ---- MyMemo Cloud -----------------------------------------------------------------------------------
+
+# The ports the Mac app looks at and starts its server on (desktop/src-tauri/src/core.rs `PORTS`): 8787 and the next nine.
+PANEL_PORTS = range(DEFAULT_PORT, DEFAULT_PORT + 10)
+
+
+def _panel_for(vault_root: Path, port: int) -> str | None:
+    """The panel serving this folder, if one is running (it then runs MyMemo Cloud too): on `port`, or on any of
+    the ports the Mac app uses. A panel for another folder is never used."""
+    import json
+    import urllib.request
+
+    from .cloud import same_folder
+
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    for p in dict.fromkeys([port, *PANEL_PORTS]):
+        url = f"http://127.0.0.1:{p}"
+        try:
+            req = urllib.request.Request(f"{url}/api/state", headers={"X-OpenMyMemo": "1"})
+            with opener.open(req, timeout=1) as resp:
+                served = json.load(resp).get("vault")
+        except Exception:
+            continue
+        if isinstance(served, str) and same_folder(served, vault_root):
+            return url
+    return None
+
+
+def _panel_call(panel: str, method: str, path: str) -> dict:
+    import json
+    import urllib.request
+
+    req = urllib.request.Request(f"{panel}{path}", method=method, headers={"X-OpenMyMemo": "1"})
+    with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req, timeout=30) as resp:
+        return json.load(resp)
+
+
+BRIDGE_STATES = {
+    "online": "online",
+    "connecting": "connecting…",
+    "offline": "offline, reconnecting",
+    "refused": "turned away by MyMemo (it didn't say the link is gone), trying again",
+    "plan": "paused: your MyMemo plan doesn't include MyMemo Cloud (it checks again every hour)",
+    "replaced": "stopped: another OpenMyMemo took over this link",
+    "key": "stopped: run `openmymemo cloud link` again",
+    "unlinked": "unlinked",
+    "closed": "stopped",
+    "not_running": "not connected yet",
+}
+
+
+def _web_steps(endpoint: str) -> None:
+    typer.echo(f"\nAdd this URL as a custom connector in ChatGPT or claude.ai, exactly as shown:\n  {endpoint}")
+    typer.echo("- claude.ai: Settings → Connectors → Add custom connector; Claude signs you in with your MyMemo "
+               "account.\n- ChatGPT: turn on Developer Mode in Settings, then add a connector with this URL "
+               "(OAuth). Whether ChatGPT may use write tools can depend on your ChatGPT plan.")
+
+
+def _cloud_link(ctx: typer.Context, port: int, open_browser: bool) -> None:
+    import time
+    import webbrowser
+
+    from . import cloud
+
+    vault = _vault(ctx, init=True)
+
+    def show(url: str) -> None:
+        typer.echo("Sign in to MyMemo in your browser to link this computer.")
+        if open_browser and webbrowser.open(url):
+            typer.echo(f"If your browser didn't open, go to:\n  {url}")
+        else:
+            typer.echo(f"Open this link:\n  {url}")
+
+    before = cloud.load_link()
+    panel = _panel_for(vault.root, port)
+    if panel:  # the running panel takes the callback and starts the connection right away
+        show(_panel_call(panel, "POST", "/api/cloud/link")["url"])
+        deadline = time.monotonic() + cloud.LINK_TTL
+        link = None
+        while time.monotonic() < deadline:
+            time.sleep(1)
+            link = cloud.load_link()
+            if link and (before is None or link.device_id != before.device_id):
+                break
+            status = _panel_call(panel, "GET", "/api/cloud")
+            if not status["pending"] and status["link_error"]:
+                typer.secho(f"Not linked: {status['link_error']}", fg="red", err=True)
+                raise typer.Exit(1)
+            link = None
+        if link is None:
+            typer.secho("Nobody signed in within ten minutes. Run `openmymemo cloud link` again.", fg="red", err=True)
+            raise typer.Exit(1)
+    else:
+        outcome = cloud.link_with_listener(vault, show)
+        if outcome.link is None:
+            typer.secho(f"Not linked: {outcome.title}. {outcome.message}", fg="red", err=True)
+            raise typer.Exit(1)
+        link = outcome.link
+    plan = cloud.plan_label(link.plan)
+    typer.secho(f"Linked to {link.account}" + (f" · {plan}." if plan else "."), fg="green")
+    typer.echo("If that isn't your MyMemo account, run `openmymemo cloud unlink` now.")
+    _web_steps(cloud.endpoint(link.service))
+    if not panel:
+        typer.echo("\nMyMemo Cloud works while OpenMyMemo runs on this computer: the Mac app, `openmymemo serve`, or "
+                   "an AI app that opens the panel.")
+
+
+@cloud_app.command("link")
+def cloud_link(ctx: typer.Context,
+               port: Annotated[int, typer.Option(help="The port of the panel, if one is running.")] = DEFAULT_PORT,
+               open_browser: Annotated[bool, typer.Option("--open/--no-open", help="Open the browser.")] = True) -> None:
+    """Sign in to MyMemo and link this computer, so ChatGPT and claude.ai on the web can use this folder."""
+    _cloud_link(ctx, port, open_browser)
+
+
+@cloud_app.command("status")
+def cloud_status(ctx: typer.Context,
+                 port: Annotated[int, typer.Option(help="The port of the panel, if one is running.")] = DEFAULT_PORT
+                 ) -> None:
+    """Show whether this computer is linked to MyMemo Cloud, and whether it is connected."""
+    from . import cloud
+
+    link = cloud.load_link()
+    if link is None:
+        typer.echo("Not linked. `openmymemo cloud link` signs in to MyMemo so ChatGPT and claude.ai on the web can use "
+                   "your memory.")
+        return
+    plan = cloud.plan_label(link.plan)
+    typer.echo(f"Linked to {link.account}" + (f" · {plan}" if plan else ""))
+    root = Path(ctx.obj["vault"]).expanduser()
+    here = link.serves(root)
+    typer.echo(f"Folder: {link.vault}" + ("" if here else f"  (not {root}: link again from that folder to move it)"))
+    typer.echo(f"Endpoint for ChatGPT and claude.ai: {cloud.endpoint(link.service)}")
+    panel = _panel_for(Path(link.vault), port)
+    if panel:
+        status = _panel_call(panel, "GET", "/api/cloud")
+        state = BRIDGE_STATES.get(status["reason"] if status["state"] != "online" and status["reason"]
+                                  else status["state"], status["state"])
+        typer.echo(f"Connection: {state}")
+        if status.get("queued"):
+            typer.echo(f"Waiting in MyMemo Cloud: {status['queued']}")
+    else:
+        typer.echo("Connection: not running. MyMemo Cloud works while OpenMyMemo runs on this computer: the Mac app, "
+                   "`openmymemo serve`, or an AI app that opens the panel.")
+
+
+def _cloud_unlink(port: int, yes: bool) -> None:
+    from . import cloud
+
+    link = cloud.load_link()
+    if link is None:
+        typer.echo("This computer isn't linked to MyMemo Cloud.")
+        return
+    if not yes and not typer.confirm("Unlink this computer from MyMemo Cloud? ChatGPT and claude.ai on the web won't "
+                                     "reach your memory anymore.", default=True):
+        raise typer.Exit()
+    panel = _panel_for(Path(link.vault), port)
+    message = _panel_call(panel, "DELETE", "/api/cloud")["message"] if panel else cloud.unlink()
+    typer.echo(message)
+
+
+@cloud_app.command("unlink")
+def cloud_unlink(port: Annotated[int, typer.Option(help="The port of the panel, if one is running.")] = DEFAULT_PORT,
+                 yes: Annotated[bool, typer.Option("--yes", "-y", help="Don't ask first.")] = False) -> None:
+    """Unlink this computer from MyMemo Cloud: the web apps lose access and the link is deleted here and at MyMemo."""
+    _cloud_unlink(port, yes)
 
 
 # ---- setup ------------------------------------------------------------------------------------------

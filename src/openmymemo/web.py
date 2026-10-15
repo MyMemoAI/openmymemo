@@ -4,6 +4,10 @@ Only 127.0.0.1 is bound, but that alone doesn't stop a web page in the user's br
 so every request must carry a localhost ``Host`` (defeats DNS rebinding), API calls must carry an
 ``X-OpenMyMemo`` header and a localhost ``Origin`` if any (a cross-site page can't add custom headers
 without a CORS preflight, which we never grant), and ``/mcp`` requires a connector's bearer token.
+
+``/cloud/callback`` is where the browser comes back after signing in to MyMemo (product-design.md §16.4). It is
+a navigation, so it can't carry the header; it isn't under ``/api/``, it still needs a localhost ``Host``, and it
+does nothing unless its ``state`` matches a link this process started in the last ten minutes, once.
 """
 
 from __future__ import annotations
@@ -24,6 +28,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel
 
 from . import __version__, clients, transfer
+from .cloud import CALLBACK_HEADERS, Cloud, callback_page
 from .connectors import Connector, Connectors
 from .context import compile_context
 from .mcp_server import build_server
@@ -152,8 +157,10 @@ class TopicPatch(BaseModel):
     private: bool | None = None
 
 
-def create_api(vault: Vault, port: int) -> FastAPI:
+def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
     api = FastAPI(title="OpenMyMemo", version=__version__, docs_url=None, redoc_url=None, openapi_url=None)
+    cloud = cloud or Cloud(vault, port)
+    api.state.cloud = cloud
     hosts = {f"127.0.0.1:{port}", f"localhost:{port}", f"[::1]:{port}"}
     origins = {f"http://{h}" for h in hosts}
     connectors = Connectors(vault)
@@ -317,6 +324,8 @@ def create_api(vault: Vault, port: int) -> FastAPI:
 
     @api.post("/api/connectors")
     def create_connector(body: ConnectorIn) -> dict:
+        if body.kind not in ("stdio", "http"):  # web apps come through MyMemo Cloud, not by name
+            raise HTTPException(400, "kind must be stdio or http")
         c, token = connectors.create(body.name, body.kind, write=body.write)
         return {"connector": connector_dict(c), "token": token, "snippets": snippets_for(c, token)}
 
@@ -350,7 +359,7 @@ def create_api(vault: Vault, port: int) -> FastAPI:
         known = {c.id: c for c in connectors.list()}
         ids = {c.id for c in clients.CLIENTS if c.id != clients.OTHER}  # "other" is a button, not an app
         return {"system": env.system, "apps": [app_dict(r, known) for r in clients.catalog(vault, env)],
-                "custom": [connector_dict(c) for c in known.values() if c.id not in ids]}
+                "custom": [connector_dict(c) for c in known.values() if c.id not in ids and c.kind != "cloud"]}
 
     def client_action(app_id: str, action) -> dict:
         env = clients.Env.current()
@@ -370,6 +379,56 @@ def create_api(vault: Vault, port: int) -> FastAPI:
     @api.post("/api/clients/{app_id}/disconnect")
     def disconnect_client(app_id: str) -> dict:
         return client_action(app_id, clients.disconnect)
+
+    # ---- MyMemo Cloud (product-design.md §16) ----------------------------------------------------
+
+    def cloud_status() -> dict:
+        s = cloud.status()
+        apps = []
+        for c in Connectors(vault)._load():  # tombstones too: a revoked web app can be allowed again
+            if c.kind != "cloud":
+                continue
+            d = connector_dict(c) if not c.revoked_at else None
+            apps.append({"id": c.id, "name": c.name, "revoked": bool(c.revoked_at),
+                         "last_seen": d["last_seen"] if d else None, "connector": d})
+        s["apps"] = apps
+        seen = [a["last_seen"] for a in apps if a["last_seen"]] + ([s["last_call_at"]] if s["last_call_at"] else [])
+        s["last_call_at"] = max(seen) if seen else None
+        return s
+
+    @api.get("/api/cloud")
+    def get_cloud() -> dict:
+        return cloud_status()
+
+    @api.post("/api/cloud/link")
+    def start_cloud_link() -> dict:
+        """Start linking: the panel opens this URL in the browser; MyMemo sends it back to /cloud/callback."""
+        return {"url": cloud.begin_link()}
+
+    @api.delete("/api/cloud")
+    def unlink_cloud() -> dict:
+        message = cloud.unlink()
+        return {"message": message, "cloud": cloud_status()}
+
+    @api.post("/api/cloud/reconnect")
+    def reconnect_cloud() -> dict:
+        cloud.reconnect()
+        return cloud_status()
+
+    @api.post("/api/cloud/apps/{cid}/allow")
+    def allow_cloud_app(cid: str) -> dict:
+        """Allow a web app again after its access was removed (an explicit re-grant, §5.5)."""
+        c = next((x for x in connectors._load() if x.id == cid and x.kind == "cloud"), None)
+        if c is None:
+            raise NotFound(f"No MyMemo Cloud app {cid}")
+        if c.revoked_at:
+            connectors.create(c.name, "cloud", connector_id=cid)
+        return cloud_status()
+
+    @api.get("/cloud/callback", include_in_schema=False)
+    def cloud_callback(request: Request) -> HTMLResponse:
+        outcome = cloud.callback(dict(request.query_params))
+        return HTMLResponse(callback_page(outcome), status_code=outcome.status, headers=CALLBACK_HEADERS)
 
     # ---- what AI sees, activity ----------------------------------------------------------------
 
@@ -488,6 +547,49 @@ def create_api(vault: Vault, port: int) -> FastAPI:
     return api
 
 
+def _panel_server_class():
+    import uvicorn
+
+    class _PanelServer(uvicorn.Server):
+        """uvicorn, plus MyMemo Cloud: the bridge starts once the port is ours and closes (1000) when we stop.
+
+        Starting it only after the port is bound matters: two AI apps may start the panel for the same folder at
+        once, and only the one that gets the port may connect, or the other would be told it was replaced.
+        """
+
+        def __init__(self, config: uvicorn.Config, cloud: Cloud):
+            super().__init__(config)
+            self.cloud = cloud
+
+        async def startup(self, sockets=None) -> None:
+            await super().startup(sockets=sockets)
+            if self.started:
+                self.cloud.start()
+
+        async def shutdown(self, sockets=None) -> None:
+            import asyncio
+
+            await asyncio.to_thread(self.cloud.stop)
+            await super().shutdown(sockets=sockets)
+
+    return _PanelServer
+
+
+def panel_server(vault: Vault, port: int, log_level: str = "warning"):
+    """The uvicorn server for the panel, `/mcp` and MyMemo Cloud on 127.0.0.1:`port`."""
+    import uvicorn
+
+    cloud = Cloud(vault, port)
+    config = uvicorn.Config(create_app(vault, port=port, cloud=cloud), host="127.0.0.1", port=port,
+                            log_level=log_level, access_log=False, log_config=None, lifespan="on", ws="none")
+    return _panel_server_class()(config, cloud)
+
+
+def serve_panel(vault: Vault, port: int) -> None:
+    """Run the panel in the foreground until interrupted (``openmymemo serve``, the Mac app's server)."""
+    panel_server(vault, port).run()
+
+
 def start_background_panel(vault: Vault, port: int) -> str | None:
     """Serve the panel from inside another process (e.g. the stdio MCP server a plugin launches).
 
@@ -507,19 +609,15 @@ def start_background_panel(vault: Vault, port: int) -> str | None:
             same = False
         return url if same else None
 
-    import uvicorn
-
-    config = uvicorn.Config(create_app(vault, port=port), host="127.0.0.1", port=port, log_level="error",
-                            access_log=False, log_config=None, lifespan="on")
-    server = uvicorn.Server(config)
+    server = panel_server(vault, port, log_level="error")
     threading.Thread(target=server.run, name="openmymemo-panel", daemon=True).start()
     return url
 
 
-def create_app(vault: Vault, port: int = 8787):
+def create_app(vault: Vault, port: int = 8787, cloud: Cloud | None = None):
     """Compose the panel API with the MCP endpoint at ``/mcp`` (bearer token required)."""
     vault.ensure()
-    api = create_api(vault, port)
+    api = create_api(vault, port, cloud)
     connectors = Connectors(vault)
     hosts = [f"127.0.0.1:{port}", f"localhost:{port}", f"[::1]:{port}"]
     mcp_app = build_server(vault, panel_url=f"http://127.0.0.1:{port}").streamable_http_app(
@@ -532,6 +630,9 @@ def create_app(vault: Vault, port: int = 8787):
     async def app(scope, receive, send):
         if scope["type"] == "lifespan":
             await mcp_app(scope, receive, send)  # runs the MCP session manager
+            return
+        if scope["type"] == "websocket":  # the panel has none; refused before the upgrade (HTTP 403)
+            await send({"type": "websocket.close", "code": 1008})
             return
         path = scope.get("path", "")
         if scope["type"] == "http" and (path == "/mcp" or path.startswith("/mcp/")):

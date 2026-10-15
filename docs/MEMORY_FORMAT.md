@@ -177,7 +177,7 @@ format: 1
 connectors:
   - id: claude-code
     name: Claude Code
-    kind: stdio                 # stdio | http
+    kind: stdio                 # stdio | http | cloud
     read:
       topics: all               # all, or a list of slugs
       include_private: false
@@ -191,6 +191,7 @@ connectors:
 
 - `write`: `none` is read only; `propose` follows the folder's `require_approval` setting and the protected-memory rule (§6.1); `auto` applies every change except in private topics.
 - Tokens are never stored; only the SHA-256 and a short preview are.
+- `kind: cloud` is a web app reaching the folder through MyMemo Cloud (product-design.md §16). Its id is `cloud-<slug>` (`cloud-chatgpt`, `cloud-claude`, …), it has no token, and it is created on first use like a stdio app. Ids starting with `cloud-` are kept for this kind: OpenMyMemo gives another app whose name would make such an id `app-cloud-…` instead, and never lets a web app act as a connector of another kind that has one.
 - A connector with `revoked_at` refuses every call. Adding the same id again is an explicit re-grant.
 
 ## 6. `.openmymemo/`
@@ -299,7 +300,7 @@ Append-only, one JSON object per line: what each connector did.
 {"at": "2026-10-08T09:15:00+00:00", "connector": "claude-code", "action": "context", "memory_ids": ["m7f3a", "k2p9d"], "chars": 1840, "via": "hook"}
 ```
 
-`action` is `context`, `search`, `get`, `propose` or `import`; other fields depend on it (`query`, `memory_ids`, `proposal_id`, `result`, `op`, `chars`, `via`, `source`). Reads never rewrite `connectors.yaml`; "last seen" is derived from here.
+`action` is `context`, `search`, `get`, `propose`, `import` or `link`; other fields depend on it (`query`, `memory_ids`, `proposal_id`, `result`, `op`, `chars`, `via`, `source`, `account`, `email_masked`). `link` is written when this computer is linked to MyMemo Cloud, with `connector` `mymemo-cloud` and the account it was linked to: its display name and MyMemo's masked email (`s***@example.com`). Reads never rewrite `connectors.yaml`; "last seen" is derived from here.
 
 ### 6.6 `proposals/<id>.json`
 
