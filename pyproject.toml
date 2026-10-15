@@ -9,10 +9,18 @@ requires-python = ">=3.11"
 authors = [{ name = "MyMemo", email = "leo@mymemo.ai" }]
 keywords = ["memory", "mcp", "llm", "claude", "chatgpt", "local-first"]
 classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: End Users/Desktop",
+    "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Operating System :: OS Independent",
     "Environment :: Console",
     "Environment :: Web Environment",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
     "mcp>=2.3,<3",
@@ -28,7 +36,11 @@ dependencies = [
 openmymemo = "openmymemo.cli:main"
 
 [project.urls]
+Homepage = "https://github.com/MyMemoAI/openmymemo"
 Repository = "https://github.com/MyMemoAI/openmymemo"
+Documentation = "https://github.com/MyMemoAI/openmymemo/blob/main/docs/MEMORY_FORMAT.md"
+Issues = "https://github.com/MyMemoAI/openmymemo/issues"
+Changelog = "https://github.com/MyMemoAI/openmymemo/releases"
 
 [dependency-groups]
 dev = [
