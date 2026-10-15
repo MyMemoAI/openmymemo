@@ -8,9 +8,11 @@ repositories), and the file as it was before OpenMyMemo first changed it is kept
 
 from __future__ import annotations
 
+import contextlib
 import os
 import secrets
 import shutil
+import stat
 from pathlib import Path
 
 BACKUP_SUFFIX = ".openmymemo-backup"
@@ -42,13 +44,32 @@ def replace(path: Path, text: str) -> None:
         raise
 
 
+def _make_private(path: Path) -> None:
+    """chmod 0600 a regular file that others may read. Opened with O_NOFOLLOW, so a symlink (which isn't ours)
+    is never followed, not even one swapped in meanwhile. Windows has no such modes: nothing to do there."""
+    if not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "fchmod"):
+        return
+    with contextlib.suppress(OSError):  # not ours, gone, or a symlink: left as it is
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0))
+        try:
+            st = os.fstat(fd)
+            if stat.S_ISREG(st.st_mode) and stat.S_IMODE(st.st_mode) & 0o077:
+                os.fchmod(fd, 0o600)
+        finally:
+            os.close(fd)
+
+
 def backup(path: Path) -> None:
     """Keep the file as it was before OpenMyMemo first changed it, once: ``<file>.openmymemo-backup``.
 
     Written private to a temporary file and renamed into place only when complete, so the copy of a file
-    holding API keys is never readable by others, and a copy cut short is never taken for the backup."""
+    holding API keys is never readable by others, and a copy cut short is never taken for the backup. A copy
+    left by an older version, which took the original's permissions, is made private here too."""
     copy = path.with_name(path.name + BACKUP_SUFFIX)
-    if not path.exists() or copy.exists():
+    if copy.exists() or copy.is_symlink():
+        _make_private(copy)
+        return
+    if not path.exists():
         return
     source = path.resolve()
     tmp = copy.with_name(f".{copy.name}.{secrets.token_hex(4)}.tmp")
@@ -58,7 +79,8 @@ def backup(path: Path) -> None:
             shutil.copyfileobj(src, f)
             f.flush()
             os.fsync(f.fileno())
-        shutil.copystat(source, tmp)  # the original's own permissions and times, now that it is all there
+        shutil.copystat(source, tmp)  # the original's times, now that it is all there
+        os.chmod(tmp, 0o600)  # but readable by this user only, whatever the original allows (PRIVACY.md)
         os.replace(tmp, copy)
     except BaseException:
         tmp.unlink(missing_ok=True)

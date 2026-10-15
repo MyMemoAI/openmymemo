@@ -73,3 +73,13 @@ def test_claude_desktop_extension_installs_with_nothing_to_fill_in():
     assert not any("${" in str(f.get("default", "")) for f in fields)
     config = manifest["server"]["mcp_config"]
     assert config["env"]["OPENMYMEMO_HOME"] == "${user_config.vault}" and "--vault" not in config["args"]
+
+
+def test_the_privacy_policy_is_where_directories_look_for_it():
+    """Claude's directory rejects a local server without a "Privacy Policy" section in its README and HTTPS links
+    in the manifest's privacy_policies; both lead to PRIVACY.md."""
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert re.search(r"^## Privacy Policy$", readme, re.M)
+    policies = load("integrations/claude-desktop/manifest.json")["privacy_policies"]
+    assert policies == ["https://github.com/MyMemoAI/openmymemo/blob/main/PRIVACY.md"]
+    assert policies[0] in readme and (ROOT / "PRIVACY.md").is_file()

@@ -31,8 +31,9 @@ def main() -> Path:
     with tempfile.TemporaryDirectory() as tmp:
         stage = Path(tmp) / "openmymemo"
         stage.mkdir()
-        # pyproject.toml references README.md and LICENSE, so the build inside the bundle needs them.
-        for name in ("pyproject.toml", "uv.lock", "README.md", "LICENSE"):
+        # pyproject.toml references README.md and LICENSE, so the build inside the bundle needs them; and the
+        # privacy policy (README's section links to it).
+        for name in ("pyproject.toml", "uv.lock", "README.md", "LICENSE", "PRIVACY.md"):
             shutil.copy2(ROOT / name, stage / name)
         shutil.copytree(ROOT / "src/openmymemo", stage / "src/openmymemo",
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
