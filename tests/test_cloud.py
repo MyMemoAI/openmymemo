@@ -926,16 +926,19 @@ def test_a_passing_failure_stops_the_queue_until_it_is_sent_again_in_order(vault
         return item(qid, {**good, "qid": qid, "params": {"name": "memory_propose", "arguments": args}})
 
     real, failed = Proposals.propose, []
+    both_sent = threading.Event()  # the failure, and the hang-up after it, wait until q-new is on its way too
 
     def once(self, *a, **k):
         if k.get("queue_id") == "q-old" and not failed:
             failed.append(True)
+            assert both_sent.wait(5)
             raise OSError(28, "No space left on device")
         return real(self, *a, **k)
 
     monkeypatch.setattr(Proposals, "propose", once)
     conn.send(update("q-old", "Drinks black tea."))
     conn.send(update("q-new", "Drinks green tea."))
+    both_sent.set()
     assert conn.closed.wait(5) and conn.client_close == 1011  # hung up rather than filing q-new first
     assert not [f for f in conn.frames if f.get("type") == "ack"] and vault.get(m.id).content == "Drinks coffee."
 
