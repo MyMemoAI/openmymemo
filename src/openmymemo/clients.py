@@ -162,7 +162,8 @@ class Client:
     restore_args: Callable[[dict], list[str]] | None = None  # cli: puts a removed entry back as it was
     plugin: Callable[[Env], str | None] | None = None  # names our plugin when it is installed there
     plugin_where: str = ""  # where the person removes that plugin
-    plugin_home_only: bool = False  # the plugin always serves ~/OpenMyMemo, so it doesn't connect another folder
+    # The plugin always serves ~/OpenMyMemo, and an entry in `config` takes precedence over it (Gemini CLI).
+    plugin_home_only: bool = False
     session: bool = False  # a CLI: "start a new session" rather than "restart the app"
     restart_as: str = ""  # what to restart, when it isn't `name`
     note: str = ""
@@ -864,11 +865,12 @@ def _gemini_extension(env: Env) -> str | None:
 
 
 def _plugin(client: Client, vault: Vault, env: Env) -> str | None:
-    """Our plugin in that app, when it serves this vault."""
+    """Our plugin in that app, when it is what serves this vault."""
     if not client.plugin:
         return None
-    if client.plugin_home_only and vault.root != (env.home / "OpenMyMemo").resolve():
-        return None
+    if client.plugin_home_only and (vault.root != (env.home / "OpenMyMemo").resolve()
+                                    or configured(client, env) is not None):
+        return None  # another folder, or our config entry runs instead: Connect updates that entry
     return client.plugin(env)
 
 
