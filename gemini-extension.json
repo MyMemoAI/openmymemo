@@ -1,0 +1,26 @@
+{
+  "name": "openmymemo",
+  "version": "0.2.3",
+  "description": "Your AI memory as a local folder you own. Gemini reads it and writes what it learns; you see every change and can undo it.",
+  "mcpServers": {
+    "openmymemo": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "${extensionPath}",
+        "--frozen",
+        "--no-dev",
+        "--quiet",
+        "openmymemo",
+        "mcp",
+        "--connector",
+        "gemini-cli",
+        "--init",
+        "--panel-port",
+        "8787"
+      ]
+    }
+  },
+  "contextFileName": "integrations/gemini/GEMINI.md"
+}
