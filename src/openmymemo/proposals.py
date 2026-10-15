@@ -86,6 +86,7 @@ class Proposal:
     evidence: str | None = None
     idempotency_key: str | None = None
     created_at: str = ""
+    queue_id: str | None = None  # filed from MyMemo Cloud's offline queue: its receipt's id
     status: str = "pending"
     hold: str | None = None  # why it waits: approval | protected | private (None when it applied at once)
     decided_at: str | None = None
@@ -200,7 +201,10 @@ class Proposals:
 
     def propose(self, connector: Connector, op: str, *, content: str | None = None, memory_id: str | None = None,
                 topic: str | None = None, kind: str | None = None, reason: str | None = None,
-                evidence: str | None = None, idempotency_key: str | None = None) -> dict:
+                evidence: str | None = None, idempotency_key: str | None = None,
+                created_at: str | None = None, queue_id: str | None = None) -> dict:
+        """`created_at`: when the AI proposed it, if that was earlier, and `queue_id`: the receipt it got then
+        (both from MyMemo Cloud's offline queue)."""
         v = self.vault
         if connector.write == "none":
             raise PermissionDenied("This connector is read-only. The user can allow proposals in the OpenMyMemo panel.")
@@ -218,6 +222,9 @@ class Proposals:
             if idempotency_key:
                 for p in self.list(connector_id=connector.id):
                     if p.idempotency_key == idempotency_key:
+                        if queue_id and not p.queue_id:  # the live retry came first: keep the queued receipt too
+                            p.queue_id = queue_id
+                            self._save(p)
                         return self._result(p, deduplicated=True)
 
             private = v.private_topics()
@@ -252,7 +259,7 @@ class Proposals:
             p = Proposal(id=_new_id(), connector_id=connector.id, connector_name=connector.name, op=op,
                          content=content, topic=topic, memory_id=memory_id, kind=kind, reason=reason,
                          evidence=(evidence or None) and evidence[:2000], idempotency_key=idempotency_key,
-                         created_at=now_iso(), topic_confidence=confidence)
+                         created_at=created_at or now_iso(), queue_id=queue_id, topic_confidence=confidence)
             if target:
                 p.before_content, p.before_topic = target.content, target.topic
 

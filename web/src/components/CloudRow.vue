@@ -2,13 +2,14 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { api, type CloudApp, type CloudStatus, type Connector } from "../api";
 import { desktop } from "../desktop";
-import { relTime, t } from "../i18n";
+import { relTime, t, tn } from "../i18n";
 import { copy, refresh, store, toast } from "../store";
 import AppIcon from "./AppIcon.vue";
 
 /**
  * MyMemo Cloud (product-design.md §16): sign in to link this computer, its status, what to paste into ChatGPT and
- * claude.ai, and the web apps using it, each a normal connector row (`manage` shows a row's permissions, as in
+ * claude.ai, how many changes wait in its offline queue (from the service's `welcome`, counted down as they are
+ * filed), and the web apps using it, each a normal connector row (`manage` shows a row's permissions, as in
  * ConnectApps). Polls /api/cloud while it is on screen.
  */
 const props = defineProps<{ open?: string | null }>();
@@ -216,6 +217,14 @@ defineExpose({ reload: load });
       <a :href="signInUrl" target="_blank" rel="noopener" class="btn btn-link btn-sm">{{ t("cloud.openAgain") }}</a>
     </div>
 
+    <div v-if="s && linkedHere && s.queued" class="flex items-start gap-2.5 bg-sunken px-4.5 py-3 text-[13px]" role="status" data-queued>
+      <AppIcon name="clock" :size="15" class="mt-px text-wait-ink" />
+      <div class="min-w-0 flex-1">
+        <div>{{ tn("cloud.queued", s.queued) }}</div>
+        <div class="text-muted">{{ t("cloud.queuedHint") }}</div>
+      </div>
+    </div>
+
     <div v-if="s && linkedHere && showSetup" class="space-y-3 bg-sunken px-4.5 py-3.5 text-[13px]">
       <p>{{ t("cloud.endpoint") }}</p>
       <div class="relative rounded-[10px] bg-surface shadow-[0_0_0_1px_var(--color-ring)]">
@@ -231,7 +240,7 @@ defineExpose({ reload: load });
           <span class="text-muted">{{ t("cloud.chatgptPlan") }}</span>
         </li>
       </ul>
-      <p class="text-muted">{{ t("cloud.whileRunning") }}</p>
+      <p class="text-muted">{{ t(s?.plan?.queue ? "cloud.whileRunningQueue" : "cloud.whileRunning") }}</p>
     </div>
 
     <template v-for="app in apps" :key="app.id">

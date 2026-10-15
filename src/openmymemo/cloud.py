@@ -16,9 +16,14 @@ tool calls the service relays from web apps, by running the same tool code as th
   registers the public key.
 * **The service** is ``OPENMYMEMO_CLOUD_URL`` (default https://api.mymemo.ai); the bridge is ``/openmymemo/bridge``
   on the same host. The wire format is pinned by ``tests/fixtures/cloud/`` (the MyMemo service tests against the same files).
-* **The bridge** runs on a thread of its own, starts once the panel's port is bound (``web.PanelServer``) and
+* **The bridge** runs on a thread of its own, starts once the panel's port is bound (``web.panel_server``) and
   closes with 1000 when the panel stops. It reconnects with backoff and follows the close codes in
   ``tests/fixtures/cloud/bridge/close_codes.json``.
+* **The offline queue:** while this computer was offline, the service sealed web apps' ``memory_propose`` calls
+  to its X25519 key (HPKE, RFC 9180). They arrive as ``item`` frames after connecting, in order; each is opened,
+  filed through ``proposals.py`` as its web app with the time it was made, its ``queue_id`` and the AI's own
+  ``idempotency_key`` (the qid when it sent none), so a replay or a live retry is a duplicate, and acknowledged:
+  stored, duplicate, undecryptable or rejected (recorded in the activity log, never retried).
 
 The service never sees anything at rest in readable form, and nothing here logs tool arguments or results.
 """
@@ -49,12 +54,14 @@ import urllib.request
 from collections.abc import Callable, Mapping
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode, urlsplit
 
 from . import __version__
 from .connectors import Connector, Connectors, Revoked
+from .proposals import Proposals
 from .vault import NotFound, Vault, VaultError, now_iso
 
 log = logging.getLogger("openmymemo.cloud")
@@ -71,6 +78,13 @@ TOOL_NAMES = ("memory_context", "memory_search", "memory_get", "memory_propose",
 SLUG = re.compile(r"[a-z0-9][a-z0-9-]{0,62}")
 CLOUD_PREFIX = "cloud-"
 TOO_LARGE = "The answer from your computer was too large to relay. Ask for less (fewer ids, a smaller max_chars)."
+ENC = "hpke-x25519-hkdfsha256-chacha20poly1305/v1"
+QUEUE_INFO = b"openmymemo-queue/v1|"
+PROPOSE_FIELDS = ("content", "memory_id", "topic", "kind", "reason", "evidence")
+QUEUE_MAX_AGE = timedelta(days=31)
+# The web apps whose slug the service derives from a verified redirect host (its design note, §1.3). The sealed
+# plaintext carries no `verified` flag, so a queued item from any other slug is named as unverified.
+VERIFIED_WEB_APPS = {"chatgpt": "ChatGPT", "claude": "Claude"}
 
 
 class CloudError(Exception):
@@ -573,6 +587,80 @@ def unlink() -> str:
             "way; remove it from your MyMemo account settings too.")
 
 
+# ---- the offline queue -----------------------------------------------------------------------------------------
+
+
+class Undecryptable(Exception):
+    pass
+
+
+def open_item(private_key: str, device_id: str, qid: str, ct: str) -> bytes:
+    """Open one queued item: HPKE base mode, X25519 / HKDF-SHA256 / ChaCha20-Poly1305, bound to this device and row
+    by ``info`` (tests/fixtures/cloud/hpke_vector.json)."""
+    from cryptography.exceptions import InvalidTag
+    from cryptography.hazmat.primitives import hpke
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+
+    try:
+        key = X25519PrivateKey.from_private_bytes(unb64u(private_key))
+        suite = hpke.Suite(hpke.KEM.X25519, hpke.KDF.HKDF_SHA256, hpke.AEAD.CHACHA20_POLY1305)
+        return suite.decrypt(unb64u(ct), key, info=QUEUE_INFO + device_id.encode() + b"|" + qid.encode())
+    except (InvalidTag, ValueError, TypeError) as e:  # binascii.Error is a ValueError
+        raise Undecryptable(type(e).__name__) from None
+
+
+def _parse_time(value: Any) -> str | None:
+    """An ISO time from the service, written the way OpenMyMemo writes times (UTC, seconds); None if it isn't one."""
+    if not isinstance(value, str) or len(value) > 64:
+        return None
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt.astimezone(UTC).isoformat(timespec="seconds")
+    except (ValueError, OverflowError):
+        return None
+
+
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _queued_at(value: Any) -> str | None:
+    """When a queued proposal was made, kept within [now − 31 days, now]: the service keeps items 30 days, so
+    anything outside that is a clock or a bug, and a time in the future would never expire. None: use now."""
+    parsed = _parse_time(value)
+    if parsed is None:
+        return None
+    now = _now().replace(microsecond=0)
+    return min(max(datetime.fromisoformat(parsed), now - QUEUE_MAX_AGE), now).isoformat(timespec="seconds")
+
+
+def _read_queued(plaintext: bytes, qid: str) -> tuple[dict, str, dict, str | None, str | None] | None:
+    """A queued ``memory_propose``: (client, op, the proposal's fields, when it was made, the AI's own
+    idempotency key); None if it isn't one."""
+    item = json.loads(plaintext)
+    client = item.get("client") if isinstance(item, dict) else None
+    params = item.get("params") if isinstance(item, dict) else None
+    if (not isinstance(item, dict) or item.get("v") != 1 or item.get("qid") != qid
+            or not isinstance(client, dict) or not isinstance(client.get("slug"), str)
+            or not SLUG.fullmatch(client["slug"]) or not isinstance(params, dict)
+            or params.get("name") != "memory_propose" or not isinstance(params.get("arguments"), dict)):
+        return None
+    slug, args = client["slug"], params["arguments"]
+    name = VERIFIED_WEB_APPS.get(slug) or (client["name"] if isinstance(client.get("name"), str) else slug)
+    named = {"slug": slug, "name": name, "verified": slug in VERIFIED_WEB_APPS}
+    fields = {k: args[k] for k in PROPOSE_FIELDS if isinstance(args.get(k), str)}
+    key = args.get("idempotency_key")
+    key = key if isinstance(key, str) and key else None  # as the live path takes it, whatever its length
+    try:  # JSON allows a lone surrogate (\ud800), which no file can hold: turned down for good, never retried
+        for text in (*fields.values(), name, key or "", str(args.get("op"))):
+            text.encode("utf-8")
+    except UnicodeEncodeError:
+        return None
+    return named, str(args.get("op")), fields, _queued_at(item.get("received_at")), key
+
+
 # ---- the bridge ------------------------------------------------------------------------------------------------
 
 
@@ -809,7 +897,12 @@ class Bridge:
                 since = time.monotonic()
                 self._set("online")
                 log.info("MyMemo Cloud: connected")
-                await self._serve(ws)
+                items: asyncio.Queue[dict] = asyncio.Queue()
+                drain = asyncio.create_task(self._drain(ws, items))
+                try:
+                    await self._serve(ws, items)
+                finally:
+                    drain.cancel()  # anything not acknowledged is sent again after reconnecting
                 return ws.close_code, time.monotonic() - since
             finally:
                 self._ws = None
@@ -834,7 +927,7 @@ class Bridge:
             with contextlib.suppress(OSError):
                 _update_link(self.link.device_id, **changes)
 
-    async def _serve(self, ws) -> None:
+    async def _serve(self, ws, items: asyncio.Queue[dict]) -> None:
         from websockets.exceptions import ConnectionClosed
 
         while True:
@@ -854,6 +947,8 @@ class Bridge:
             kind = msg.get("type")
             if kind == "call":
                 self._spawn(self._call(ws, msg))
+            elif kind == "item":
+                items.put_nowait(msg)  # one at a time, in the order the service sends them
             elif kind == "ping":
                 await self._send(ws, {"type": "pong", "t": msg.get("t")})
             elif kind == "bye":
@@ -875,6 +970,54 @@ class Bridge:
             async with self._send_lock:
                 await ws.send(json.dumps(frame, ensure_ascii=False))
 
+    # -- the offline queue --
+
+    async def _drain(self, ws, items: asyncio.Queue[dict]) -> None:
+        while True:
+            msg = await items.get()
+            try:
+                outcome = await asyncio.to_thread(self.file_item, msg)
+            except Exception as e:  # noqa: BLE001 - a passing failure (a full disk, a locked file): try it again later
+                # Nothing after it may be filed first, or an older change could land on top of a newer one when it
+                # is sent again. Hang up instead: the service sends the queue again, in order, after reconnecting.
+                log.warning("MyMemo Cloud: couldn't file a queued change (%s); reconnecting", type(e).__name__)
+                await ws.close(1011, "couldn't file a queued change")
+                return
+            if outcome is None:
+                continue
+            await self._send(ws, {"type": "ack", "qid": msg["qid"], "outcome": outcome})
+            if self.queued:
+                self.queued -= 1
+
+    def file_item(self, msg: Mapping[str, Any]) -> str | None:
+        """File one queued ``memory_propose`` as the web app that made it; the ack's outcome (None: no ack)."""
+        qid = msg.get("qid")
+        if not isinstance(qid, str) or not qid:
+            return None
+        if msg.get("enc") != ENC or msg.get("key_id") != self.link.key_id or not isinstance(msg.get("ct"), str):
+            return "undecryptable"  # sealed to a key this computer doesn't hold
+        try:
+            plaintext = open_item(self.link.private_key, self.link.device_id, qid, msg["ct"])
+        except Undecryptable:
+            return "undecryptable"
+        try:
+            queued = _read_queued(plaintext, qid)
+        except Exception:  # noqa: BLE001 - anything malformed (deep nesting is a RecursionError) is turned down for good
+            queued = None
+        if queued is None:
+            return "rejected"
+        client, op, fields, made_at, key = queued
+        try:
+            out = Proposals(self.vault).propose(
+                self._connector(client), op, **fields,
+                # The AI's own key, so retrying the same call live once the computer is back is a duplicate;
+                # without one, the queue id, which a replayed item carries again.
+                idempotency_key=key or qid, created_at=made_at, queue_id=qid)
+        except VaultError:  # revoked, read-only, a blocked topic, a bad proposal
+            self._refused(client, op, qid)
+            return "rejected"
+        return "duplicate" if out.get("deduplicated") or out.get("status") == "duplicate" else "stored"
+
     # -- relayed calls --
 
     async def _call(self, ws, msg: dict) -> None:
@@ -893,6 +1036,16 @@ class Bridge:
                 log.warning("MyMemo Cloud: a relayed call failed (%s)", type(e).__name__)
                 frame = _error(call_id, "internal", "OpenMyMemo couldn't answer this call.")
         await self._send(ws, frame)
+
+    def _refused(self, client: Mapping[str, Any], op: str, qid: str) -> None:
+        """Record a queued write turned down here, as its web app, or as MyMemo Cloud when that id belongs to an
+        app of the person's own."""
+        from .clients import CLOUD
+
+        cid = CLOUD_PREFIX + str(client["slug"])
+        known = next((c for c in Connectors(self.vault)._load() if c.id == cid), None)
+        who = cid if known is None or known.kind == "cloud" else CLOUD
+        self.vault.log_activity(who, "propose", op=op, queue_id=qid, result="rejected")
 
     def _connector(self, client: Mapping[str, Any]) -> Connector:
         cid = CLOUD_PREFIX + str(client["slug"])
