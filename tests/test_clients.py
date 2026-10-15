@@ -873,3 +873,15 @@ def test_a_backup_left_readable_by_an_older_version_is_made_private(tmp_path):
     (tmp_path / "settings.json.openmymemo-backup").symlink_to(other)
     appfiles.backup(link_target)
     assert stat.S_IMODE(other.stat().st_mode) == 0o644
+
+
+def test_install_links_open_the_app_and_never_send_paths_to_a_website():
+    """An install link carries the command that starts OpenMyMemo, with the memory folder's path and usually the
+    user name in it. It may open the AI app through its own scheme, never a web page (PRIVACY.md)."""
+    from urllib.parse import urlsplit
+
+    cmd = ["/Users/sam/.local/bin/openmymemo", "--vault", "/Users/sam/OpenMyMemo", "mcp", "--connector", "x"]
+    links = {c.id: c.link(cmd)[1] for c in clients.CLIENTS if c.link}
+    assert links  # Cursor, VS Code, LM Studio, Trae, Cherry Studio
+    for app_id, url in links.items():
+        assert urlsplit(url).scheme not in ("http", "https"), app_id

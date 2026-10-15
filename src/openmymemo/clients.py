@@ -937,12 +937,11 @@ CLIENTS: list[Client] = [
            config=lambda e: e.home / ".lmstudio/mcp.json",
            link=lambda cmd: ("Add to LM Studio",
                              f"lmstudio://add_mcp?name={ENTRY}&config={quote(_b64(plain(cmd)))}")),
-    # https://kiro.dev/docs/mcp/configuration (~/.kiro/settings/mcp.json) and https://kiro.dev/docs/mcp/servers
+    # https://kiro.dev/docs/mcp/configuration (~/.kiro/settings/mcp.json). No install link: Kiro's is a page on
+    # kiro.dev, and the command in it carries the memory folder's path (and so the user name) to that website.
     Client("kiro", "Kiro", "file", docs="https://kiro.dev/docs/mcp/configuration", site="https://kiro.dev",
            bundles=("Kiro.app",), commands=("kiro", "kiro-cli"), dirs=(".kiro",),
-           config=lambda e: e.home / ".kiro/settings/mcp.json",
-           link=lambda cmd: ("Add to Kiro", f"https://kiro.dev/launch/mcp/add?name={ENTRY}"
-                                            f"&config={quote(json.dumps(plain(cmd)))}")),
+           config=lambda e: e.home / ".kiro/settings/mcp.json"),
     # https://opencode.ai/docs/mcp-servers/ and /docs/config/: `mcp` in ~/.config/opencode/opencode.json (or
     # opencode.jsonc), a local server's command as one list.
     Client("opencode", "opencode", "file", docs="https://opencode.ai/docs/mcp-servers/", site="https://opencode.ai",
