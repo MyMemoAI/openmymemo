@@ -523,8 +523,9 @@ def apps_(ctx: typer.Context) -> None:
         installed = "-" if r["method"] == "account" else "yes" if r["installed"] else "no"
         typer.echo(f"{_pad(name, 34)} {installed:<10} {connected:<18} "
                    f"{_ago(r['last_seen']) if r['in_use'] else '-'}")
-    typer.echo("\nConnect one: openmymemo connect <app>    Any other MCP app: openmymemo connect other"
-               "\nChatGPT and claude.ai on the web: openmymemo cloud link (needs a MyMemo account)")
+    typer.echo("\nConnect one: openmymemo connect <app>    Any other MCP app: openmymemo connect other")
+    if any(r["id"] == clients.CLOUD for r in rows):
+        typer.echo("ChatGPT and claude.ai on the web: openmymemo cloud link (needs a MyMemo account)")
 
 
 def _print_result(result) -> None:
@@ -811,6 +812,24 @@ def cloud_unlink(port: Annotated[int, typer.Option(help="The port of the panel, 
                  yes: Annotated[bool, typer.Option("--yes", "-y", help="Don't ask first.")] = False) -> None:
     """Unlink this computer from MyMemo Cloud: the web apps lose access and the link is deleted here and at MyMemo."""
     _cloud_unlink(port, yes)
+
+
+@cloud_app.command("settings")
+def cloud_settings(
+    show: Annotated[bool | None, typer.Option("--show/--hide", help="List MyMemo Cloud in the panel and `apps`.")] = None,
+    service: Annotated[str | None, typer.Option(help="The MyMemo service to link to; \"\" for MyMemo's own.")] = None,
+) -> None:
+    """Show or change this computer's MyMemo Cloud settings: whether it is listed, and which service it links to."""
+    from . import cloud
+
+    try:
+        prefs = cloud.save_settings(show=show, service=service, default_service=service is not None and not service.strip())
+    except cloud.CloudError as e:
+        typer.secho(str(e), fg="red", err=True)
+        raise typer.Exit(1) from None
+    linked = cloud.load_link() is not None
+    typer.echo(f"Listed: {'yes' if prefs['show'] else 'yes, while linked' if linked else 'no'}")
+    typer.echo(f"Service: {cloud.service_url()}" + ("" if prefs["service"] else " (MyMemo's own)"))
 
 
 # ---- setup ------------------------------------------------------------------------------------------
