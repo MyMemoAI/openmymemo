@@ -2,6 +2,8 @@
 
 Your AI memory as a plain folder on your own computer. See exactly what models remember about you; let Claude, Codex, Cursor or any MCP app share it, so what you tell one the others know too, and see every change they make, with one click to undo. If an account gets banned, a vendor shuts down or you switch models, your memory comes with you.
 
+<!-- mcp-name: io.github.MyMemoAI/openmymemo -->
+
 > v0.2. Product design and status: [docs/product-design.md](https://github.com/MyMemoAI/openmymemo/blob/main/docs/product-design.md). The folder format, for any tool that wants to read or write it: [docs/MEMORY_FORMAT.md](https://github.com/MyMemoAI/openmymemo/blob/main/docs/MEMORY_FORMAT.md).
 
 <picture>
