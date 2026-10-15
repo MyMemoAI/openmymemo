@@ -46,8 +46,10 @@ month, call memory_propose (with a reason and my words as evidence). I'll see th
 OpenMyMemo and undo anything I don't want, so don't ask me to approve them here."""
 
 # What the cloud variant of memory_propose adds to its description: only the cloud ever answers "queued".
-CLOUD_QUEUED = (' Through MyMemo Cloud, when the person\'s computer is offline the status can also be "queued": '
-                "the change is kept encrypted and filed when the computer is back.")
+CLOUD_QUEUED = (' Through MyMemo Cloud, when the person\'s computer is offline the status can also be "queued", '
+                "with a `queue_id`: a receipt, not an acceptance. The change waits encrypted and is filed when the "
+                "computer is back, where it can still be turned down; memory_proposals then shows it with that "
+                "`queue_id`.")
 
 Kind = Literal["fact", "preference", "ongoing", "instruction", "event"]
 READ_ONLY = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
@@ -202,13 +204,15 @@ def build_server(vault: Vault, *, stdio_connector: str | None = None, panel_url:
 
         Statuses: applied (saved; the user may still undo it), pending (waiting for the user; `hold` says
         why), accepted or edited_accepted (the user approved it, perhaps reworded), rejected, undone, expired.
+        A proposal that waited in MyMemo Cloud's offline queue also has the `queue_id` it was given then.
         """
         c = who(ctx)
         rows = await run(proposals.list, status, c.id)
         out = [{"proposal_id": p.id, "op": p.op, "status": p.status, "hold": p.hold,
                 "content": p.final_content or p.content, "topic": p.final_topic or p.topic,
                 "memory_id": p.applied_memory_id or p.memory_id, "created_at": p.created_at,
-                "decided_at": p.decided_at} for p in rows[: max(1, min(limit, 100))]]
+                "decided_at": p.decided_at, **({"queue_id": p.queue_id} if p.queue_id else {})}
+               for p in rows[: max(1, min(limit, 100))]]
         return {"proposals": out}
 
     if stdio_connector:

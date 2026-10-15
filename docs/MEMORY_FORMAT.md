@@ -300,7 +300,7 @@ Append-only, one JSON object per line: what each connector did.
 {"at": "2026-10-08T09:15:00+00:00", "connector": "claude-code", "action": "context", "memory_ids": ["m7f3a", "k2p9d"], "chars": 1840, "via": "hook"}
 ```
 
-`action` is `context`, `search`, `get`, `propose`, `import` or `link`; other fields depend on it (`query`, `memory_ids`, `proposal_id`, `result`, `op`, `chars`, `via`, `source`, `account`, `email_masked`). `link` is written when this computer is linked to MyMemo Cloud, with `connector` `mymemo-cloud` and the account it was linked to: its display name and MyMemo's masked email (`s***@example.com`). Reads never rewrite `connectors.yaml`; "last seen" is derived from here.
+`action` is `context`, `search`, `get`, `propose`, `import` or `link`; other fields depend on it (`query`, `memory_ids`, `proposal_id`, `queue_id`, `result`, `op`, `chars`, `via`, `source`, `account`, `email_masked`). A queued MyMemo Cloud write turned down when it is filed is a `propose` with `result: "rejected"` and its `queue_id`. `link` is written when this computer is linked to MyMemo Cloud, with `connector` `mymemo-cloud` and the account it was linked to: its display name and MyMemo's masked email (`s***@example.com`). Reads never rewrite `connectors.yaml`; "last seen" is derived from here.
 
 ### 6.6 `proposals/<id>.json`
 
@@ -312,6 +312,7 @@ One file per proposal, named by its id (`p` plus hexadecimal; the id must be alp
 | `op` | `add`, `update`, `archive` |
 | `content`, `topic`, `memory_id`, `kind`, `reason`, `evidence`, `idempotency_key` | What was proposed |
 | `created_at` | |
+| `queue_id` | Optional: the MyMemo Cloud queue id of a proposal filed from the offline queue (product-design.md §16.3), so the AI can match its `queued` receipt to it |
 | `status` | `pending`, `accepted`, `edited_accepted`, `rejected`, `expired`, `applied`, `undone` |
 | `decided_at` | When the status left `pending` or `applied` was set |
 | `reviewed_at` | Version 2: when the person saw an applied change in the digest. Applied proposals without it are "unreviewed". |

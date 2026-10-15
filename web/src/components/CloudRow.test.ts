@@ -152,6 +152,17 @@ describe("CloudRow", () => {
     expect(moved.find("[data-endpoint]").exists()).toBe(false);
   });
 
+  it("says how many changes wait in the offline queue", async () => {
+    api.cloud.mockResolvedValue(linked({ queued: 3 }));
+    const w = mountRow();
+    await flushPromises();
+    expect(w.find("[data-queued]").text()).toContain("3 changes from the web, made while this computer was offline");
+    api.cloud.mockResolvedValue(linked({ queued: 0 }));
+    await (w.vm as unknown as { reload: () => Promise<void> }).reload();
+    await flushPromises();
+    expect(w.find("[data-queued]").exists()).toBe(false);
+  });
+
   it("unlinks after asking", async () => {
     api.cloud.mockResolvedValue(linked());
     api.cloudUnlink.mockResolvedValue({ message: "Unlinked this computer from MyMemo Cloud.", cloud: status() });

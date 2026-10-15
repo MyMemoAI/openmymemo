@@ -564,9 +564,9 @@ The MyMemo Cloud row on the Connectors page shows: signed in as (name and masked
 3. Mobile ChatGPT and Claude apps use the same connectors; anything specific to check there?
 4. MCP elicitation for in-chat approval (§5.4) applies here too once the web apps support it.
 
-### 16.10 As built (phase 1, 2026-10-12)
+### 16.10 As built (2026-10-12)
 
-Where the sections above left a choice open, the build settled it as follows:
+Where the sections above left a choice open, the build settled it as follows (phase 1, the live relay):
 
 - **Connectors:** web apps get the connector kind `cloud` (MEMORY_FORMAT.md §5), named "ChatGPT (web)", "Claude (web)", or "… (web, unverified)" for an unverified client. A revoked one answers `revoked`; after unlinking, or after removing one by itself, it comes back only through **Allow again** on the MyMemo Cloud row — linking again doesn't re-grant it.
 - **Which process connects:** the bridge runs on a thread of the process serving the panel, starts only once that process holds the panel's port (two AI apps may start a panel for the same folder at once; only the one that gets the port connects) and closes with 1000 when the panel stops. A panel inside an AI app's MCP process closes it at interpreter exit, not when the process is killed.
@@ -577,6 +577,14 @@ Where the sections above left a choice open, the build settled it as follows:
 - **Unlinking** while MyMemo can't be reached still forgets the link here and says to remove the computer in the MyMemo account settings too.
 - **The CLI** (`openmymemo cloud link`) signs in through the running panel when one serves the folder (on `--port` or any of the Mac app's ports, 8787–8796), and otherwise through a short-lived listener on an ephemeral port. Linking again replaces the device: the service tells the old connection 4409, which stops it without touching `cloud.json` or the web apps, and the running panel connects with the new link. `openmymemo connect mymemo-cloud` does the same.
 - **The panel:** MyMemo Cloud has its own "On the web" section on the Connectors page once it is shown (§16.11); the first-run guide (§15.3) leaves it out.
+
+Phase 2 (the offline queue), as built:
+
+- **Idempotency:** a queued item is filed with the AI's own `idempotency_key` from inside the sealed arguments, or with its queue id when the AI sent none, and keeps the queue id as `queue_id`. A resent item is therefore a duplicate, and so is a live retry with the same key once the computer is back. `memory_proposals` returns `queue_id`, so the AI can match its `queued` receipt to the proposal. An item turned down (revoked, read-only, blocked topic, malformed) is acknowledged `rejected`, recorded in the activity log with its `queue_id`, and never retried. A passing failure while filing (a full disk, say) acknowledges nothing and hangs up, so nothing after it is filed first; the service sends the queue again, in order, after reconnecting. When the live retry is filed before the queued copy, the queued copy's `queue_id` is added to that proposal.
+- **Time:** the proposal's `created_at` is the item's `received_at`, so the 30-day expiry of a pending proposal (§5.5) counts from when the AI made it, not from when it was filed. It is kept within the last 31 days (the service keeps items 30): a time in the future becomes now, an older one 31 days ago, and one that isn't a time is filed as now.
+- **Order and acks:** items are filed one at a time in the order they arrive and acknowledged `stored`, `duplicate` (already filed, or the memory already says it), `undecryptable` (another key, another row, a damaged ciphertext) or `rejected` (a revoked or read-only web app, a blocked topic, an item that doesn't decode or validate, however malformed). An item whose filing fails unexpectedly isn't acknowledged, so the service sends it again.
+- **Naming:** the sealed item carries the web app's slug and name but no `verified` flag (the service doesn't seal one), so only the slugs `chatgpt` and `claude` are named "ChatGPT (web)" and "Claude (web)"; any other slug is "… (web, unverified)", whatever name it gives.
+- **The panel** shows how many changes are waiting (the service's count at connection, counted down as they are filed). The re-link warning about queued proposals (§16.4) is the consent page's, on the service side.
 
 ### 16.11 Showing it, and choosing the service (2026-10-15)
 
