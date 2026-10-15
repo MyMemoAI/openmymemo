@@ -15,6 +15,7 @@ from openmymemo import appfiles, clients, codex
 from openmymemo.cli import app
 from openmymemo.connectors import Connectors, Revoked
 from openmymemo.snippets import command_for, stdio_command
+from openmymemo.vault import Vault
 from openmymemo.web import create_api
 
 H = {"X-OpenMyMemo": "1"}
@@ -595,7 +596,8 @@ def test_claude_code_plugin_counts_as_connected(vault, env):
     assert clients.app_status(vault, clients.get("claude-code"), env)["via"] is None  # only in one project
 
 
-def test_gemini_cli_with_the_extension_is_connected_without_a_config_entry(vault, env):
+def test_gemini_cli_with_the_extension_is_connected_without_a_config_entry(env):
+    vault = Vault.create(env.home / "OpenMyMemo")  # the folder the extension serves
     ext = env.home / ".gemini/extensions/openmymemo"
     ext.mkdir(parents=True)
     (ext / "gemini-extension.json").write_text(json.dumps({"name": "openmymemo", "version": "0.2.4"}))
@@ -615,6 +617,20 @@ def test_gemini_cli_with_the_extension_is_connected_without_a_config_entry(vault
     assert clients.app_status(vault, clients.get("gemini-cli"), env)["via"] is None
     enablement.write_text(json.dumps({"openmymemo": {"overrides": [f"!{env.home}/*", f"{env.home}/*"]}}))
     assert clients.app_status(vault, clients.get("gemini-cli"), env)["via"] == "plugin"  # the last rule wins
+
+
+def test_the_gemini_extension_doesnt_connect_another_folder(vault, env):
+    ext = env.home / ".gemini/extensions/openmymemo"
+    ext.mkdir(parents=True)
+    (ext / "gemini-extension.json").write_text(json.dumps({"name": "openmymemo"}))
+    assert clients.app_status(vault, clients.get("gemini-cli"), env)["via"] is None  # it serves ~/OpenMyMemo
+    result = clients.connect(vault, "gemini-cli", env)
+    assert result.status == "done" and result.changed
+    entry = json.loads((env.home / ".gemini/settings.json").read_text())["mcpServers"]["openmymemo"]
+    assert str(vault.root) in entry["args"]  # settings.json takes precedence over the extension's server
+    assert clients.app_status(vault, clients.get("gemini-cli"), env)["via"] == "config"
+    off = clients.disconnect(vault, "gemini-cli", env)
+    assert off.changed and not any("extension" in s for s in off.steps)
 
 
 # ---- Codex: TOML and the session hook ----------------------------------------------------------------------
