@@ -1,7 +1,8 @@
 name: Release
 
 # Push a tag named after the version (v0.2.2) to publish the Mac app, the Claude Desktop extension and the
-# Python package as a GitHub release, and the Python package on PyPI. The version must already be bumped everywhere (tests/test_packaging.py).
+# Python package as a GitHub release, the Python package on PyPI, and server.json on the MCP Registry. The version
+# must already be bumped everywhere (tests/test_packaging.py).
 # The release is created once every file is built, so it never lacks the disk image; if a job fails, nothing
 # is published and "Re-run failed jobs" picks up from there.
 on:
@@ -165,3 +166,37 @@ jobs:
           name: openmymemo-python
           path: dist
       - run: uv publish --trusted-publishing always dist/*
+
+  mcp-registry:
+    # Lists this version on the official MCP Registry (registry.modelcontextprotocol.io), which MCP clients and
+    # other directories read. The registry stores only server.json: it checks that the PyPI package of that
+    # version exists and that its README names this server ("mcp-name:" near the top of README.md), so it runs
+    # after PyPI. GitHub OIDC proves the namespace io.github.MyMemoAI, so there is no token in the secrets.
+    needs: pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+      - name: Install mcp-publisher
+        env:
+          VERSION: v1.8.1
+          SHA256: a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc
+        run: |
+          curl -fsSL -o mcp-publisher.tar.gz \
+            "https://github.com/modelcontextprotocol/registry/releases/download/$VERSION/mcp-publisher_linux_amd64.tar.gz"
+          echo "$SHA256  mcp-publisher.tar.gz" | sha256sum --check
+          tar xzf mcp-publisher.tar.gz mcp-publisher
+      - run: ./mcp-publisher validate
+      - run: ./mcp-publisher login github-oidc
+      - name: Publish server.json
+        run: |
+          # PyPI can take a minute to serve a version it has just accepted.
+          for wait in 0 30 60 120; do
+            sleep "$wait"
+            if ./mcp-publisher publish; then exit 0; fi
+          done
+          exit 1
