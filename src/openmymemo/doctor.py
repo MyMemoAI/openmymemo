@@ -95,9 +95,11 @@ def folder(root: Path) -> tuple[list[Check], Vault | None]:
 
 
 # The top-level shape each state file must have for the vault to read it: a mapping, with these keys (when
-# present) of these types. An empty YAML file is fine (it reads as defaults); JSON must be an object.
-SHAPES = {"topics.yaml": {"groups": list}, "connectors.yaml": {"connectors": list}, "settings.yaml": {},
-          "meta.json": {"memories": dict}}
+# present) of these types, and whether its reader also takes an explicit null (the YAML readers use
+# `data.get(key) or []`; meta.json's `setdefault("memories", {})` only fills a missing key, not a null one).
+# An empty YAML file is fine (it reads as defaults); JSON must be an object.
+SHAPES = {"topics.yaml": {"groups": (list, True)}, "connectors.yaml": {"connectors": (list, True)},
+          "settings.yaml": {}, "meta.json": {"memories": (dict, False)}}
 
 
 def _parses(path: Path) -> bool:
@@ -114,7 +116,8 @@ def _parses(path: Path) -> bool:
         return path.suffix != ".json"
     if not isinstance(data, dict):
         return False
-    return all(data.get(key) is None or isinstance(data[key], kind) for key, kind in SHAPES[path.name].items())
+    return all(key not in data or isinstance(data[key], kind) or (null_ok and data[key] is None)
+               for key, (kind, null_ok) in SHAPES[path.name].items())
 
 
 def _port_free(port: int) -> bool:

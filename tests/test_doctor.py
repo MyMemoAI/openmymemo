@@ -114,7 +114,8 @@ def test_doctor_doesnt_guess_the_folder_of_an_http_entry(tmp_path):
 
 
 def test_doctor_rejects_state_files_the_vault_cant_use(vault):
-    for path, text in ((vault.state_dir / "meta.json", "null"), (vault.state_dir / "meta.json", '{"memories": []}'),
+    meta = vault.state_dir / "meta.json"
+    for path, text in ((meta, "null"), (meta, '{"memories": []}'), (meta, '{"memories": null}'),
                        (vault.topics_path, "- a list"), (vault.connectors_path, "connectors: {}")):
         good = path.read_text()
         path.write_text(text)
@@ -122,6 +123,17 @@ def test_doctor_rejects_state_files_the_vault_cant_use(vault):
         path.write_text(good)
     vault.settings_path.write_text("")  # an empty YAML file reads as the defaults
     assert all(c.level != "fail" for c in doctor.folder(vault.root)[0])
+
+
+def test_doctor_accepts_state_files_the_vault_reads_as_defaults(vault):
+    # a missing key, and a null YAML list the reader takes as empty: both read fine, so both pass
+    for path, text in ((vault.state_dir / "meta.json", "{}"), (vault.connectors_path, "connectors: null"),
+                       (vault.topics_path, "groups: null")):
+        good = path.read_text()
+        path.write_text(text)
+        Vault(vault.root).topics()  # the normal reader takes it
+        assert all(c.level != "fail" for c in doctor.folder(vault.root)[0]), (path.name, text)
+        path.write_text(good)
 
 
 def test_doctor_counts_what_the_vault_reads_as_topics(vault):
