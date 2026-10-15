@@ -1,7 +1,7 @@
 """Setup snippets and one-click install links for MCP clients.
 
 Keys ending in ``_link`` are URLs the panel renders as install buttons; every other value is text to copy.
-Commands use this installation's absolute path, so they work before OpenMyMemo is on PyPI.
+Commands use this installation's absolute path, or ``uvx openmymemo`` when it runs from uvx's cache.
 """
 
 from __future__ import annotations
@@ -17,6 +17,12 @@ from pathlib import Path
 PANEL_PORT = 8787
 
 
+def _from_uvx() -> bool:
+    """Running from a throwaway environment of `uvx openmymemo` (uv's cache keeps those in ``archive-v0/<hash>``),
+    not from `uv tool install`, a project's venv or the Mac app."""
+    return Path(sys.prefix).parent.name.startswith("archive-v")
+
+
 def command_for(vault_root: Path) -> list[str]:
     """The absolute command that starts this installation's CLI against this vault.
 
@@ -27,6 +33,12 @@ def command_for(vault_root: Path) -> list[str]:
     override = os.environ.get("OPENMYMEMO_COMMAND", "").strip()
     if override and Path(override).is_absolute() and Path(override).is_file():
         return [override, "--vault", str(vault_root)]
+    if _from_uvx():  # its path is in uv's cache, which `uv cache clean` deletes: name uvx itself instead
+        uvx, uv = shutil.which("uvx"), shutil.which("uv")
+        if uvx:
+            return [str(Path(uvx).resolve()), "openmymemo", "--vault", str(vault_root)]
+        if uv:
+            return [str(Path(uv).resolve()), "tool", "run", "openmymemo", "--vault", str(vault_root)]
     exe = shutil.which("openmymemo")
     argv0 = Path(sys.argv[0]) if sys.argv and sys.argv[0] else None
     if argv0 and argv0.name == "openmymemo" and argv0.exists():

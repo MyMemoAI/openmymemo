@@ -293,3 +293,31 @@ def test_openmymemo_command_is_what_configs_get_when_the_mac_app_sets_it(tmp_pat
     assert stdio_command(tmp_path / "v", "cursor")[:4] == [str(launcher), "--vault", str(tmp_path / "v"), "mcp"]
     monkeypatch.setenv("OPENMYMEMO_COMMAND", "openmymemo")  # not absolute: ignored
     assert command_for(tmp_path / "v")[0] == str(venv_cli.resolve())
+
+
+def test_configs_name_uvx_when_openmymemo_runs_from_uvx(tmp_path, monkeypatch):
+    """`uvx openmymemo connect …` runs from uv's cache, which `uv cache clean` deletes: configs get uvx instead."""
+    from openmymemo import snippets
+
+    cached = tmp_path / "cache" / "uv" / "archive-v0" / "YOgxP7GEyeZ8I1n4"
+    (cached / "bin").mkdir(parents=True)
+    (cached / "bin" / "openmymemo").write_text("#!/bin/sh\n")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name in ("uv", "uvx"):
+        (bin_dir / name).write_text("#!/bin/sh\n")
+        (bin_dir / name).chmod(0o755)
+    monkeypatch.setattr("sys.prefix", str(cached))
+    monkeypatch.setattr("sys.argv", [str(cached / "bin" / "openmymemo")])
+    monkeypatch.delenv("OPENMYMEMO_COMMAND", raising=False)
+    monkeypatch.setenv("PATH", str(bin_dir))
+    vault = tmp_path / "v"
+    assert snippets.command_for(vault) == [str((bin_dir / "uvx").resolve()), "openmymemo", "--vault", str(vault)]
+    (bin_dir / "uvx").unlink()
+    assert snippets.command_for(vault)[:4] == [str((bin_dir / "uv").resolve()), "tool", "run", "openmymemo"]
+    (bin_dir / "uv").unlink()  # no uv on PATH: the cached command is all there is
+    assert snippets.command_for(vault)[0] == str((cached / "bin" / "openmymemo").resolve())
+    monkeypatch.setattr("sys.prefix", str(tmp_path / "tools" / "openmymemo"))  # `uv tool install`: kept as is
+    (bin_dir / "uvx").write_text("#!/bin/sh\n")
+    (bin_dir / "uvx").chmod(0o755)
+    assert snippets.command_for(vault)[0] == str((cached / "bin" / "openmymemo").resolve())
