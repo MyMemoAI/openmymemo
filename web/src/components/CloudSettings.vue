@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { api, type CloudStatus } from "../api";
 import { t } from "../i18n";
 import { store, toast } from "../store";
@@ -17,13 +17,20 @@ function take(s: CloudStatus) {
   draft.value = s.settings.service_from_env ?? (s.settings.service || s.settings.default_service);
 }
 
-onMounted(async () => {
+let seq = 0;
+async function load() {
+  const mine = ++seq;
   try {
-    take(await api.cloud());
+    const s = await api.cloud();
+    if (mine === seq) take(s);
   } catch {
-    status.value = null; // an older server without MyMemo Cloud: nothing to set
+    if (mine === seq && !status.value) status.value = null; // an older server without MyMemo Cloud: nothing to set
   }
-});
+}
+onMounted(load);
+// Linked or unlinked meanwhile (CloudRow polls and bumps cloudVersion): what may change now changes with it.
+let own = -1; // the bump this component made itself, with the answer already in hand
+watch(() => store.cloudVersion, (v) => v !== own && load());
 
 const settings = computed(() => status.value?.settings ?? null);
 const locked = computed(() => !!status.value?.linked || !!settings.value?.service_from_env);
@@ -35,12 +42,14 @@ async function change(body: { show?: boolean; service?: string }, done?: (s: Clo
   busy.value = true;
   try {
     const s = await api.cloudSettings(body);
+    seq++; // an older load must not overwrite this answer
     take(s);
-    store.cloudVersion++;
+    own = ++store.cloudVersion;
     const text = done?.(s);
     if (text) toast(text);
   } catch (e) {
     toast(e instanceof Error ? e.message : String(e), "error");
+    void load(); // refused because the link changed meanwhile, say: show how things are now
   } finally {
     busy.value = false;
   }

@@ -164,15 +164,7 @@ describe("CloudRow", () => {
     expect(api.cloudUnlink).toHaveBeenCalled();
     expect(store.toast?.text).toBe("Unlinked this computer from MyMemo Cloud.");
     expect(button(w, "Sign in")).toBeTruthy();
-    expect(store.cloudVersion).toBe(version); // still shown in Settings: the row stays
-
-    api.cloud.mockResolvedValue(linked());
-    api.cloudUnlink.mockResolvedValue({ message: "Unlinked", cloud: status({ shown: false }) });
-    const hidden = mountRow();
-    await flushPromises();
-    await button(hidden, "Unlink")!.trigger("click");
-    await flushPromises();
-    expect(store.cloudVersion).toBe(version + 1); // hidden in Settings: the Connectors page drops it
+    expect(store.cloudVersion).toBe(version + 1); // Settings and the catalog follow
   });
 });
 
