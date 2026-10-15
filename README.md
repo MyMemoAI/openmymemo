@@ -151,6 +151,10 @@ The server listens on 127.0.0.1 only. The panel API checks `Host`, `Origin` and 
 
 Found a vulnerability? Please report it privately as described in [SECURITY.md](./SECURITY.md).
 
+## Privacy Policy
+
+Your memory stays on your computer: MyMemo doesn't receive it, and OpenMyMemo has no account, telemetry, analytics or update check. AI apps you connect read the topics you allow (never `health` or `finance` unless you say so) and send what they read to their own model provider under their own policies. OpenMyMemo goes online only to download Python and its libraries when it is installed or first started, and for MyMemo Cloud, which is off until you turn it on and link this computer; then the memories web apps read pass through the MyMemo service in transit. The full policy, including what is stored where: [PRIVACY.md](https://github.com/MyMemoAI/openmymemo/blob/main/PRIVACY.md).
+
 ## Development
 
 ```bash

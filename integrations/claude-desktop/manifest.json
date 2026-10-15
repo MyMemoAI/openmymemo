@@ -15,6 +15,7 @@
   },
   "homepage": "https://github.com/MyMemoAI/openmymemo",
   "support": "https://github.com/MyMemoAI/openmymemo/issues",
+  "privacy_policies": ["https://github.com/MyMemoAI/openmymemo/blob/main/PRIVACY.md"],
   "icon": "icon.png",
   "server": {
     "type": "uv",
