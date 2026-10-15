@@ -8,7 +8,7 @@ describe("Settings", () => {
   it("reopens the welcome guide", async () => {
     history.replaceState(null, "", "#/memories");
     const w = mount(SettingsSheet, {
-      global: { stubs: { ApprovalSwitch: true, CloudSettings: true, ModalDialog: { template: "<div><slot /></div>" } } },
+      global: { stubs: { ApprovalSwitch: true, ModalDialog: { template: "<div><slot /></div>" } } },
     });
     await flushPromises();
     const open = w.findAll("button").find((b) => b.text() === "Open the welcome guide")!;

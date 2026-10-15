@@ -5,12 +5,11 @@ import { t } from "../i18n";
 import { copy, store, toast } from "../store";
 import AppIcon from "./AppIcon.vue";
 import ApprovalSwitch from "./ApprovalSwitch.vue";
-import CloudSettings from "./CloudSettings.vue";
 import ModalDialog from "./ModalDialog.vue";
 
 /**
  * The Mac app's settings (⌘,), in small groups: General (the memory folder, opening at login,
- * notifications), Appearance, AI changes (the approval switch), MyMemo Cloud (shown or not, and its service), Help, and Advanced (the `openmymemo`
+ * notifications), Appearance, AI changes (the approval switch), Help, and Advanced (the `openmymemo`
  * command the app installs, desktop/src-tauri/src/launcher.rs). In a browser preview only the parts the
  * panel itself provides show.
  */
@@ -113,8 +112,6 @@ const revealLog = () => app.value && run(() => shell.reveal(app.value!.log));
         <h3 class="label px-1">{{ t("desk.aiChanges") }}</h3>
         <ApprovalSwitch />
       </section>
-
-      <CloudSettings />
 
       <section class="space-y-1.5" :aria-label="t('desk.help')">
         <h3 class="label px-1">{{ t("desk.help") }}</h3>

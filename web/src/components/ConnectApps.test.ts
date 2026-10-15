@@ -65,16 +65,6 @@ describe("ConnectApps", () => {
     expect(w.text()).toContain("Other MCP app");
   });
 
-  it("loads the list again when MyMemo Cloud is shown or hidden in Settings", async () => {
-    const w = mount(ConnectApps, { props: { compact: true } });
-    await flushPromises();
-    api.apps.mockClear();
-    store.cloudVersion++;
-    await flushPromises();
-    expect(api.apps).toHaveBeenCalled();
-    w.unmount();
-  });
-
   it("connects with one click and says what's left to do", async () => {
     api.connectApp.mockImplementation(async () => ({
       result: result({ message: "Added OpenMyMemo to ~/.cursor/mcp.json. Restart Cursor to finish." }),

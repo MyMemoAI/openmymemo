@@ -12,8 +12,6 @@ export const store = reactive({
   connectors: [] as Connector[],
   /** Bumped after every successful refresh, so views that load their own data can follow along. */
   version: 0,
-  /** Bumped when MyMemo Cloud is shown, hidden or pointed at another service in Settings. */
-  cloudVersion: 0,
   offline: false,
   toast: null as { text: string; kind: "ok" | "error" } | null,
 });

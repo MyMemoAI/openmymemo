@@ -527,10 +527,7 @@ def catalog(vault: Vault, env: Env | None = None) -> list[dict]:
     env = env or Env.current()
     known = {c.id: c for c in Connectors(vault)._load()}
     seen = _last_seen(vault)
-    from .cloud import shown
-
-    listed = [c for c in CLIENTS if c.id != CLOUD or shown()]  # MyMemo Cloud: when turned on in Settings, or linked
-    return [app_status(vault, c, env, known, seen) for c in listed]
+    return [app_status(vault, c, env, known, seen) for c in CLIENTS]
 
 
 # ---- connect and disconnect ------------------------------------------------------------------------------

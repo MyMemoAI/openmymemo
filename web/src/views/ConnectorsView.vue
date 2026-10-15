@@ -2,18 +2,13 @@
 import { ref, watch } from "vue";
 import { api, type AppStatus, type Connector } from "../api";
 import AppIcon from "../components/AppIcon.vue";
-import CloudSettings from "../components/CloudSettings.vue";
 import ConnectApps from "../components/ConnectApps.vue";
 import ConnectorPanel from "../components/ConnectorPanel.vue";
 import PageHeader from "../components/PageHeader.vue";
-import { desktop } from "../desktop";
 import { t } from "../i18n";
 import { act, store } from "../store";
 
-/**
- * The AI apps: connect them with one click, then set what each connected one may read and write. In a browser,
- * which has no Settings sheet, MyMemo Cloud's settings (shown or not, its service) sit at the bottom.
- */
+/** The AI apps: connect them with one click, then set what each connected one may read and write. */
 const props = defineProps<{ initialConnector: string | null }>();
 
 const apps = ref<InstanceType<typeof ConnectApps> | null>(null);
@@ -53,7 +48,5 @@ async function remove(app: AppStatus | null, c: Connector, alsoSettings: boolean
         <ConnectorPanel :connector="live(connector)" :app="app" @remove="(also) => remove(app, connector, also)" />
       </template>
     </ConnectApps>
-
-    <CloudSettings v-if="!desktop" />
   </div>
 </template>

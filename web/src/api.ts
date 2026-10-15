@@ -200,23 +200,9 @@ export interface CloudApp {
   connector: Connector | null;
 }
 
-/** This computer's MyMemo Cloud preferences (product-design.md §16.11). */
-export interface CloudSettings {
-  /** Listed on the Connectors page (it always is while this computer is linked). */
-  show: boolean;
-  /** The chosen service; "" for MyMemo's own (`default_service`). */
-  service: string;
-  default_service: string;
-  /** OPENMYMEMO_CLOUD_URL decides the service, when set. */
-  service_from_env: string | null;
-}
-
 /** MyMemo Cloud on this computer (GET /api/cloud). */
 export interface CloudStatus {
   linked: boolean;
-  /** Listed: turned on in Settings, or linked. */
-  shown: boolean;
-  settings: CloudSettings;
   /** The MyMemo service, and the URL ChatGPT and claude.ai need, exactly. */
   service: string;
   endpoint: string;
@@ -377,8 +363,6 @@ export const api = {
   cloudUnlink: () => req<{ message: string; cloud: CloudStatus }>("DELETE", "/api/cloud"),
   cloudReconnect: () => req<CloudStatus>("POST", "/api/cloud/reconnect"),
   cloudAllow: (id: string) => req<CloudStatus>("POST", `/api/cloud/apps/${enc(id)}/allow`),
-  /** Show or hide MyMemo Cloud, or choose its service ("" for MyMemo's own). */
-  cloudSettings: (body: { show?: boolean; service?: string }) => req<CloudStatus>("PATCH", "/api/cloud/settings", body),
   context: (connector: string | null, maxChars: number) =>
     req<ContextResult>("GET", `/api/context?max_chars=${maxChars}${connector ? `&connector=${enc(connector)}` : ""}`),
   activity: (connector?: string) =>
