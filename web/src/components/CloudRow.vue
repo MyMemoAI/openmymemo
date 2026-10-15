@@ -23,6 +23,13 @@ const busy = ref(false);
 const signInUrl = ref<string | null>(null);
 const showSetup = ref(false);
 
+/** Take a status; a link made or undone (here, from the CLI, or by MyMemo) tells Settings and the catalog. */
+function take(data: CloudStatus) {
+  const was = status.value?.linked;
+  status.value = data;
+  if (was !== undefined && was !== data.linked) store.cloudVersion++;
+}
+
 let seq = 0;
 async function load() {
   const mine = ++seq;
@@ -30,7 +37,7 @@ async function load() {
     const data = await api.cloud();
     if (mine !== seq) return;
     const wasLinked = status.value?.linked;
-    status.value = data;
+    take(data);
     failed.value = false;
     if (data.linked && wasLinked === false) {
       // Just signed in: say so, and show what to paste into the web apps.
@@ -126,7 +133,7 @@ async function unlink() {
   busy.value = true;
   try {
     const res = await api.cloudUnlink();
-    status.value = res.cloud;
+    take(res.cloud);
     showSetup.value = false;
     toast(res.message);
     await refresh();

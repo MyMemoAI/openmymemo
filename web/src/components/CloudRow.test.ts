@@ -10,7 +10,8 @@ const ENDPOINT = "https://api.mymemo.ai/openmymemo/mcp";
 
 function status(extra: Partial<CloudStatus> = {}): CloudStatus {
   return {
-    linked: false, service: "https://api.mymemo.ai", endpoint: ENDPOINT, pending: false, link_error: null,
+    linked: false, shown: true, service: "https://api.mymemo.ai", endpoint: ENDPOINT,
+    settings: { show: true, service: "", default_service: "https://api.mymemo.ai", service_from_env: null }, pending: false, link_error: null,
     folder: null, this_folder: false, account: null, plan: null, linked_at: null, state: "stopped", reason: null,
     online: false, close_code: null, last_call_at: null, queued: null, apps: [], ...extra,
   };
@@ -166,6 +167,7 @@ describe("CloudRow", () => {
     api.cloud.mockResolvedValue(linked());
     api.cloudUnlink.mockResolvedValue({ message: "Unlinked this computer from MyMemo Cloud.", cloud: status() });
     vi.stubGlobal("confirm", vi.fn(() => true));
+    const version = store.cloudVersion;
     const w = mountRow();
     await flushPromises();
     await button(w, "Unlink")!.trigger("click");
@@ -173,6 +175,7 @@ describe("CloudRow", () => {
     expect(api.cloudUnlink).toHaveBeenCalled();
     expect(store.toast?.text).toBe("Unlinked this computer from MyMemo Cloud.");
     expect(button(w, "Sign in")).toBeTruthy();
+    expect(store.cloudVersion).toBe(version + 1); // Settings and the catalog follow
   });
 });
 

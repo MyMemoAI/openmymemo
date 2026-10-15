@@ -14,8 +14,9 @@ tool calls the service relays from web apps, by running the same tool code as th
   ``/cloud/callback`` (or to a short-lived listener of the CLI's own), whose ``state`` must match a link started
   in this process within ten minutes, once. The code is exchanged at ``POST /openmymemo/device/link``, which also
   registers the public key.
-* **The service** is ``OPENMYMEMO_CLOUD_URL`` (default https://api.mymemo.ai); the bridge is ``/openmymemo/bridge``
-  on the same host. The wire format is pinned by ``tests/fixtures/cloud/`` (the MyMemo service tests against the same files).
+* **The service** is ``OPENMYMEMO_CLOUD_URL``, else the one chosen in Settings (``settings.json`` next to
+  ``cloud.json``, which also says whether MyMemo Cloud is shown at all; §16.11), else https://api.mymemo.ai; the
+  bridge is ``/openmymemo/bridge`` on the same host. The wire format is pinned by ``tests/fixtures/cloud/`` (the MyMemo service tests against the same files).
 * **The bridge** runs on a thread of its own, starts once the panel's port is bound (``web.panel_server``) and
   closes with 1000 when the panel stops. It reconnects with backoff and follows the close codes in
   ``tests/fixtures/cloud/bridge/close_codes.json``.
@@ -91,12 +92,36 @@ class CloudError(Exception):
     """Something the person should read: MyMemo couldn't be reached, or refused."""
 
 
+class SettingLocked(CloudError):
+    """A preference that can't change right now (the service, while linked or set by OPENMYMEMO_CLOUD_URL)."""
+
+
 # ---- where the link lives ----------------------------------------------------------------------------------
 
 
 def service_url() -> str:
-    """The MyMemo service this installation links to: ``OPENMYMEMO_CLOUD_URL``, or MyMemo's own."""
-    return (os.environ.get("OPENMYMEMO_CLOUD_URL", "").strip() or DEFAULT_SERVICE).rstrip("/")
+    """The MyMemo service a new link goes to: ``OPENMYMEMO_CLOUD_URL``, else the one chosen in Settings, else
+    MyMemo's own. An existing link keeps the service it was made with (``Link.service``)."""
+    env = os.environ.get("OPENMYMEMO_CLOUD_URL", "").strip()
+    return (env or load_settings()["service"] or DEFAULT_SERVICE).rstrip("/")
+
+
+def normalize_service(url: str) -> str:
+    """A service URL as it is stored and compared with the callback's ``iss``: https (http only on this computer's
+    loopback, for a local service), no user, query or fragment, no trailing slash. Raises CloudError."""
+    url = url.strip().rstrip("/")
+    try:
+        parts = urlsplit(url)
+        parts.port  # noqa: B018 - raises ValueError on a bad port
+    except ValueError:
+        raise CloudError("That isn't a valid web address.") from None
+    if len(url) > 300 or not parts.hostname or any(c.isspace() for c in url):
+        raise CloudError("That isn't a valid web address.")
+    if parts.username is not None or parts.password is not None or parts.query or parts.fragment or "#" in url:
+        raise CloudError("Enter the service's address only, without a user name, ? or #.")
+    if parts.scheme == "https" or (parts.scheme == "http" and _loopback(url)):
+        return url
+    raise CloudError("The service's address must start with https:// (http:// only for a service on this computer).")
 
 
 def endpoint(service: str) -> str:
@@ -120,6 +145,58 @@ def cloud_dir(environ: Mapping[str, str] | None = None, system: str | None = Non
 
 def link_path() -> Path:
     return cloud_dir() / "cloud.json"
+
+
+def settings_path() -> Path:
+    return cloud_dir() / "settings.json"
+
+
+def load_settings() -> dict[str, Any]:
+    """This computer's MyMemo Cloud preferences (product-design.md §16.11): ``show`` (the panel and ``openmymemo
+    apps`` list MyMemo Cloud; off until the person turns it on) and ``service`` (None: MyMemo's own)."""
+    try:
+        data = json.loads(settings_path().read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        data = {}
+    except (OSError, ValueError) as e:
+        log.warning("MyMemo Cloud: ignoring an unreadable %s (%s)", settings_path(), type(e).__name__)
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    service = data.get("service")
+    try:
+        service = normalize_service(service) if isinstance(service, str) and service.strip() else None
+    except CloudError:
+        service = None  # edited by hand into something that can't be used: MyMemo's own
+    return {**data, "show": data.get("show") is True, "service": service}
+
+
+def save_settings(*, show: bool | None = None, service: str | None = None, default_service: bool = False) -> dict:
+    """Change the preferences; returns them. The service can't change while this computer is linked (the link
+    keeps the service it was made with; unlink first) or while ``OPENMYMEMO_CLOUD_URL`` decides it."""
+    with _link_lock():
+        current = load_settings()
+        new = dict(current)
+        if show is not None:
+            new["show"] = bool(show)
+        if default_service or service is not None:
+            chosen = None if default_service or not service.strip() else normalize_service(service)
+            if chosen == DEFAULT_SERVICE:
+                chosen = None
+            if chosen != current["service"]:
+                if os.environ.get("OPENMYMEMO_CLOUD_URL", "").strip():
+                    raise SettingLocked("OPENMYMEMO_CLOUD_URL sets the service on this computer; change it there.")
+                if load_link() is not None:
+                    raise SettingLocked("Unlink this computer from MyMemo Cloud before choosing another service.")
+            new["service"] = chosen
+        if new != current:
+            _write_private(settings_path(), json.dumps(new, indent=2) + "\n")
+        return new
+
+
+def shown() -> bool:
+    """MyMemo Cloud is listed when the person turned it on, and always while this computer is linked."""
+    return load_settings()["show"] or link_path().exists()
 
 
 @dataclass
@@ -1189,13 +1266,29 @@ class Cloud:
             self._bridge = None
         return message
 
+    # -- settings --
+
+    @staticmethod
+    def settings(prefs: Mapping[str, Any] | None = None) -> dict:
+        """The preferences as the panel's Settings shows them: ``service`` is the chosen one ("" for MyMemo's own)."""
+        prefs = prefs or load_settings()
+        env = os.environ.get("OPENMYMEMO_CLOUD_URL", "").strip()
+        return {"show": prefs["show"], "service": prefs["service"] or "", "default_service": DEFAULT_SERVICE,
+                "service_from_env": env.rstrip("/") if env else None}
+
+    def update_settings(self, *, show: bool | None = None, service: str | None = None) -> dict:
+        save_settings(show=show, service=service, default_service=service is not None and not service.strip())
+        return self.settings()
+
     # -- status --
 
     def status(self) -> dict:
         link = load_link()
         service = link.service if link else service_url()
+        prefs = load_settings()
         out: dict[str, Any] = {
             "linked": link is not None, "service": service, "endpoint": endpoint(service),
+            "shown": prefs["show"] or link is not None, "settings": self.settings(prefs),
             "pending": self.linker.pending(), "link_error": self.linker.error,
             "folder": None, "this_folder": False, "account": None, "plan": None, "linked_at": None,
             "state": "stopped", "reason": None, "online": False, "close_code": None, "last_call_at": None,

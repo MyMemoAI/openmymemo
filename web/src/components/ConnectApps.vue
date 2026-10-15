@@ -55,6 +55,7 @@ async function load() {
 const connectorIds = computed(() => store.connectors.map((c) => c.id).join(" "));
 watch(connectorIds, () => catalog.value && load());
 watch(() => store.version, () => Date.now() - loadedAt > 30_000 && load());
+watch(() => store.cloudVersion, () => load());  // MyMemo Cloud shown, hidden, linked or unlinked
 const onFocus = () => document.visibilityState === "visible" && Date.now() - loadedAt > 2_000 && load();
 onMounted(() => {
   load();
