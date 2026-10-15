@@ -836,6 +836,32 @@ def _codex_plugin(env: Env) -> str | None:
     return "the OpenMyMemo plugin" if found else None
 
 
+def _gemini_extension(env: Env) -> str | None:
+    """The Gemini CLI extension: ~/.gemini/extensions/openmymemo/, unless `gemini extensions disable` turned it off
+    for the whole home folder. Each rule in extension-enablement.json is a folder (`!` to disable, `*` for its
+    subfolders too) and the last one that matches wins (gemini-cli packages/cli/src/config/extensions/)."""
+    extensions = env.home / ".gemini/extensions"
+    if _json_file(extensions / ENTRY / "gemini-extension.json").get("name") != ENTRY:
+        return None
+    rules = _json_file(extensions / "extension-enablement.json").get(ENTRY)
+    rules = rules.get("overrides") if isinstance(rules, dict) else None
+
+    def slashed(p: str) -> str:
+        p = p.replace("\\", "/")
+        return ("" if p.startswith("/") else "/") + p + ("" if p.endswith("/") else "/")
+
+    home, enabled = slashed(str(env.home)), True
+    for rule in rules if isinstance(rules, list) else []:
+        if not isinstance(rule, str):
+            continue
+        base = rule.removeprefix("!")
+        subdirs = base.endswith("*")
+        base = slashed(base.removesuffix("*"))
+        if home == base or (subdirs and home.startswith(base)):
+            enabled = not rule.startswith("!")
+    return "the OpenMyMemo extension" if enabled else None
+
+
 def _json_or_jsonc(path: Path) -> Path:
     """`settings.json`, or the `.jsonc` the person keeps instead."""
     jsonc = path.with_suffix(".jsonc")
@@ -915,10 +941,13 @@ CLIENTS: list[Client] = [
            dirs=(".codeium/windsurf", ".config/devin"), config=lambda e: e.config / "devin/mcp_config.json",
            where="Cascade's MCP settings (View raw config)", note="Devin Desktop"),
     # https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md (~/.gemini/settings.json)
+    # https://github.com/google-gemini/gemini-cli/blob/main/docs/extensions/reference.md (the extension; a server
+    # of the same name in settings.json takes precedence over the extension's)
     Client("gemini-cli", "Gemini CLI", "file",
            docs="https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md",
            site="https://github.com/google-gemini/gemini-cli", commands=("gemini",), dirs=(".gemini/settings.json",),
-           config=lambda e: e.home / ".gemini/settings.json", fmt="jsonc", session=True),
+           config=lambda e: e.home / ".gemini/settings.json", fmt="jsonc", session=True,
+           plugin=_gemini_extension, plugin_where="`gemini extensions uninstall openmymemo`"),
     # https://zed.dev/docs/ai/mcp: `context_servers` with a plain command in settings.json (JSONC, usually
     # with comments, which OpenMyMemo never rewrites: then it's the snippet).
     Client("zed", "Zed", "file", docs="https://zed.dev/docs/ai/mcp", site="https://zed.dev/download",

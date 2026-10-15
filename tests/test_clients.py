@@ -595,6 +595,28 @@ def test_claude_code_plugin_counts_as_connected(vault, env):
     assert clients.app_status(vault, clients.get("claude-code"), env)["via"] is None  # only in one project
 
 
+def test_gemini_cli_with_the_extension_is_connected_without_a_config_entry(vault, env):
+    ext = env.home / ".gemini/extensions/openmymemo"
+    ext.mkdir(parents=True)
+    (ext / "gemini-extension.json").write_text(json.dumps({"name": "openmymemo", "version": "0.2.4"}))
+    row = clients.app_status(vault, clients.get("gemini-cli"), env)
+    assert row["connected"] and row["via"] == "plugin" and row["plugin"] == "the OpenMyMemo extension"
+    result = clients.connect(vault, "gemini-cli", env)
+    assert result.status == "done" and "extension" in result.message and not result.changed
+    assert not (env.home / ".gemini/settings.json").exists()  # its entry would shadow the extension's server
+    off = clients.disconnect(vault, "gemini-cli", env)
+    assert any("gemini extensions uninstall openmymemo" in s for s in off.steps)
+    # `gemini extensions disable openmymemo` (user scope) writes a rule for the home folder and its subfolders;
+    # a rule for one project leaves it on everywhere else.
+    enablement = env.home / ".gemini/extensions/extension-enablement.json"
+    enablement.write_text(json.dumps({"openmymemo": {"overrides": [f"!{env.home}/work/*"]}}))
+    assert clients.app_status(vault, clients.get("gemini-cli"), env)["via"] == "plugin"
+    enablement.write_text(json.dumps({"openmymemo": {"overrides": [f"!{env.home}/*"]}}))
+    assert clients.app_status(vault, clients.get("gemini-cli"), env)["via"] is None
+    enablement.write_text(json.dumps({"openmymemo": {"overrides": [f"!{env.home}/*", f"{env.home}/*"]}}))
+    assert clients.app_status(vault, clients.get("gemini-cli"), env)["via"] == "plugin"  # the last rule wins
+
+
 # ---- Codex: TOML and the session hook ----------------------------------------------------------------------
 
 
