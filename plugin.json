@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "openmymemo",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Your AI memory as a local folder you own. Codex starts each session with it and writes what it learns; you see every change and can undo it.",
   "author": { "name": "MyMemo", "url": "https://github.com/MyMemoAI/openmymemo" },
   "homepage": "https://github.com/MyMemoAI/openmymemo",
