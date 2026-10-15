@@ -19,6 +19,7 @@ def test_versions_match_everywhere():
     version = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
     assert load(".claude-plugin/plugin.json")["version"] == version
     assert load("plugin.json")["version"] == version
+    assert load("gemini-extension.json")["version"] == version
     assert load("integrations/claude-desktop/manifest.json")["version"] == version
     assert load("web/package.json")["version"] == version
     assert load("desktop/package.json")["version"] == version
@@ -83,3 +84,19 @@ def test_the_privacy_policy_is_where_directories_look_for_it():
     policies = load("integrations/claude-desktop/manifest.json")["privacy_policies"]
     assert policies == ["https://github.com/MyMemoAI/openmymemo/blob/main/PRIVACY.md"]
     assert policies[0] in readme and (ROOT / "PRIVACY.md").is_file()
+
+
+def test_gemini_extension_runs_the_plugin_server_and_carries_the_instructions():
+    from openmymemo.mcp_server import INSTRUCTIONS
+
+    ext = load("gemini-extension.json")
+    claude = load(".claude-plugin/plugin.json")["mcpServers"]["openmymemo"]["args"]
+    args = ext["mcpServers"]["openmymemo"]["args"]
+    assert args == [a.replace("${CLAUDE_PLUGIN_ROOT}", "${extensionPath}").replace("claude-code", "gemini-cli")
+                    for a in claude]
+    # Gemini CLI loads this file into every session; it repeats the server's instructions for clients that
+    # don't show those to the model.
+    context = (ROOT / ext["contextFileName"]).read_text()
+    assert " ".join(INSTRUCTIONS.split()) in " ".join(context.split())
+    # A GEMINI.md at the root would also load for anyone running Gemini CLI inside this repository.
+    assert not (ROOT / "GEMINI.md").exists()
