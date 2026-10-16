@@ -39,7 +39,9 @@ _NOISE = {
 }
 _BULLET = re.compile(r"^\s*(?:[-*+•·▪●◦]|\d+[.)、]|\(\d+\))\s+")
 _DATED = re.compile(r"^\s*\[?(\d{4}-\d{2}(?:-\d{2})?)\]?\s*[–—:\-]+\s*(.+)$")
-_HEADING = re.compile(r"^\s*(?:#{1,6}\s+(.+?)\s*#*|\*\*(.+?)\*\*:?)\s*$")
+# The # form takes the rest of the line and _heading_text trims it: a lazy `(.+?)\s*#*\s*$` backtracks
+# over every split of a long run of spaces (CodeQL py/polynomial-redos).
+_HEADING = re.compile(r"^\s*(?:#{1,6}\s+(.+)|\*\*(.+?)\*\*:?\s*)$")
 
 
 @dataclass
@@ -58,9 +60,16 @@ class ImportItem:
         return asdict(self)
 
 
+def _heading_text(text: str) -> str:
+    """A # heading's text without the closing #s and spaces, keeping at least its first character."""
+    return text.rstrip().rstrip("#").rstrip() or text[:1]
+
+
 def _clean(line: str) -> str:
     line = _BULLET.sub("", line).strip()
-    line = re.sub(r"\s*\^[a-z0-9-]+$", "", line)
+    # A trailing block id (`^abc`), then the space before it. `\s*\^…$` would rescan a long run of spaces from
+    # every position, so a pasted line full of spaces took seconds (CodeQL py/polynomial-redos).
+    line = re.sub(r"\^[a-z0-9-]+$", "", line).rstrip()
     return line.strip(" \t\"“”")
 
 
@@ -85,7 +94,7 @@ def parse(source: str, text: str) -> list[ImportItem]:
             continue
         h = _HEADING.match(raw)
         if h and not _BULLET.match(raw):
-            hint = (h.group(1) or h.group(2)).strip()
+            hint = (_heading_text(h.group(1)) if h.group(1) else h.group(2)).strip()
             continue
         line = raw.strip()
         if not line or line.lower().strip(":：") in _NOISE or len(line) < 3:
