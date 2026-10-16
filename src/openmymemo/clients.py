@@ -162,6 +162,8 @@ class Client:
     restore_args: Callable[[dict], list[str]] | None = None  # cli: puts a removed entry back as it was
     plugin: Callable[[Env], str | None] | None = None  # names our plugin when it is installed there
     plugin_where: str = ""  # where the person removes that plugin
+    # The plugin always serves ~/OpenMyMemo, and an entry in `config` takes precedence over it (Gemini CLI).
+    plugin_home_only: bool = False
     session: bool = False  # a CLI: "start a new session" rather than "restart the app"
     restart_as: str = ""  # what to restart, when it isn't `name`
     note: str = ""
@@ -490,7 +492,7 @@ def app_status(vault: Vault, client: Client, env: Env, known: dict | None = None
     connector = known.get(client.id)
     active = connector is not None and not connector.revoked_at
     entry = configured(client, env)
-    plugin = client.plugin(env) if client.plugin else None
+    plugin = _plugin(client, vault, env)
     # Apps whose settings we can't read count as connected once their connector exists.
     via = "plugin" if plugin else "config" if entry else "connector" if active and client.config is None else None
     return {
@@ -714,7 +716,7 @@ def connect(vault: Vault, app_id: str, env: Env | None = None) -> Result:
                                 "for an HTTP config with a token), or \"Add another app\" in the panel. Or paste this "
                                 "into any app that runs MCP servers, with my-app changed to a short name for it:",
                       snippet=snippet(client, cmd))
-    plugin = client.plugin(env) if client.plugin else None
+    plugin = _plugin(client, vault, env)
     try:
         if plugin:
             result = Result("done", f"{client.name} is connected through {plugin}.")
@@ -780,7 +782,7 @@ def disconnect(vault: Vault, app_id: str, env: Env | None = None) -> Result:
             result.changed = codex.remove(path) or result.changed
         except (VaultError, OSError, ValueError) as e:  # access is still revoked below
             result.steps.append(f"OpenMyMemo couldn't check for its session hook: {_problem(path, e)}")
-    if plugin := (client.plugin(env) if client.plugin else None):
+    if plugin := _plugin(client, vault, env):
         where = f" ({client.plugin_where})" if client.plugin_where else ""
         result.steps.append(f"{client.name} still has {plugin}. Remove it there{where}; until then it asks for "
                             "your memory and is turned away.")
@@ -834,6 +836,42 @@ def _codex_plugin(env: Env) -> str | None:
     cache = env.codex_home.joinpath(*codex.PLUGIN_CACHE)
     found = cache.is_dir() and any(p.is_dir() for p in cache.iterdir())
     return "the OpenMyMemo plugin" if found else None
+
+
+def _gemini_extension(env: Env) -> str | None:
+    """The Gemini CLI extension: ~/.gemini/extensions/openmymemo/, unless `gemini extensions disable` turned it off
+    for the whole home folder. Each rule in extension-enablement.json is a folder (`!` to disable, `*` for its
+    subfolders too) and the last one that matches wins (gemini-cli packages/cli/src/config/extensions/)."""
+    extensions = env.home / ".gemini/extensions"
+    if _json_file(extensions / ENTRY / "gemini-extension.json").get("name") != ENTRY:
+        return None
+    rules = _json_file(extensions / "extension-enablement.json").get(ENTRY)
+    rules = rules.get("overrides") if isinstance(rules, dict) else None
+
+    def slashed(p: str) -> str:
+        p = p.replace("\\", "/")
+        return ("" if p.startswith("/") else "/") + p + ("" if p.endswith("/") else "/")
+
+    home, enabled = slashed(str(env.home)), True
+    for rule in rules if isinstance(rules, list) else []:
+        if not isinstance(rule, str):
+            continue
+        base = rule.removeprefix("!")
+        subdirs = base.endswith("*")
+        base = slashed(base.removesuffix("*"))
+        if home == base or (subdirs and home.startswith(base)):
+            enabled = not rule.startswith("!")
+    return "the OpenMyMemo extension" if enabled else None
+
+
+def _plugin(client: Client, vault: Vault, env: Env) -> str | None:
+    """Our plugin in that app, when it is what serves this vault."""
+    if not client.plugin:
+        return None
+    if client.plugin_home_only and (vault.root != (env.home / "OpenMyMemo").resolve()
+                                    or configured(client, env) is not None):
+        return None  # another folder, or our config entry runs instead: Connect updates that entry
+    return client.plugin(env)
 
 
 def _json_or_jsonc(path: Path) -> Path:
@@ -915,10 +953,14 @@ CLIENTS: list[Client] = [
            dirs=(".codeium/windsurf", ".config/devin"), config=lambda e: e.config / "devin/mcp_config.json",
            where="Cascade's MCP settings (View raw config)", note="Devin Desktop"),
     # https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md (~/.gemini/settings.json)
+    # https://github.com/google-gemini/gemini-cli/blob/main/docs/extensions/reference.md (the extension; a server
+    # of the same name in settings.json takes precedence over the extension's)
     Client("gemini-cli", "Gemini CLI", "file",
            docs="https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md",
            site="https://github.com/google-gemini/gemini-cli", commands=("gemini",), dirs=(".gemini/settings.json",),
-           config=lambda e: e.home / ".gemini/settings.json", fmt="jsonc", session=True),
+           config=lambda e: e.home / ".gemini/settings.json", fmt="jsonc", session=True,
+           plugin=_gemini_extension, plugin_where="`gemini extensions uninstall openmymemo`",
+           plugin_home_only=True),
     # https://zed.dev/docs/ai/mcp: `context_servers` with a plain command in settings.json (JSONC, usually
     # with comments, which OpenMyMemo never rewrites: then it's the snippet).
     Client("zed", "Zed", "file", docs="https://zed.dev/docs/ai/mcp", site="https://zed.dev/download",

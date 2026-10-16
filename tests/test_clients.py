@@ -15,6 +15,7 @@ from openmymemo import appfiles, clients, codex
 from openmymemo.cli import app
 from openmymemo.connectors import Connectors, Revoked
 from openmymemo.snippets import command_for, stdio_command
+from openmymemo.vault import Vault
 from openmymemo.web import create_api
 
 H = {"X-OpenMyMemo": "1"}
@@ -593,6 +594,68 @@ def test_claude_code_plugin_counts_as_connected(vault, env):
         {"scope": "project", "projectPath": "/p"}]}}))
     (env.home / ".claude/settings.json").unlink()
     assert clients.app_status(vault, clients.get("claude-code"), env)["via"] is None  # only in one project
+
+
+def test_gemini_cli_with_the_extension_is_connected_without_a_config_entry(env):
+    vault = Vault.create(env.home / "OpenMyMemo")  # the folder the extension serves
+    ext = env.home / ".gemini/extensions/openmymemo"
+    ext.mkdir(parents=True)
+    (ext / "gemini-extension.json").write_text(json.dumps({"name": "openmymemo", "version": "0.2.4"}))
+    row = clients.app_status(vault, clients.get("gemini-cli"), env)
+    assert row["connected"] and row["via"] == "plugin" and row["plugin"] == "the OpenMyMemo extension"
+    result = clients.connect(vault, "gemini-cli", env)
+    assert result.status == "done" and "extension" in result.message and not result.changed
+    assert not (env.home / ".gemini/settings.json").exists()  # its entry would shadow the extension's server
+    off = clients.disconnect(vault, "gemini-cli", env)
+    assert any("gemini extensions uninstall openmymemo" in s for s in off.steps)
+    # `gemini extensions disable openmymemo` (user scope) writes a rule for the home folder and its subfolders;
+    # a rule for one project leaves it on everywhere else.
+    enablement = env.home / ".gemini/extensions/extension-enablement.json"
+    enablement.write_text(json.dumps({"openmymemo": {"overrides": [f"!{env.home}/work/*"]}}))
+    assert clients.app_status(vault, clients.get("gemini-cli"), env)["via"] == "plugin"
+    enablement.write_text(json.dumps({"openmymemo": {"overrides": [f"!{env.home}/*"]}}))
+    assert clients.app_status(vault, clients.get("gemini-cli"), env)["via"] is None
+    enablement.write_text(json.dumps({"openmymemo": {"overrides": [f"!{env.home}/*", f"{env.home}/*"]}}))
+    assert clients.app_status(vault, clients.get("gemini-cli"), env)["via"] == "plugin"  # the last rule wins
+
+
+def test_the_gemini_extension_doesnt_connect_another_folder(vault, env):
+    ext = env.home / ".gemini/extensions/openmymemo"
+    ext.mkdir(parents=True)
+    (ext / "gemini-extension.json").write_text(json.dumps({"name": "openmymemo"}))
+    assert clients.app_status(vault, clients.get("gemini-cli"), env)["via"] is None  # it serves ~/OpenMyMemo
+    result = clients.connect(vault, "gemini-cli", env)
+    assert result.status == "done" and result.changed
+    entry = json.loads((env.home / ".gemini/settings.json").read_text())["mcpServers"]["openmymemo"]
+    assert str(vault.root) in entry["args"]  # settings.json takes precedence over the extension's server
+    assert clients.app_status(vault, clients.get("gemini-cli"), env)["via"] == "config"
+    off = clients.disconnect(vault, "gemini-cli", env)
+    assert off.changed and not any("extension" in s for s in off.steps)
+
+
+def test_a_gemini_settings_entry_wins_over_the_extension(env):
+    home_vault, work = Vault.create(env.home / "OpenMyMemo"), Vault.create(env.home / "WorkMemory")
+    ext = env.home / ".gemini/extensions/openmymemo"
+    ext.mkdir(parents=True)
+    (ext / "gemini-extension.json").write_text(json.dumps({"name": "openmymemo"}))
+    settings = env.home / ".gemini/settings.json"
+    clients.connect(work, "gemini-cli", env)
+    # Back to ~/OpenMyMemo: Gemini CLI would keep running the entry for WorkMemory, so Connect must change it.
+    assert clients.app_status(home_vault, clients.get("gemini-cli"), env)["via"] == "config"
+    result = clients.connect(home_vault, "gemini-cli", env)
+    assert result.status == "done" and result.changed
+    args = json.loads(settings.read_text())["mcpServers"]["openmymemo"]["args"]
+    assert str(home_vault.root) in args and str(work.root) not in args
+    # An entry whose program is gone shows as broken, not as the extension, and Connect rewrites it.
+    entry = {"command": str(env.home / "gone/openmymemo"), "args": ["mcp"]}
+    settings.write_text(json.dumps({"mcpServers": {"openmymemo": entry}}))
+    row = clients.app_status(home_vault, clients.get("gemini-cli"), env)
+    assert row["via"] == "config" and row["broken"]
+    assert clients.connect(home_vault, "gemini-cli", env).changed
+    # Once the entry is gone, the extension serves ~/OpenMyMemo again.
+    off = clients.disconnect(home_vault, "gemini-cli", env)
+    assert off.changed and any("gemini extensions uninstall openmymemo" in s for s in off.steps)
+    assert clients.app_status(home_vault, clients.get("gemini-cli"), env)["via"] == "plugin"
 
 
 # ---- Codex: TOML and the session hook ----------------------------------------------------------------------
