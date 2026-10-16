@@ -49,9 +49,7 @@ OpenMyMemo's server listens only on `127.0.0.1`, so other devices cannot reach i
   - the libraries from PyPI (pypi.org and files.pythonhosted.org).
 
   These are ordinary download requests. Like any `uv` download, they carry `uv`'s usual client information, such as its version and your operating system. No memory is sent.
-- **Links you click.** The panel and the Mac app open documentation, download pages and install links in your browser or in the AI app they belong to.
-  - Most install links open the AI app directly (for example `cursor://` or `vscode:`).
-  - The Kiro install link is a web address on kiro.dev. It carries the command that starts OpenMyMemo, which includes the path of your memory folder and, with it, usually your user name.
+- **Links you click.** The panel and the Mac app open documentation and download pages in your browser. Install links open the AI app they belong to directly (for example `cursor://` or `vscode:`), never a website, because they carry the command that starts OpenMyMemo and with it the path of your memory folder.
 - **MyMemo Cloud**, only after you turn it on and link this computer (see below).
 
 ## MyMemo Cloud (optional)
