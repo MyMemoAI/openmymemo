@@ -39,9 +39,9 @@ _NOISE = {
 }
 _BULLET = re.compile(r"^\s*(?:[-*+•·▪●◦]|\d+[.)、]|\(\d+\))\s+")
 _DATED = re.compile(r"^\s*\[?(\d{4}-\d{2}(?:-\d{2})?)\]?\s*[–—:\-]+\s*(.+)$")
-# The # form takes the rest of the line and _heading_text trims it: a lazy `(.+?)\s*#*\s*$` backtracks
-# over every split of a long run of spaces (CodeQL py/polynomial-redos).
-_HEADING = re.compile(r"^\s*(?:#{1,6}\s+(.+)|\*\*(.+?)\*\*:?\s*)$")
+# The # form takes everything after the first space and _heading_text trims it: a lazy `\s+(.+?)\s*#*\s*$`
+# backtracks over every split of a long run of spaces (CodeQL py/polynomial-redos).
+_HEADING = re.compile(r"^\s*(?:#{1,6}\s(.+)|\*\*(.+?)\*\*:?\s*)$")
 
 
 @dataclass
@@ -61,7 +61,8 @@ class ImportItem:
 
 
 def _heading_text(text: str) -> str:
-    """A # heading's text without the closing #s and spaces, keeping at least its first character."""
+    """A # heading's text without the spaces around it and the closing #s, keeping at least one character."""
+    text = text.lstrip() or text[-1:]
     return text.rstrip().rstrip("#").rstrip() or text[:1]
 
 

@@ -30,7 +30,9 @@ import yaml
 ITEM_RE = re.compile(r"^([-*+])[ \t]+(.*)$")
 HR_RE = re.compile(r"^([-*_])([ \t]*\1){2,}[ \t]*$")
 ID_RE = re.compile(r"(?:^|[ \t])\^([A-Za-z0-9-]+)$")
-COMMENT_RE = re.compile(r"<!--(.*?)-->$")  # the spaces before it are rstripped; `[ \t]*` here rescanned them
+# The spaces before the comment are rstripped by the caller (a leading `[ \t]*` rescanned them). Lines never
+# hold a newline; DOTALL only says so to CodeQL's py/bad-tag-filter, which reads this as an HTML filter.
+COMMENT_RE = re.compile(r"<!--(.*?)-->$", re.DOTALL)
 FENCE_RE = re.compile(r"^ {0,3}(```|~~~)")
 H1_RE = re.compile(r"^#[ \t]+(.*)$")
 H2_RE = re.compile(r"^##[ \t]+(.*)$")

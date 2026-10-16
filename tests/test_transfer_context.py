@@ -300,7 +300,7 @@ def test_heading_and_item_patterns_match_the_old_lazy_ones_without_their_backtra
     old_h1 = re.compile(r"^#[ \t]+(.*?)[ \t]*#*[ \t]*$")
     old_h2 = re.compile(r"^##[ \t]+(.*?)[ \t]*#*[ \t]*$")
     old_heading = re.compile(r"^\s*(?:#{1,6}\s+(.+?)\s*#*|\*\*(.+?)\*\*:?)\s*$")
-    old_comment = re.compile(r"[ \t]*<!--(.*?)-->$")
+    old_comment = re.compile(r"[ \t]*<!--(.*?)-->$", re.DOTALL)  # DOTALL: as in mdfile, for CodeQL
 
     def same(old, new, line, text):
         o = old.match(line)
