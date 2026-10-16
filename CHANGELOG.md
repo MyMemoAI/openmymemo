@@ -4,6 +4,9 @@ What changed in each release, for people who use OpenMyMemo. Every release is al
 
 ## Unreleased
 
+- **`openmymemo doctor`.** Checks the setup and says what to fix: the memory folder and its state files, the panel's port, each AI app's connection (including one pointed at another folder) and MyMemo Cloud. It only reads, never changes anything, and leaves out memory text, so you can paste its output into an issue.
+- The Kiro install link no longer sends your memory folder's path to kiro.dev. `openmymemo connect kiro` still sets Kiro up.
+
 ## 0.2.4 — 2026-10-15
 
 - **The Mac app.** Download a disk image from the release, drag it to Applications and you're set: no terminal and no Python to install. It shows the panel in its own window, counts changes to review in the menu bar and notifies you when an AI app changes something.
