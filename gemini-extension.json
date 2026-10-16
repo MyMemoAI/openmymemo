@@ -1,6 +1,6 @@
 {
   "name": "openmymemo",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Your AI memory as a local folder you own. Gemini reads it and writes what it learns; you see every change and can undo it.",
   "mcpServers": {
     "openmymemo": {

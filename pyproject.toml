@@ -1,6 +1,6 @@
 [project]
 name = "openmymemo"
-version = "0.2.4"
+version = "0.2.5"
 description = "Your AI memory as a local folder: any model can read it over MCP, every change needs your approval."
 readme = "README.md"
 license = "Apache-2.0"
