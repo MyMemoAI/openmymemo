@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security problem
+    url: https://github.com/MyMemoAI/openmymemo/security/advisories/new
+    about: Please report vulnerabilities privately, not in a public issue. See SECURITY.md.
+  - name: Read the docs
+    url: https://github.com/MyMemoAI/openmymemo#readme
+    about: Install, connect AI apps and use the panel.
