@@ -107,7 +107,13 @@ def status(ctx: typer.Context) -> None:
 
 def _read_input(file: Path | None, source: str) -> str:
     if file and str(file) != "-":
-        return file.read_text(encoding="utf-8")
+        try:
+            return file.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            typer.secho(f"{file} isn't UTF-8 text. Export or copy the memories as text first.", fg="red", err=True)
+        except OSError as e:
+            typer.secho(f"Can't read {file}: {e.strerror or e}.", fg="red", err=True)
+        raise typer.Exit(1)
     if not sys.stdin.isatty():
         return sys.stdin.read()
     if sys.platform == "darwin":
@@ -225,9 +231,16 @@ def export(ctx: typer.Context,
            include_private: Annotated[bool, typer.Option(help="Include private topics and memories.")] = False,
            output: Annotated[Path | None, typer.Option("--output", "-o")] = None) -> None:
     """Export memories (e.g. to paste into Claude's or ChatGPT's memory)."""
+    if fmt not in transfer.EXPORT_FORMATS:
+        typer.secho(f"format must be one of {', '.join(transfer.EXPORT_FORMATS)}", fg="red", err=True)
+        raise typer.Exit(2)
     text = transfer.export(_vault(ctx), fmt, include_private=include_private)
     if output:
-        output.write_text(text, encoding="utf-8")
+        try:
+            output.write_text(text, encoding="utf-8")
+        except OSError as e:
+            typer.secho(f"Can't write {output}: {e.strerror or e}.", fg="red", err=True)
+            raise typer.Exit(1) from None
         typer.echo(f"Wrote {output}")
     else:
         typer.echo(text, nl=False)

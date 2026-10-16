@@ -321,3 +321,20 @@ def test_configs_name_uvx_when_openmymemo_runs_from_uvx(tmp_path, monkeypatch):
     (bin_dir / "uvx").write_text("#!/bin/sh\n")
     (bin_dir / "uvx").chmod(0o755)
     assert snippets.command_for(vault)[0] == str((cached / "bin" / "openmymemo").resolve())
+
+
+def test_import_and_export_report_file_problems_without_a_traceback(tmp_path, vault):
+    base = ["--vault", str(vault.root)]
+    missing = runner.invoke(app, [*base, "import", "chatgpt", str(tmp_path / "nope.txt")])
+    assert missing.exit_code == 1 and isinstance(missing.exception, SystemExit)
+    assert "Traceback" not in missing.output and f"Can't read {tmp_path / 'nope.txt'}" in missing.output
+    binary = tmp_path / "export.zip"
+    binary.write_bytes(b"PK\x03\x04\xff\xfe")
+    r = runner.invoke(app, [*base, "import", "chatgpt", str(binary)])
+    assert r.exit_code == 1 and "isn't UTF-8 text" in r.output
+
+    bad = runner.invoke(app, [*base, "export", "--format", "csv"])
+    assert bad.exit_code == 2 and "format must be one of markdown, claude, chatgpt, json" in bad.output
+    vault.add("work", "CTO at Acme")
+    nowhere = runner.invoke(app, [*base, "export", "-o", str(tmp_path / "no/such/dir/out.md")])
+    assert nowhere.exit_code == 1 and f"Can't write {tmp_path / 'no/such/dir/out.md'}" in nowhere.output
