@@ -4,6 +4,8 @@ What changed in each release, for people who use OpenMyMemo. Every release is al
 
 ## Unreleased
 
+## 0.2.5 — 2026-10-15
+
 - **`openmymemo doctor`.** Checks the setup and says what to fix: the memory folder and its state files, the panel's port, each AI app's connection (including one pointed at another folder) and MyMemo Cloud. It only reads, never changes anything, and leaves out memory text, so you can paste its output into an issue.
 - The Kiro install link no longer sends your memory folder's path to kiro.dev. `openmymemo connect kiro` still sets Kiro up.
 
