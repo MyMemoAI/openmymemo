@@ -852,9 +852,17 @@ mod tests {
         assert!(busy.join(READY).exists(), "the environment a server runs from stays");
         assert!(!idle.exists() && previous.exists());
 
-        // Once that server is gone, the next update's clean-up removes it.
+        // Once that server is gone, the next update's clean-up removes it. Tests run in parallel and spawn
+        // processes: one forked while `held` is open shares its lock until its exec closes the descriptor, so
+        // clean up again for a moment, as the next update would.
         drop(held);
-        collect_garbage(&root.join("support/venvs"), &[core.ready.as_deref().unwrap(), &previous]);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while busy.exists() && Instant::now() < deadline {
+            collect_garbage(&root.join("support/venvs"), &[core.ready.as_deref().unwrap(), &previous]);
+            if busy.exists() {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
         assert!(!busy.exists());
     }
 
