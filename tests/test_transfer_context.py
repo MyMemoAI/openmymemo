@@ -1,4 +1,5 @@
 import json
+import time
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
@@ -61,6 +62,14 @@ def test_parse_claude_dated_list():
         ("2026-03-05", "Prefers TypeScript over JavaScript for new projects"),
         (None, "[unknown] - Lives in San Francisco"),
     ]
+
+
+def test_parse_strips_block_ids_and_stays_fast_on_long_runs_of_spaces():
+    items = transfer.parse("text", "- Likes tea ^ab12\n- Likes coffee\u3000^cd34\n- Uses Vim^ef56")
+    assert [i.content for i in items] == ["Likes tea", "Likes coffee", "Uses Vim"]
+    start = time.perf_counter()
+    transfer.parse("text", "abc" + " " * 100_000 + "x")  # quadratic before: about 15 seconds
+    assert time.perf_counter() - start < 1
 
 
 def _import(vault, source, text):
@@ -279,3 +288,49 @@ def test_custom_topic_uses_description_words(vault):
 
     vault.add_topic("garden", "Garden", "Plants, vegetables, composting and the greenhouse")
     assert classify_topic("Grows tomatoes in the greenhouse", vault.topics())[0] == "garden"
+
+
+def test_heading_and_item_patterns_match_the_old_lazy_ones_without_their_backtracking():
+    import itertools
+    import re
+
+    from openmymemo import mdfile
+
+    old_item = re.compile(r"^([-*+])[ \t]+(.*?)[ \t]*$")
+    old_h1 = re.compile(r"^#[ \t]+(.*?)[ \t]*#*[ \t]*$")
+    old_h2 = re.compile(r"^##[ \t]+(.*?)[ \t]*#*[ \t]*$")
+    old_heading = re.compile(r"^\s*(?:#{1,6}\s+(.+?)\s*#*|\*\*(.+?)\*\*:?)\s*$")
+    old_comment = re.compile(r"[ \t]*<!--(.*?)-->$", re.DOTALL)  # DOTALL: as in mdfile, for CodeQL
+
+    def same(old, new, line, text):
+        o = old.match(line)
+        n = new.match(line)
+        assert bool(o) == bool(n), line
+        if o:
+            assert o.group(1 if old is not old_item else 2) == text(n), line
+
+    for size in range(7):
+        for tail in itertools.product("# \ta*:", repeat=size):
+            tail = "".join(tail)
+            same(old_item, mdfile.ITEM_RE, "-" + tail, lambda m: m.group(2).rstrip(" \t"))
+            same(old_h1, mdfile.H1_RE, "#" + tail, mdfile._heading)
+            same(old_h2, mdfile.H2_RE, "##" + tail, mdfile._heading)
+            line = "#" + tail
+            o, n = old_heading.match(line), transfer._HEADING.match(line)
+            assert bool(o) == bool(n), line
+            if o:
+                got = transfer._heading_text(n.group(1)) if n.group(1) else n.group(2)
+                assert (o.group(1) or o.group(2)) == got, line
+            line = "**" + tail
+            o, n = old_heading.match(line), transfer._HEADING.match(line)
+            assert bool(o) == bool(n) and (not o or o.group(2) == n.group(2)), line
+            line = tail.replace("*", "<!--").replace(":", "-->")
+            o, n = old_comment.search(line), mdfile.COMMENT_RE.search(line)
+            assert bool(o) == bool(n) and (not o or (o.group(1), line[: o.start()].rstrip())
+                                           == (n.group(1), line[: n.start()].rstrip())), line
+
+    start = time.perf_counter()
+    for line in ("# a" + " " * 50_000 + "x", "## a" + " " * 50_000 + "x", "- a" + " " * 50_000 + "x"):
+        mdfile.MemoryFile(line + "\n")
+        transfer.parse("text", line)
+    assert time.perf_counter() - start < 1  # the old patterns took minutes on one of these

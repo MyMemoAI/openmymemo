@@ -24,14 +24,25 @@ from dataclasses import dataclass, field
 
 import yaml
 
-ITEM_RE = re.compile(r"^([-*+])[ \t]+(.*?)[ \t]*$")
+# Items and headings take the rest of the line greedily; the parser trims trailing spaces and _heading closing #s.
+# A lazy `(.*?)` before `[ \t]*…$` backtracks over every split of a long run of spaces (seconds for a
+# 2,000-space heading), which is the shape CodeQL flags as polynomial-redos.
+ITEM_RE = re.compile(r"^([-*+])[ \t]+(.*)$")
 HR_RE = re.compile(r"^([-*_])([ \t]*\1){2,}[ \t]*$")
 ID_RE = re.compile(r"(?:^|[ \t])\^([A-Za-z0-9-]+)$")
-COMMENT_RE = re.compile(r"[ \t]*<!--(.*?)-->$")
+# The spaces before the comment are rstripped by the caller (a leading `[ \t]*` rescanned them). Lines never
+# hold a newline; DOTALL only says so to CodeQL's py/bad-tag-filter, which reads this as an HTML filter.
+COMMENT_RE = re.compile(r"<!--(.*?)-->$", re.DOTALL)
 FENCE_RE = re.compile(r"^ {0,3}(```|~~~)")
-H1_RE = re.compile(r"^#[ \t]+(.*?)[ \t]*#*[ \t]*$")
-H2_RE = re.compile(r"^##[ \t]+(.*?)[ \t]*#*[ \t]*$")
+H1_RE = re.compile(r"^#[ \t]+(.*)$")
+H2_RE = re.compile(r"^##[ \t]+(.*)$")
 QUOTE_RE = re.compile(r"^>[ \t]?(.*)$")
+
+
+def _heading(m: re.Match) -> str:
+    """A heading's text without the optional closing #s (`## Work ##`) and the spaces around them."""
+    return m.group(1).rstrip(" \t").rstrip("#").rstrip(" \t")
+
 
 ATTR_KEYS = ("until", "private")
 FRONTMATTER_KEYS = ("type", "title", "description", "group", "private")  # written first, in this order
@@ -179,13 +190,13 @@ class MemoryFile:
 
             h2 = H2_RE.match(line)
             if h2:
-                section = h2.group(1).strip()
+                section = _heading(h2).strip()
                 self.sections.append((section, i))
                 continue
             h1 = H1_RE.match(line)
             if h1:
                 if self.heading_title is None and not self.items and not self.sections:
-                    self.heading_title = h1.group(1).strip()
+                    self.heading_title = _heading(h1).strip()
                     self.title_line = i
                     collecting_desc = True
                 continue
@@ -193,7 +204,7 @@ class MemoryFile:
                 continue
             im = ITEM_RE.match(line)
             if im:
-                content, item_id, attrs = parse_item_body(im.group(2))
+                content, item_id, attrs = parse_item_body(im.group(2).rstrip(" \t"))
                 if content:
                     self.items.append(Item(i, content, item_id, attrs, section, im.group(1)))
         if desc_lines:
