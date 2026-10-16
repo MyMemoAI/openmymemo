@@ -528,6 +528,27 @@ def apps_(ctx: typer.Context) -> None:
         typer.echo("ChatGPT and claude.ai on the web: openmymemo cloud link (needs a MyMemo account)")
 
 
+@app.command()
+def doctor(ctx: typer.Context,
+           port: Annotated[int, typer.Option(help="The panel's port.")] = DEFAULT_PORT) -> None:
+    """Check the setup: the memory folder, uv, the panel and each AI app. Prints no memories."""
+    from . import doctor as doc
+
+    checks = doc.run(Path(ctx.obj["vault"]), port, _panel_for)
+    marks = {"ok": ("✓", "green"), "info": ("·", None), "warn": ("!", "yellow"), "fail": ("✗", "red")}
+    for c in checks:
+        mark, color = marks[c.level]
+        typer.secho(f"{mark} {_pad(c.area, 16)} {c.message}", fg=color)
+        if c.fix and c.level != "ok":
+            typer.echo(f"  {' ' * 16} → {c.fix}")
+    problems = [c for c in checks if c.level in ("warn", "fail")]
+    typer.echo("\nNo problems found." if not problems else
+               f"\n{len(problems)} thing{'s' if len(problems) > 1 else ''} to look at. Paths above can include your user "
+               "name; check before posting this anywhere.")
+    if any(c.level == "fail" for c in checks):
+        raise typer.Exit(1)
+
+
 def _print_result(result) -> None:
     color = {"done": "green", "manual": "yellow", "error": "red"}[result.status]
     typer.secho(result.message, fg=color, err=result.status == "error")

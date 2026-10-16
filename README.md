@@ -60,7 +60,7 @@ openmymemo serve                             # open the panel at http://127.0.0.
 openmymemo review                            # what AI changed since you last looked: keep, edit or undo
 ```
 
-`connect` edits only the app's own MCP config (keeping a backup) or runs the app's own `mcp add` command, and tells you to restart the app; where it can't do that safely it prints the config to paste. More: `status`, `approval on|off` (on: every AI change waits for you), `context --connector <id>` (what an AI actually receives), `export --format claude|chatgpt|markdown|json`, `search`, `add`, `connector add|list|config|rotate|remove` (configs by hand), `setup codex` (load your memory at the start of every Codex session). Use `--vault` or `OPENMYMEMO_HOME` to put the folder elsewhere.
+`connect` edits only the app's own MCP config (keeping a backup) or runs the app's own `mcp add` command, and tells you to restart the app; where it can't do that safely it prints the config to paste. More: `doctor` (checks the setup and says what to fix when an app doesn't see your memory; it prints no memories), `status`, `approval on|off` (on: every AI change waits for you), `context --connector <id>` (what an AI actually receives), `export --format claude|chatgpt|markdown|json`, `search`, `add`, `connector add|list|config|rotate|remove` (configs by hand), `setup codex` (load your memory at the start of every Codex session). Use `--vault` or `OPENMYMEMO_HOME` to put the folder elsewhere.
 
 #### Plugins
 
