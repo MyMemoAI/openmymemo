@@ -4,7 +4,7 @@ Your AI memory as a plain folder on your own computer. See exactly what models r
 
 <!-- mcp-name: io.github.MyMemoAI/openmymemo -->
 
-> v0.2. Product design and status: [docs/product-design.md](https://github.com/MyMemoAI/openmymemo/blob/main/docs/product-design.md). The folder format, for any tool that wants to read or write it: [docs/MEMORY_FORMAT.md](https://github.com/MyMemoAI/openmymemo/blob/main/docs/MEMORY_FORMAT.md).
+> v0.2. What changed in each release: [CHANGELOG.md](https://github.com/MyMemoAI/openmymemo/blob/main/CHANGELOG.md). Product design and status: [docs/product-design.md](https://github.com/MyMemoAI/openmymemo/blob/main/docs/product-design.md). The folder format, for any tool that wants to read or write it: [docs/MEMORY_FORMAT.md](https://github.com/MyMemoAI/openmymemo/blob/main/docs/MEMORY_FORMAT.md).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/MyMemoAI/openmymemo/main/docs/images/panel-memories-dark.png">
@@ -100,6 +100,7 @@ From your next new session on, Codex starts with your memory. The plugin also ad
 #### Connecting AI apps by hand
 
 - **Local process (recommended):** Claude Desktop, Claude Code, Cursor, Codex and other stdio MCP clients. `openmymemo connect <app>` writes the app's config for you (`openmymemo apps` lists them); for anything else, `openmymemo connector add <name>` prints a config with absolute paths to paste in. Give each app its own `--connector` so permissions and logs stay separate.
+- **From the MCP Registry:** OpenMyMemo is listed in the official [MCP Registry](https://registry.modelcontextprotocol.io) as `io.github.MyMemoAI/openmymemo`, so MCP clients that browse it can install it from there (it runs with `uvx`).
 - **Local HTTP:** `openmymemo connector add <name> --http` creates a token (shown once) for use with `openmymemo serve` at `http://127.0.0.1:8787/mcp`.
 - ChatGPT chat (web, desktop and mobile) and claude.ai on the web can only reach MCP servers on the public internet, so they aren't supported yet. On the OpenAI side, Codex works today, including the Codex built into the ChatGPT desktop app.
 
@@ -112,7 +113,8 @@ Tools AI apps see: `memory_context`, `memory_search`, `memory_get`, `memory_prop
 | Claude Desktop (Chat, Cowork and Code) | ✅ Extension |
 | Claude Code | ✅ Plugin |
 | Codex (the CLI, and Codex in the ChatGPT desktop app) | ✅ Plugin |
-| Cursor, VS Code and other MCP apps | ✅ One click in the app, `openmymemo connect`, or a config to paste |
+| Gemini CLI | ✅ Extension |
+| Cursor, VS Code, Zed, Cline, Kiro, LM Studio, opencode, GitHub Copilot CLI and other MCP apps | ✅ One click in the app, `openmymemo connect`, or a config to paste (`openmymemo apps` lists them all) |
 | ChatGPT chat (web, desktop and mobile), claude.ai on the web | ❌ Not yet. They can only connect to MCP servers on the public internet, and OpenMyMemo stays on your computer. You can still bring your ChatGPT memories over with `openmymemo import chatgpt`. |
 
 ## Principles
@@ -184,6 +186,13 @@ CI=true pnpm tauri build --bundles app,dmg  # → desktop/src-tauri/target/relea
 ```
 
 Local builds are signed ad hoc, so macOS asks once before opening them (see [The Mac app](#the-mac-app)); the release workflow signs and notarizes when the Apple Developer secrets are set (`.github/workflows/release.yml` lists them). `CI=true` makes Tauri skip the Finder scripting that lays out the disk image window, which otherwise asks for permission to control Finder. On every start the app writes the `openmymemo` launcher AI apps run to `~/Library/Application Support/ai.mymemo.openmymemo/bin/`; it keeps working when the app is moved. The server's log is in `~/Library/Logs/ai.mymemo.openmymemo/core.log`.
+
+## Help and contributing
+
+- **Something not working?** Run `openmymemo doctor`. It checks the memory folder, uv, the panel and each AI app, and says what to fix, without printing your memories. If that doesn't solve it, [open an issue](https://github.com/MyMemoAI/openmymemo/issues/new/choose) and paste its output.
+- **Ideas and questions** are welcome as issues too. Bigger changes start as a proposal.
+- **Contributing:** see [CONTRIBUTING.md](https://github.com/MyMemoAI/openmymemo/blob/main/CONTRIBUTING.md) for how to set up, test and send a pull request.
+- **Where OpenMyMemo is published and listed:** [docs/distribution.md](https://github.com/MyMemoAI/openmymemo/blob/main/docs/distribution.md).
 
 ## Relationship to MyMemo
 
