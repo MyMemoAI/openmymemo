@@ -919,6 +919,8 @@ CLIENTS: list[Client] = [
     # read here for status but only ever changed through its own command.
     Client("claude-code", "Claude Code", "cli", docs="https://code.claude.com/docs/en/mcp",
            site="https://code.claude.com/docs/en/setup", commands=("claude",), dirs=(".claude",),
+           # The VS Code and Cursor extension brings its own CLI; without `claude` on PATH Connect gives the command.
+           installs=(".vscode/extensions/anthropic.claude-code-*", ".cursor/extensions/anthropic.claude-code-*"),
            config=lambda e: e.home / ".claude.json", entry=_typed,
            # `--env` takes any number of values, so an option must follow them before the server's name.
            add_args=lambda cmd, env: ["mcp", "add", "--scope", "user",
@@ -983,7 +985,10 @@ CLIENTS: list[Client] = [
     Client("cline", "Cline", "file", docs="https://docs.cline.bot/mcp/adding-and-configuring-servers",
            site="https://cline.bot", commands=("cline",),
            dirs=(".cline",),
-           installs=(".vscode/extensions/saoudrizwan.claude-dev-*", ".cursor/extensions/saoudrizwan.claude-dev-*"),
+           installs=(".vscode/extensions/saoudrizwan.claude-dev-*", ".cursor/extensions/saoudrizwan.claude-dev-*",
+                     *(f"{base}/JetBrains/*/{sub}[Cc]line*" for base, sub in (  # the JetBrains plugin
+                         ("Library/Application Support", "plugins/"), ("AppData/Roaming", "plugins/"),
+                         (".local/share", "")))),
            config=lambda e: e.home / ".cline/data/settings/cline_mcp_settings.json"),
     # https://lmstudio.ai/docs/app/mcp (Cursor's notation, the deeplink) and https://lmstudio.ai/blog/mcp (the path)
     Client("lm-studio", "LM Studio", "file", docs="https://lmstudio.ai/docs/app/mcp", site="https://lmstudio.ai",

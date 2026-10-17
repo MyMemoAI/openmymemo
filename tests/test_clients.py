@@ -796,11 +796,19 @@ def test_settings_left_behind_by_an_uninstall_dont_count_as_installed(vault, env
         (env.home / ext).mkdir(parents=True)
     rows = {r["id"]: r for r in clients.catalog(vault, env)}
     assert {i for i, r in rows.items() if r["installed"]} == {"codex", "cline"}
+    # extension-only installs of Claude Code (VS Code, Cursor) and Cline (a JetBrains IDE): no command, no entry
+    for ext in (".cursor/extensions/saoudrizwan.claude-dev-3.40.0", ".vscode/extensions/openai.chatgpt-26.1.0"):
+        (env.home / ext).rmdir()
+    (env.home / ".vscode/extensions/anthropic.claude-code-2.1.0").mkdir(parents=True)
+    (env.home / "Library/Application Support/JetBrains/PyCharm2026.2/plugins/cline").mkdir(parents=True)
+    rows = {r["id"]: r for r in clients.catalog(vault, env)}
+    assert {i for i, r in rows.items() if r["installed"]} == {"claude-code", "cline"}
+    assert not rows["claude-code"]["connected"] and not rows["cline"]["connected"]
     # Outside macOS there's no app bundle to find, so an app with no command still goes by its folder
     linux = clients.Env(home=env.home, system="linux", bin_dirs=env.bin_dirs, app_dirs=())
     found = {c.id for c in clients.CLIENTS if clients.installed(c, linux)}
     assert {"claude-desktop", "trae", "warp", "antigravity"} <= found
-    assert not found & {"cursor", "kiro", "claude-code", "opencode", "lm-studio", "zed", "gemini-cli"}
+    assert not found & {"cursor", "kiro", "opencode", "lm-studio", "zed", "gemini-cli"}
 
 
 def test_env_current_looks_beyond_the_shell_path(tmp_path, monkeypatch):
