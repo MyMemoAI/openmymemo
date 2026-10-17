@@ -1,6 +1,6 @@
 [package]
 name = "openmymemo-desktop"
-version = "0.2.5"
+version = "0.2.6"
 description = "OpenMyMemo for Mac: your AI memory folder, its panel and a menu-bar item"
 authors = ["MyMemo <leo@mymemo.ai>"]
 license = "Apache-2.0"
