@@ -29,7 +29,11 @@ DEFAULT_PRIVATE = ["health", "finance"]
 IMPORTED_GROUP = "imported"
 IMPORTED_GROUP_NAME = "Imported"
 IMPORT_SOURCE_NAMES = {"chatgpt": "ChatGPT", "claude": "Claude", "gemini": "Gemini", "text": "text",
-                       "markdown": "Markdown", "json": "JSON"}
+                       "markdown": "Markdown", "json": "JSON",
+                       # memory and instruction files read from disk (memfiles.py)
+                       "claude-code": "Claude Code", "codex": "Codex", "gemini-cli": "Gemini CLI", "cursor": "Cursor",
+                       "windsurf": "Windsurf", "cline": "Cline", "copilot": "GitHub Copilot", "kiro": "Kiro",
+                       "file": "memory files"}
 
 # Topics whose content goes first in what an AI sees.
 CONTEXT_PRIORITY = ["how-to-work-with-me", "identity", "work", "projects", "goals"]

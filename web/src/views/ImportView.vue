@@ -2,16 +2,18 @@
 import { ref } from "vue";
 import { api } from "../api";
 import AppIcon from "../components/AppIcon.vue";
+import ImportFiles from "../components/ImportFiles.vue";
 import ImportPaste from "../components/ImportPaste.vue";
 import PageHeader from "../components/PageHeader.vue";
 import SortDialog from "../components/SortDialog.vue";
 import { t, tn } from "../i18n";
 import { copy, importTopicTitle, topicsBySlug, topicTitle } from "../store";
 
-const SOURCES = ["chatgpt", "claude", "gemini", "markdown", "json"] as const;
+const SOURCES = ["chatgpt", "claude", "gemini", "files", "markdown", "json"] as const;
 const source = ref<(typeof SOURCES)[number]>("chatgpt");
-/** After an import: how many landed in the from-<source> topic, and how many in topics the source named. */
-const done = ref<{ slug: string; n: number; named: number } | null>(null);
+/** After an import: its source (a file names its own), how many landed in the from-<source> topic, and how many
+ * in topics the source named. */
+const done = ref<{ source: string; slug: string; n: number; named: number } | null>(null);
 const sorting = ref<string | null>(null);
 
 const exportFormat = ref<"markdown" | "claude" | "chatgpt" | "json">("claude");
@@ -58,7 +60,7 @@ function download() {
         <div class="flex gap-3">
           <AppIcon name="changes" :size="22" class="mt-px text-fresh" />
           <div class="space-y-0.5">
-            <p class="font-semibold">{{ tn("imp.done", done.n, { topic: importTopicTitle(source) }) }}</p>
+            <p class="font-semibold">{{ tn("imp.done", done.n, { topic: importTopicTitle(done.source) }) }}</p>
             <p v-if="done.named" class="text-[13px] text-muted">{{ tn("imp.doneNamed", done.named) }}</p>
             <p v-if="done.n" class="text-[13px] text-muted">{{ t("imp.doneHint") }}</p>
           </div>
@@ -74,7 +76,8 @@ function download() {
 
       <template v-else>
         <p class="text-[13px] text-muted">{{ t(`imp.help.${source}`) }}</p>
-        <ImportPaste :source="source" @imported="done = $event" />
+        <ImportFiles v-if="source === 'files'" @imported="done = $event" />
+        <ImportPaste v-else :source="source" @imported="done = { source, ...$event }" />
       </template>
       <SortDialog v-if="sorting" :topic="sorting" @close="sorting = null" />
     </section>

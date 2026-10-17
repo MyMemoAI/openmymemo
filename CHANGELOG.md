@@ -4,6 +4,7 @@ What changed in each release, for people who use OpenMyMemo. Every release is al
 
 ## Unreleased
 
+- **Import from files.** The Import page has a Files tab that finds the memory files other AI apps keep on your computer and imports them after a preview. It looks in your home folder or a folder you pick, or you can choose a file. It knows `CLAUDE.md`, Claude Code's auto memory, `AGENTS.md`, `GEMINI.md`, Cursor and Windsurf rules, Cline rules and memory bank, Copilot instructions, Kiro steering files and `memory.md`. Each list item or paragraph becomes a memory, in a topic named after the app. From the terminal: `openmymemo import auto <file>`.
 - AI apps you've uninstalled no longer show as installed. Their settings folders stay behind after an uninstall, and some are shared: Gemini Code Assist and Antigravity also write `~/.gemini`, so Gemini CLI showed up without being installed. An app now counts as installed when its app, its command or its editor extension is there. On Windows and Linux, an app that has no command to look for, such as Claude Desktop, still goes by its settings folder.
 
 ## 0.2.5 — 2026-10-15

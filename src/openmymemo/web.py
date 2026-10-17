@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import socket
 import threading
 import urllib.request
@@ -27,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel
 
-from . import __version__, clients, transfer
+from . import __version__, clients, memfiles, transfer
 from .cloud import CALLBACK_HEADERS, Cloud, CloudError, SettingLocked, callback_page
 from .connectors import Connector, Connectors
 from .context import compile_context
@@ -106,6 +107,13 @@ class ConnectorPatch(BaseModel):
 class ImportPreviewIn(BaseModel):
     source: str
     text: str
+
+
+class ImportFileIn(BaseModel):
+    """A memory file to preview: a ``path`` OpenMyMemo reads, or one the browser read (``name`` and ``text``)."""
+    path: str | None = None
+    name: str | None = None
+    text: str | None = None
 
 
 class ImportCommitIn(BaseModel):
@@ -464,6 +472,66 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
         return [i.to_dict() for i in transfer.plan(vault, items)]
+
+    # The panel reads other apps' memory files only in the home folder, so a request can't point it at the rest
+    # of the disk: each route resolves the path (`~`, `..`, symlinks) and checks the prefix itself, inline, which
+    # is also the shape CodeQL's py/path-injection recognizes as a check.
+    outside_home = "Choose a file or folder inside your home folder."
+
+    def resolved(path: str) -> str:
+        return os.path.normpath(os.path.realpath(os.path.expanduser(path.strip() or "~")))
+
+    def home_dir() -> str:
+        return os.path.realpath(Path.home())
+
+    def logical(path: str) -> Path:
+        """The path as typed, without resolving symlinks: an app's folder can link to a file elsewhere in home,
+        and the folder is what says which app it is."""
+        return Path(os.path.normpath(os.path.expanduser(path.strip() or "~")))
+
+    def past_home(real: str, home: str) -> bool:
+        """``real`` starts with ``home`` but only as a longer name (``/Users/ann2`` for ``/Users/ann``)."""
+        return real[len(home):len(home) + 1] not in ("", os.sep)
+
+    @api.get("/api/import/files")
+    def import_files(path: str = "") -> dict:
+        """The memory files of other AI apps at a path in the home folder (a file or a folder; the home folder
+        itself when empty)."""
+        real, home = resolved(path), home_dir()
+        if not real.startswith(home) or past_home(real, home):
+            raise HTTPException(400, outside_home)
+        root = Path(real)
+        try:
+            found = memfiles.find(root, skip=vault.root, like=logical(path) if root.is_file() else None)
+        except (FileNotFoundError, OSError) as e:
+            raise HTTPException(400, str(e) if isinstance(e, FileNotFoundError) else f"Couldn't read {root}.") from None
+        return {"path": str(root), "home": home, "files": [f.to_dict() for f in found]}
+
+    @api.post("/api/import/file")
+    def import_file(body: ImportFileIn) -> dict:
+        """Preview one memory file. Only files `find` would offer are read: never an arbitrary path."""
+        if body.path:
+            real, home = resolved(body.path), home_dir()
+            if not real.startswith(home) or past_home(real, home):
+                raise HTTPException(400, outside_home)
+            try:
+                source, text = memfiles.read(Path(real), like=logical(body.path))
+            except (ValueError, OSError) as e:
+                raise HTTPException(400, str(e) if isinstance(e, ValueError) else f"Couldn't read {body.path}.") from None
+            name = Path(body.path).name
+        elif body.text is not None and body.name:
+            if len(body.text.encode()) > memfiles.MAX_BYTES:
+                raise HTTPException(400, f"{body.name} is larger than OpenMyMemo imports (1 MB).")
+            name = Path(body.name).name
+            source = memfiles.detect(Path(name)) or ("json" if name.lower().endswith(".json") else "file")
+            text = body.text
+        else:
+            raise HTTPException(400, "Give a path, or a file's name and text.")
+        try:
+            items = transfer.parse(source, text)
+        except ValueError as e:
+            raise HTTPException(400, f"{name}: {e}") from None
+        return {"source": source, "name": name, "items": [i.to_dict() for i in transfer.plan(vault, items)]}
 
     @api.post("/api/import/commit")
     def import_commit(body: ImportCommitIn) -> dict:
