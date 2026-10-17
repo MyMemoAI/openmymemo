@@ -9,6 +9,9 @@ Supported import sources:
 * ``markdown`` — list items; headings are kept as hints.
 * ``json``     — a list of strings or objects (``content``/``memory``/``text``), including Mem0 exports and
   OpenMyMemo's own export (whose ``topic`` is honoured when that topic exists).
+* ``claude-code``, ``codex``, ``gemini-cli``, ``cursor``, ``windsurf``, ``cline``, ``copilot``, ``kiro``, ``file``
+  — a memory or instructions file another AI app keeps on disk (CLAUDE.md, AGENTS.md, GEMINI.md, Cursor rules,
+  memory.md, …; ``memfiles`` finds them). Each list item or paragraph is one memory.
 
 Imports always go through a preview: parse → check duplicates → commit. Nothing is classified into a topic at
 import time: memories land in a topic of their own, ``from-<source>`` in the "Imported" group, in the source's
@@ -27,7 +30,8 @@ from .textutil import KINDS, classify_kind, classify_topic, similarity
 from .topics import IMPORT_SOURCE_NAMES, IMPORTED_GROUP, import_topic_slug
 from .vault import NotFound, Vault, VaultError, now_iso
 
-SOURCES = ("chatgpt", "claude", "gemini", "text", "markdown", "json")
+DOCUMENT_SOURCES = ("claude-code", "codex", "gemini-cli", "cursor", "windsurf", "cline", "copilot", "kiro", "file")
+SOURCES = ("chatgpt", "claude", "gemini", "text", "markdown", "json", *DOCUMENT_SOURCES)
 EXPORT_FORMATS = ("markdown", "claude", "chatgpt", "json")
 SORT_SURE_AT = 0.5  # suggestions at or above this confidence are applied by `sort --yes`
 
@@ -80,6 +84,8 @@ def parse(source: str, text: str) -> list[ImportItem]:
     text = text.replace("\r\n", "\n").strip()
     if not text:
         return []
+    if source in DOCUMENT_SOURCES:
+        return _unique(_parse_document(text))
     if source == "json" or (text[:1] in "[{" and source in ("text", "chatgpt", "claude")):
         try:
             return _parse_json(json.loads(text))
@@ -110,12 +116,98 @@ def parse(source: str, text: str) -> list[ImportItem]:
         if len(content) < 3 or content.lower() in _NOISE:
             continue
         items.append(ImportItem(content=content, created_at=created, hint=hint))
-    # The same memory pasted twice is one memory.
+    return _unique(items)
+
+
+def _unique(items: list[ImportItem]) -> list[ImportItem]:
+    """The same memory pasted twice is one memory."""
     unique: list[ImportItem] = []
     for it in items:
         if not any(similarity(it.content, u.content) >= 0.95 for u in unique):
             unique.append(it)
     return unique
+
+
+_FRONTMATTER = re.compile(r"\A---[ \t]*\n.*?\n---[ \t]*(?:\n|\Z)", re.DOTALL)
+# Negated classes that exclude their own delimiters keep these linear on a line full of brackets.
+_LINK = re.compile(r"!?\[([^\[\]\n]*)\]\([^()\n]*\)")  # [text](url) → text; an image keeps its alt text
+_CHECKBOX = re.compile(r"^\[[ xX]\][ \t]+")
+_RULE = re.compile(r"(?:[-*_][ \t]*){3,}")  # a thematic break: ---, * * *
+_LABEL_MAX = 80  # "Preferences:" over a list is the list's heading, not a memory
+_LINE_MAX = 2000  # a longer "memory" is a pasted blob, not something to remember
+
+
+def _strip_comments(text: str) -> str:
+    """Drop ``<!-- … -->`` (an unclosed one runs to the end), with ``find`` rather than a lazy regex, which
+    rescans the rest of the text from every unclosed ``<!--``."""
+    out, pos = [], 0
+    while (start := text.find("<!--", pos)) != -1:
+        out.append(text[pos:start])
+        end = text.find("-->", start + 4)
+        pos = len(text) if end == -1 else end + 3
+    out.append(text[pos:])
+    return "".join(out)
+
+
+def _parse_document(text: str) -> list[ImportItem]:
+    """A memory or instructions file: every list item, and every paragraph, is one memory. Headings are kept
+    as hints, and so is a short "Label:" line over a list, for that list. Front matter, code blocks, comments,
+    tables and Claude Code's ``@file`` imports are skipped."""
+    text = _strip_comments(_FRONTMATTER.sub("", text, count=1))
+    items: list[ImportItem] = []
+    heading: str | None = None
+    label: str | None = None  # a "Label:" line; it names the list after it, until a paragraph or heading
+    current: list[str] = []  # the lines of the item being read
+    bullet = False  # whether that item is a list item
+    fence = ""  # the open code fence (``` or ~~~~, …): only the same character, as many or more, closes it
+
+    def flush() -> None:
+        nonlocal label
+        if not current:
+            return
+        line = " ".join(" ".join(current).split())
+        current.clear()
+        if len(line) > _LINE_MAX:
+            return
+        line = _LINK.sub(r"\1", _CHECKBOX.sub("", line)).replace("**", "")
+        if line.endswith((":", "：")) and len(line) <= _LABEL_MAX:
+            label = line.rstrip(":：").strip() or None
+            return
+        if not bullet:
+            label = None
+        content = _clean(line)
+        if len(content) >= 3 and content.lower() not in _NOISE:
+            items.append(ImportItem(content=content, hint=label or heading))
+
+    for raw in text.split("\n"):
+        stripped = raw.strip()
+        if fence:
+            run = len(stripped) - len(stripped.lstrip(fence[0]))
+            if run >= len(fence) and not stripped[run:].strip():
+                fence = ""
+            continue
+        if stripped.startswith(("```", "~~~")):
+            flush()
+            fence = stripped[: len(stripped) - len(stripped.lstrip(stripped[0]))]
+            continue
+        if not stripped or stripped.startswith("|") or re.fullmatch(r"@\S+", stripped) or _RULE.fullmatch(stripped):
+            flush()
+            continue
+        h = _HEADING.match(raw)
+        if h and not _BULLET.match(raw):
+            flush()
+            heading, label = (_heading_text(h.group(1)) if h.group(1) else h.group(2)).strip() or heading, None
+            continue
+        if _BULLET.match(raw):
+            flush()
+            bullet = True
+            current.append(_BULLET.sub("", raw))
+        else:
+            if not current:
+                bullet = False
+            current.append(stripped.lstrip("> ") if stripped.startswith(">") else stripped)
+    flush()
+    return items
 
 
 def _parse_json(data) -> list[ImportItem]:

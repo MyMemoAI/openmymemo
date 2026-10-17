@@ -300,6 +300,30 @@ export interface ImportItem {
   include: boolean;
 }
 
+/** A memory or instructions file another AI app keeps on disk (memfiles.py). */
+export interface MemoryFile {
+  path: string;
+  name: string;
+  /** The import source it reads as: claude-code, codex, gemini-cli, cursor, windsurf, cline, copilot, kiro, file, json. */
+  source: string;
+  /** Who keeps it, for people: "Claude Code", "Memory file". */
+  app: string;
+  size: number;
+  modified: number;
+}
+
+export interface MemoryFiles {
+  path: string;
+  home: string;
+  files: MemoryFile[];
+}
+
+export interface FilePreview {
+  source: string;
+  name: string;
+  items: ImportItem[];
+}
+
 const HEADERS = { "X-OpenMyMemo": "1", "Content-Type": "application/json" };
 
 /** A refused request; `status` 409 means the memory changed since the version the request named. */
@@ -384,6 +408,9 @@ export const api = {
   activity: (connector?: string) =>
     req<Activity[]>("GET", `/api/activity?limit=300${connector ? `&connector=${enc(connector)}` : ""}`),
   importPreview: (source: string, text: string) => req<ImportItem[]>("POST", "/api/import/preview", { source, text }),
+  importFiles: (path: string) => req<MemoryFiles>("GET", `/api/import/files?path=${encodeURIComponent(path)}`),
+  /** A file OpenMyMemo reads by its path, or one the browser read. */
+  importFile: (file: { path: string } | { name: string; text: string }) => req<FilePreview>("POST", "/api/import/file", file),
   importCommit: (source: string, items: ImportItem[]) =>
     req<{ memory_ids: string[] }>("POST", "/api/import/commit", { source, items }),
   sortPlan: (topic?: string | null) => req<SortRow[]>("GET", `/api/sort${topic ? `?topic=${enc(topic)}` : ""}`),
