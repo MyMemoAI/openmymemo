@@ -338,3 +338,16 @@ def test_import_and_export_report_file_problems_without_a_traceback(tmp_path, va
     vault.add("work", "CTO at Acme")
     nowhere = runner.invoke(app, [*base, "export", "-o", str(tmp_path / "no/such/dir/out.md")])
     assert nowhere.exit_code == 1 and f"Can't write {tmp_path / 'no/such/dir/out.md'}" in nowhere.output
+
+
+def test_an_unknown_connector_gets_a_message_not_a_traceback(vault):
+    base = ["--vault", str(vault.root)]
+    for args in (["context", "--connector", "nobody"], ["connector", "config", "nobody"],
+                 ["connector", "rotate", "nobody"], ["connector", "remove", "nobody"]):
+        r = runner.invoke(app, [*base, *args])
+        assert r.exit_code == 2 and isinstance(r.exception, SystemExit), (args, r.output)
+        assert "No connector nobody. `openmymemo connector list` shows yours." in r.output, args
+    Connectors(vault).create("Foo", "stdio")
+    assert runner.invoke(app, [*base, "connector", "remove", "foo"]).exit_code == 0
+    again = runner.invoke(app, [*base, "connector", "remove", "foo"])  # already revoked
+    assert again.exit_code == 2 and "No connector foo." in again.output

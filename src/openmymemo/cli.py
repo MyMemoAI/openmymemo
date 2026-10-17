@@ -6,7 +6,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, NoReturn
 
 import typer
 
@@ -301,7 +301,10 @@ def context(ctx: typer.Context, connector: Annotated[str | None, typer.Option(he
             pass
         return
     vault = _vault(ctx)
-    c = Connectors(vault).get(connector) if connector else None
+    try:
+        c = Connectors(vault).get(connector) if connector else None
+    except VaultError as e:
+        _connector_failed(e)
     result = compile_context(vault, c, max_chars=max_chars)
     typer.echo(result["text"])
     typer.secho(f"-- {result['chars']} chars, ~{result['approx_tokens']} tokens", dim=True, err=True)
@@ -614,6 +617,13 @@ def disconnect_(ctx: typer.Context, app_id: Annotated[str, typer.Argument(metava
 
 # ---- connectors ------------------------------------------------------------------------------------
 
+def _connector_failed(e: VaultError) -> NoReturn:
+    """An unknown or revoked connector id (or a change it can't take), as one line instead of a traceback."""
+    typer.secho(f"{e}. `openmymemo connector list` shows yours." if isinstance(e, NotFound) else str(e),
+                fg="red", err=True)
+    raise typer.Exit(2 if isinstance(e, NotFound) else 1) from None
+
+
 @connector_app.command("add")
 def connector_add(ctx: typer.Context, name: str,
                   http: Annotated[bool, typer.Option("--http", help="Use the local HTTP endpoint with a token.")] = False,
@@ -634,7 +644,10 @@ def connector_add(ctx: typer.Context, name: str,
 def connector_config(ctx: typer.Context, connector_id: str) -> None:
     """Print the MCP configuration for a connector."""
     vault = _vault(ctx)
-    Connectors(vault).get(connector_id)
+    try:
+        Connectors(vault).get(connector_id)
+    except VaultError as e:
+        _connector_failed(e)
     _print_snippets(vault, connector_id, None)
 
 
@@ -669,14 +682,20 @@ def connector_list(ctx: typer.Context) -> None:
 def connector_rotate(ctx: typer.Context, connector_id: str) -> None:
     """Issue a new HTTP token (the old one stops working)."""
     vault = _vault(ctx)
-    _, token = Connectors(vault).rotate(connector_id)
+    try:
+        _, token = Connectors(vault).rotate(connector_id)
+    except VaultError as e:
+        _connector_failed(e)
     _print_snippets(vault, connector_id, token)
 
 
 @connector_app.command("remove")
 def connector_remove(ctx: typer.Context, connector_id: str) -> None:
     """Revoke a connector's access."""
-    Connectors(_vault(ctx)).remove(connector_id)
+    try:
+        Connectors(_vault(ctx)).remove(connector_id)
+    except VaultError as e:
+        _connector_failed(e)
     typer.echo(f"Revoked {connector_id}. Its MCP calls will now fail; `connector add --id {connector_id}` re-grants.")
 
 
