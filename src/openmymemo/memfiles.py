@@ -100,13 +100,16 @@ def _found(path: Path, source: str) -> Found | None:
     return Found(str(path), path.name, source, LABELS[source], st.st_size, st.st_mtime)
 
 
-def find(root: Path, *, skip: Path | None = None) -> list[Found]:
+def find(root: Path, *, skip: Path | None = None, like: Path | None = None) -> list[Found]:
     """Memory files at ``root`` (a file) or in it (a folder), newest first. ``skip``: a folder to leave out
-    (the vault itself)."""
+    (the vault itself). ``like``: where a file ``root`` was reached from (a symlink to it), which says what it is."""
     root = root.expanduser()
     if root.is_file():
-        source = detect(root) or ("file" if root.suffix.lower() in (".md", ".txt") else None)
+        named = like or root
+        source = detect(named) or ("file" if named.suffix.lower() in (".md", ".txt") else None)
         hit = _found(root, source) if source else None
+        if hit and like:
+            hit.path, hit.name = str(like), like.name
         return [hit] if hit else []
     if not root.is_dir():
         raise FileNotFoundError(f"{root} doesn't exist.")
@@ -135,11 +138,11 @@ def find(root: Path, *, skip: Path | None = None) -> list[Found]:
     return out[:MAX_FILES]
 
 
-def read(path: Path) -> tuple[str, str]:
+def read(path: Path, *, like: Path | None = None) -> tuple[str, str]:
     """``(source, text)`` of one memory file. Refuses anything ``find`` wouldn't offer: unknown kinds of file,
-    folders, empty or oversized files, and text that isn't UTF-8."""
-    hits = find(path)
-    if not hits or Path(hits[0].path) != path.expanduser():
+    folders, empty or oversized files, and text that isn't UTF-8. ``like`` as for ``find``."""
+    hits = find(path, like=like)
+    if not hits or Path(hits[0].path) != (like or path.expanduser()):
         raise ValueError(f"{path} isn't a memory file OpenMyMemo can import.")
     try:
         text = path.expanduser().read_text(encoding="utf-8-sig")

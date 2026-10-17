@@ -484,6 +484,11 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
     def home_dir() -> str:
         return os.path.realpath(Path.home())
 
+    def logical(path: str) -> Path:
+        """The path as typed, without resolving symlinks: an app's folder can link to a file elsewhere in home,
+        and the folder is what says which app it is."""
+        return Path(os.path.normpath(os.path.expanduser(path.strip() or "~")))
+
     def past_home(real: str, home: str) -> bool:
         """``real`` starts with ``home`` but only as a longer name (``/Users/ann2`` for ``/Users/ann``)."""
         return real[len(home):len(home) + 1] not in ("", os.sep)
@@ -497,7 +502,7 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
             raise HTTPException(400, outside_home)
         root = Path(real)
         try:
-            found = memfiles.find(root, skip=vault.root)
+            found = memfiles.find(root, skip=vault.root, like=logical(path) if root.is_file() else None)
         except (FileNotFoundError, OSError) as e:
             raise HTTPException(400, str(e) if isinstance(e, FileNotFoundError) else f"Couldn't read {root}.") from None
         return {"path": str(root), "home": home, "files": [f.to_dict() for f in found]}
@@ -510,7 +515,7 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
             if not real.startswith(home) or past_home(real, home):
                 raise HTTPException(400, outside_home)
             try:
-                source, text = memfiles.read(Path(real))
+                source, text = memfiles.read(Path(real), like=logical(body.path))
             except (ValueError, OSError) as e:
                 raise HTTPException(400, str(e) if isinstance(e, ValueError) else f"Couldn't read {body.path}.") from None
             name = Path(body.path).name

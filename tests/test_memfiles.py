@@ -139,6 +139,16 @@ def test_panel_finds_previews_and_imports_a_memory_file(tmp_path, vault, monkeyp
         assert api.get("/api/import/files", params={"path": path}, headers=H).status_code == 400, path
     assert api.post("/api/import/file", json={"path": str(tmp_path / "link/AGENTS.md")}, headers=H).status_code == 400
     assert api.get("/api/import/files", headers=H).json()["path"] == os.path.realpath(tmp_path)  # empty: the home folder
+    # a link inside home to a file inside home still reads as the app whose folder it's in
+    write(tmp_path, {"dotfiles/style.mdc": "- Tabs, never spaces"})
+    (tmp_path / ".cursor/rules").mkdir(parents=True)
+    (tmp_path / ".cursor/rules/style.mdc").symlink_to(tmp_path / "dotfiles/style.mdc")
+    for path in (tmp_path, tmp_path / ".cursor/rules/style.mdc"):
+        listed = [f for f in api.get("/api/import/files", params={"path": str(path)}, headers=H).json()["files"]
+                  if f["name"] == "style.mdc"]
+        assert [(f["path"], f["source"]) for f in listed] == [(str(tmp_path / ".cursor/rules/style.mdc"), "cursor")]
+        preview = api.post("/api/import/file", json={"path": listed[0]["path"]}, headers=H).json()
+        assert preview["source"] == "cursor" and preview["items"][0]["content"] == "Tabs, never spaces"
 
 
 def test_cli_imports_a_memory_file_by_its_name(tmp_path, vault):
