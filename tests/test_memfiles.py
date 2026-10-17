@@ -109,7 +109,8 @@ def test_read_only_opens_what_find_would_offer(tmp_path):
             memfiles.read(bad)
 
 
-def test_panel_finds_previews_and_imports_a_memory_file(tmp_path, vault):
+def test_panel_finds_previews_and_imports_a_memory_file(tmp_path, vault, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))  # Path.home() and ~
     api = TestClient(create_api(vault, 8787), base_url="http://127.0.0.1:8787")
     write(tmp_path, {"proj/AGENTS.md": "# Conventions\n- Runs ruff before every commit\n", ".ssh/id_rsa": "KEY"})
     listed = api.get("/api/import/files", params={"path": str(tmp_path / "proj")}, headers=H).json()
@@ -127,6 +128,17 @@ def test_panel_finds_previews_and_imports_a_memory_file(tmp_path, vault):
     assert api.post("/api/import/file", json={"path": str(tmp_path / ".ssh/id_rsa")}, headers=H).status_code == 400
     assert api.get("/api/import/files", params={"path": str(tmp_path / "nope")}, headers=H).status_code == 400
     assert api.get("/api/import/files", params={"path": str(tmp_path)}).status_code == 403
+    # only inside the home folder, symlinks included
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    write(outside, {"AGENTS.md": "- not yours"})
+    (tmp_path / "link").symlink_to(outside)
+    sibling = tmp_path.parent / f"{tmp_path.name}2"  # starts with the home folder's path, but isn't in it
+    write(sibling, {"AGENTS.md": "- not yours either"})
+    for path in (str(outside), str(outside / "AGENTS.md"), str(tmp_path / "link"), str(tmp_path / ".." / outside.name),
+                 str(sibling)):
+        assert api.get("/api/import/files", params={"path": path}, headers=H).status_code == 400, path
+    assert api.post("/api/import/file", json={"path": str(tmp_path / "link/AGENTS.md")}, headers=H).status_code == 400
+    assert api.get("/api/import/files", headers=H).json()["path"] == os.path.realpath(tmp_path)  # empty: the home folder
 
 
 def test_cli_imports_a_memory_file_by_its_name(tmp_path, vault):
