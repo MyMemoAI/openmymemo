@@ -11,8 +11,10 @@
 //! The server is `openmymemo serve`, the same one the CLI and the AI apps' plugins run. One server per
 //! folder: if a port already serves this folder (Claude Desktop's extension often got there first) from a
 //! core at least as new as the app, the app uses it, and starts its own when that one goes away. A port
-//! serving something else is skipped, and so is an older core serving this folder: its panel may predate
-//! the Mac layout, which the window needs to be dragged and to keep clear of its buttons.
+//! serving something else is skipped, and so is another app's older core serving this folder: its panel
+//! may predate the Mac layout, which the window needs to be dragged and to keep clear of its buttons. The
+//! app's own server is used whatever its version, since it runs from one of the app's own environments
+//! (an older one when an update couldn't be installed), and every one of those has the Mac layout.
 
 use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
@@ -119,10 +121,9 @@ pub struct Proposal {
 pub enum Probe {
     /// Nothing listens on the port.
     Free,
-    /// The port serves this memory folder, from a core at least as new as the app.
+    /// The port serves this memory folder.
     Ours(PanelState),
-    /// Something else: another folder, another program, a server still starting, or an older core serving this
-    /// folder (an AI app's plugin that hasn't been updated), whose panel may not have the Mac layout.
+    /// Something else: another folder, another program, or a server still starting.
     Other,
 }
 
@@ -146,8 +147,9 @@ fn release(version: &str) -> Option<[u64; 3]> {
     Some(out)
 }
 
-/// Whether a server's panel can fill the window: its core is at least as new as the app, so the panel has the
-/// Mac layout (window dragging, room for the window's buttons) and the shell commands this build expects.
+/// Whether the app can use a server another app started for its folder: its core is at least as new as the app,
+/// so the panel has the Mac layout (window dragging, room for the window's buttons) and the shell commands this
+/// build expects. An AI app's plugin that hasn't been updated may serve a panel from before the Mac layout.
 fn new_enough(version: Option<&str>) -> bool {
     matches!((version.and_then(release), release(VERSION)), (Some(theirs), Some(ours)) if theirs >= ours)
 }
@@ -183,9 +185,7 @@ pub fn probe(port: u16, vault: &Path) -> Probe {
         return Probe::Free;
     }
     match api::<PanelState>(port, "/api/state") {
-        Some(state) if same_folder(Path::new(&state.vault), vault) && new_enough(state.version.as_deref()) => {
-            Probe::Ours(state)
-        }
+        Some(state) if same_folder(Path::new(&state.vault), vault) => Probe::Ours(state),
         _ => Probe::Other,
     }
 }
@@ -371,9 +371,10 @@ impl Core {
         let mut free = None;
         for port in last.into_iter().chain(self.ports.clone().filter(|p| Some(*p) != last)) {
             match probe(port, &self.vault) {
-                Probe::Ours(state) => return Ok((port, state)),
+                Probe::Ours(state) if new_enough(state.version.as_deref()) => return Ok((port, state)),
                 Probe::Free => free = free.or(Some(port)),
-                Probe::Other => {}
+                // An older core serving this folder: the app starts its own beside it.
+                Probe::Ours(_) | Probe::Other => {}
             }
         }
         let Some(port) = free else {
@@ -530,6 +531,7 @@ impl Core {
         Ok(())
     }
 
+    /// Wait for the server the app started. Whatever its version: it runs the environment `prepare` chose.
     fn wait_ready(&mut self, port: u16, status: &dyn Fn(&str, &str)) -> Result<(u16, PanelState), Problem> {
         let started = Instant::now();
         loop {
@@ -710,9 +712,9 @@ mod tests {
         // An AI app's plugin from before the Mac layout: its panel can't be dragged and sits under the window's buttons.
         let vault = temp_dir("older");
         let older = fake_server(&vault, "0.2.2");
-        assert!(matches!(probe(older, &vault), Probe::Other));
         // Starting a server would fail here (no uv), and there is no other port: Err means it wasn't used.
-        assert!(core(&vault, older..older + 1).ensure(&|_, _| {}).is_err());
+        let err = core(&vault, older..older + 1).ensure(&|_, _| {}).unwrap_err();
+        assert!(err.detail.contains("in use by other programs"), "{err:?}");
         // A newer one is used.
         let newer = fake_server(&vault, "99.0.0.dev0");
         assert_eq!(core(&vault, newer..newer + 1).ensure(&|_, _| {}).expect("the newer server").0, newer);
@@ -858,6 +860,43 @@ mod tests {
         assert_eq!(core.ready, Some(fs::canonicalize(&current).unwrap()));
         assert_eq!(fs::read_link(root.join("support/venv")).unwrap(), Path::new("venvs/9.0.0-1"));
     }
+
+    #[test]
+    fn the_server_started_from_an_older_environment_is_used() {
+        // The update couldn't be installed, so the server starts from the environment before it, older than the app.
+        use std::os::unix::fs::PermissionsExt;
+        let (mut core, root) = fake_project("stuck-serve", "9.1.0", &format!("echo '{OFFLINE}' >&2; exit 2"));
+        let current = ready_env(&root, "9.0.0-1");
+        std::os::unix::fs::symlink("venvs/9.0.0-1", root.join("support/venv")).unwrap();
+        // Its `openmymemo --vault <vault> serve --init --no-open --port <port>` answers /api/state as a 0.0.1 core.
+        let server = current.join("bin/openmymemo");
+        fs::write(&server, format!("#!/bin/sh\nexec python3 -c '{OLD_CORE}' \"$2\" \"$7\"\n")).unwrap();
+        fs::set_permissions(&server, fs::Permissions::from_mode(0o755)).unwrap();
+        let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        core.ports = port..port + 1;
+
+        let found = core.ensure(&|_, _| {});
+        core.stop();
+        let (found, state) = found.expect("the app's own server");
+        assert_eq!(found, port);
+        assert!(!new_enough(state.version.as_deref()), "{state:?}");
+    }
+
+    /// A stand-in core: serves /api/state for the folder in argv[1] on the port in argv[2], with version 0.0.1.
+    const OLD_CORE: &str = r#"
+import http.server, json, sys
+body = json.dumps({"vault": sys.argv[1], "version": "0.0.1", "counts": {"pending": 0, "unreviewed": 0}}).encode()
+class State(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+    def log_message(self, *args):
+        pass
+http.server.HTTPServer(("127.0.0.1", int(sys.argv[2])), State).serve_forever()
+"#;
 
     #[test]
     fn an_interrupted_install_is_finished_and_only_then_made_current() {
