@@ -1,7 +1,7 @@
 {
   "name": "openmymemo",
   "displayName": "OpenMyMemo",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Your AI memory as a local folder you own. Claude starts each session with it and writes what it learns; you see every change and can undo it.",
   "author": {
     "name": "MyMemo",
