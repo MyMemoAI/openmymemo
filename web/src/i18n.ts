@@ -402,11 +402,22 @@ const strings: Record<string, string> = {
   "imp.src.gemini": "Gemini / other",
   "imp.src.markdown": "Markdown",
   "imp.src.json": "JSON / Mem0",
+  "imp.src.files": "Files",
   "imp.help.chatgpt": "In ChatGPT open Settings → Personalization → Manage memories, select all, copy and paste below. Or ask ChatGPT to “list everything you remember about me, one per line”.",
   "imp.help.claude": "In Claude open Settings → Capabilities → View and edit memory and copy it, or ask Claude to list its memories as “[date] – memory”.",
   "imp.help.gemini": "Ask it to “list everything you remember about me, one per line” and paste below.",
   "imp.help.markdown": "A Markdown list; a heading that names one of your topics files its items there.",
   "imp.help.json": "An array of strings, or objects with content / memory fields (Mem0 exports work).",
+  "imp.help.files": "Memory files other AI apps keep on this computer: CLAUDE.md, AGENTS.md, GEMINI.md, Cursor and Windsurf rules, memory.md and more. Each list item or paragraph becomes a memory; nothing leaves this computer.",
+  "imp.files.path": "File or folder",
+  "imp.files.pathHint": "Your home folder",
+  "imp.files.find": "Find memory files",
+  "imp.files.choose": "Choose a file…",
+  "imp.files.none": "No memory files found there. Choose a file, or try a project folder.",
+  "imp.files.found.one": "1 memory file in {path}",
+  "imp.files.found.other": "{n} memory files in {path}",
+  "imp.files.open": "Preview",
+  "imp.files.from": "From {name}",
   "imp.paste": "Paste here",
   "imp.preview": "Preview",
   "imp.commit": "Import {n}",
@@ -535,7 +546,11 @@ export function sourceLabel(source: string): string {
   return prettyName(name ?? source);
 }
 
-const NAMES: Record<string, string> = { chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini", mem0: "Mem0", json: "JSON", markdown: "Markdown", text: "Text" };
+const NAMES: Record<string, string> = {
+  chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini", mem0: "Mem0", json: "JSON", markdown: "Markdown", text: "Text",
+  "claude-code": "Claude Code", codex: "Codex", "gemini-cli": "Gemini CLI", cursor: "Cursor", windsurf: "Windsurf",
+  cline: "Cline", copilot: "GitHub Copilot", kiro: "Kiro", file: "memory files",
+};
 
 export function prettyName(id: string): string {
   return NAMES[id] ?? id;

@@ -10,7 +10,7 @@ from typing import Annotated, NoReturn
 
 import typer
 
-from . import __version__, transfer
+from . import __version__, memfiles, transfer
 from .connectors import Connectors
 from .context import compile_context, search
 from .proposals import Proposals
@@ -130,15 +130,29 @@ def _read_input(file: Path | None, source: str) -> str:
 
 @app.command("import")
 def import_(ctx: typer.Context,
-            source: Annotated[str, typer.Argument(help=f"One of: {', '.join(transfer.SOURCES)}")],
+            source: Annotated[str, typer.Argument(help=f"auto (from the file's name), or one of: "
+                                                       f"{', '.join(transfer.SOURCES)}")],
             file: Annotated[Path | None, typer.Argument(help="File to read; omit to paste or use the clipboard.")] = None,
             yes: Annotated[bool, typer.Option("--yes", "-y", help="Import without asking.")] = False) -> None:
-    """Import memories from ChatGPT, Claude, Gemini, Markdown or JSON into a from-<source> topic, in their order."""
+    """Import memories from ChatGPT, Claude, Gemini, Markdown, JSON or another AI app's memory file (CLAUDE.md,
+    AGENTS.md, GEMINI.md, Cursor rules, memory.md, …) into a from-<source> topic, in their order."""
     vault = _vault(ctx)
-    if source not in transfer.SOURCES:
-        typer.secho(f"source must be one of {', '.join(transfer.SOURCES)}", fg="red", err=True)
+    if source == "auto":
+        if file is None:
+            typer.secho("auto needs a file: openmymemo import auto ~/.claude/CLAUDE.md", fg="red", err=True)
+            raise typer.Exit(2)
+        try:
+            source, text = memfiles.read(file)
+        except (ValueError, OSError) as e:
+            typer.secho(str(e), fg="red", err=True)
+            raise typer.Exit(1) from None
+        typer.echo(f"{file} reads as {memfiles.LABELS[source]}.")
+    elif source not in transfer.SOURCES:
+        typer.secho(f"source must be auto or one of {', '.join(transfer.SOURCES)}", fg="red", err=True)
         raise typer.Exit(2)
-    items = transfer.plan(vault, transfer.parse(source, _read_input(file, source)))
+    else:
+        text = _read_input(file, source)
+    items = transfer.plan(vault, transfer.parse(source, text))
     if not items:
         typer.echo("Nothing to import.")
         return

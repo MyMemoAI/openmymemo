@@ -40,7 +40,8 @@ python3 scripts/stage_desktop.py && (cd desktop/src-tauri && cargo test)  # Mac 
 | `src/openmymemo/appfiles.py` | Writing other apps' files (their MCP configs, Codex's `hooks.json`): atomic, permissions kept from the first byte, through symlinks, with a one-time `<file>.openmymemo-backup` |
 | `src/openmymemo/proposals.py` | Proposal lifecycle, dedupe, auto-apply and undo |
 | `src/openmymemo/context.py` | Compiles what an AI sees, MEMORY.md, log.md, search |
-| `src/openmymemo/transfer.py` | Import (ChatGPT / Claude / Markdown / JSON) and export |
+| `src/openmymemo/transfer.py` | Import (ChatGPT / Claude / Markdown / JSON, and other apps' memory files) and export |
+| `src/openmymemo/memfiles.py` | Finds other AI apps' memory and instructions files (CLAUDE.md, AGENTS.md, GEMINI.md, rules, memory.md) for import: known names and places only, never a whole tree, nothing else read |
 | `src/openmymemo/mcp_server.py` | MCP tools (mcp SDK 2.x `MCPServer`); `relayed=` builds the MyMemo Cloud variant |
 | `src/openmymemo/web.py` | Panel API, `/mcp` and `/cloud/callback` combined into one ASGI app; `panel_server()` is the uvicorn server that starts MyMemo Cloud once its port is bound |
 | `src/openmymemo/cloud.py` | MyMemo Cloud (product-design.md §16): the per-computer link (`cloud.json`, never in the folder), linking with PKCE and a loopback callback, and the bridge: one outbound WebSocket that answers relayed tool calls as `cloud-<slug>` connectors and files the offline queue (HPKE-sealed proposals) through `proposals.py`. The wire format is pinned by `tests/fixtures/cloud/` (the MyMemo service tests against the same files); `tests/cloud_fake.py` is a fake service built from it |
