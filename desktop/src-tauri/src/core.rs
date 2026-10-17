@@ -9,8 +9,10 @@
 //! AI apps run (launcher.rs) runs the current environment, which keeps working when the app moves.
 //!
 //! The server is `openmymemo serve`, the same one the CLI and the AI apps' plugins run. One server per
-//! folder: if a port already serves this folder (Claude Desktop's extension often got there first), the
-//! app uses it, and starts its own when that one goes away. A port serving something else is skipped.
+//! folder: if a port already serves this folder (Claude Desktop's extension often got there first) from a
+//! core at least as new as the app, the app uses it, and starts its own when that one goes away. A port
+//! serving something else is skipped, and so is an older core serving this folder: its panel may predate
+//! the Mac layout, which the window needs to be dragged and to keep clear of its buttons.
 
 use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
@@ -95,6 +97,8 @@ pub fn is_network_error(output: &str) -> bool {
 pub struct PanelState {
     pub vault: String,
     pub counts: Counts,
+    /// The core's version. Every release sends it; a server without one counts as too old.
+    pub version: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -115,10 +119,37 @@ pub struct Proposal {
 pub enum Probe {
     /// Nothing listens on the port.
     Free,
-    /// The port serves this memory folder.
+    /// The port serves this memory folder, from a core at least as new as the app.
     Ours(PanelState),
-    /// Something else: another folder, another program, or a server still starting.
+    /// Something else: another folder, another program, a server still starting, or an older core serving this
+    /// folder (an AI app's plugin that hasn't been updated), whose panel may not have the Mac layout.
     Other,
+}
+
+/// The app's version, which its bundled core shares (tests/test_packaging.py keeps them in sync).
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// `[major, minor, patch]` of a version such as "0.2.5" or "0.2.6.dev0"; None if it doesn't start with a number.
+fn release(version: &str) -> Option<[u64; 3]> {
+    let mut out = [0; 3];
+    for (i, part) in version.split('.').take(3).enumerate() {
+        let digits: String = part.chars().take_while(char::is_ascii_digit).collect();
+        match digits.parse() {
+            Ok(n) => out[i] = n,
+            Err(_) if i > 0 => break,
+            Err(_) => return None,
+        }
+        if digits.len() < part.len() {
+            break; // "6rc1": the rest is a pre-release
+        }
+    }
+    Some(out)
+}
+
+/// Whether a server's panel can fill the window: its core is at least as new as the app, so the panel has the
+/// Mac layout (window dragging, room for the window's buttons) and the shell commands this build expects.
+fn new_enough(version: Option<&str>) -> bool {
+    matches!((version.and_then(release), release(VERSION)), (Some(theirs), Some(ours)) if theirs >= ours)
 }
 
 fn agent() -> ureq::Agent {
@@ -152,7 +183,9 @@ pub fn probe(port: u16, vault: &Path) -> Probe {
         return Probe::Free;
     }
     match api::<PanelState>(port, "/api/state") {
-        Some(state) if same_folder(Path::new(&state.vault), vault) => Probe::Ours(state),
+        Some(state) if same_folder(Path::new(&state.vault), vault) && new_enough(state.version.as_deref()) => {
+            Probe::Ours(state)
+        }
         _ => Probe::Other,
     }
 }
@@ -614,11 +647,12 @@ mod tests {
         dir
     }
 
-    /// A stand-in panel server that says it serves `vault`.
-    fn fake_server(vault: &Path) -> u16 {
+    /// A stand-in panel server that says it serves `vault` from a core at `version`.
+    fn fake_server(vault: &Path, version: &str) -> u16 {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
-        let body = serde_json::json!({ "vault": vault, "counts": { "pending": 0, "unreviewed": 0 } }).to_string();
+        let body = serde_json::json!({ "vault": vault, "version": version, "counts": { "pending": 0, "unreviewed": 0 } })
+            .to_string();
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
                 let mut stream = stream;
@@ -653,7 +687,7 @@ mod tests {
     #[test]
     fn finds_this_folders_server_above_a_free_port_instead_of_starting_one() {
         let vault = temp_dir("found");
-        let port = fake_server(&vault);
+        let port = fake_server(&vault, VERSION);
         let ports = port - 4..port + 1;
         assert!(ports.clone().any(|p| p < port && matches!(probe(p, &vault), Probe::Free)), "needs a free lower port");
         // Starting a server would fail here (no uv), so Ok means nothing was started.
@@ -665,10 +699,37 @@ mod tests {
     fn skips_a_server_for_another_folder() {
         let ours = temp_dir("ours");
         let other = temp_dir("other");
-        let theirs = fake_server(&other);
+        let theirs = fake_server(&other, VERSION);
         assert!(matches!(probe(theirs, &ours), Probe::Other));
         let err = core(&ours, theirs..theirs + 1).ensure(&|_, _| {}).unwrap_err();
         assert!(err.detail.contains("in use by other programs"), "{err:?}");
+    }
+
+    #[test]
+    fn skips_an_older_core_serving_this_folder() {
+        // An AI app's plugin from before the Mac layout: its panel can't be dragged and sits under the window's buttons.
+        let vault = temp_dir("older");
+        let older = fake_server(&vault, "0.2.2");
+        assert!(matches!(probe(older, &vault), Probe::Other));
+        // Starting a server would fail here (no uv), and there is no other port: Err means it wasn't used.
+        assert!(core(&vault, older..older + 1).ensure(&|_, _| {}).is_err());
+        // A newer one is used.
+        let newer = fake_server(&vault, "99.0.0.dev0");
+        assert_eq!(core(&vault, newer..newer + 1).ensure(&|_, _| {}).expect("the newer server").0, newer);
+    }
+
+    #[test]
+    fn compares_versions_by_release() {
+        assert_eq!(release("0.2.5"), Some([0, 2, 5]));
+        assert_eq!(release("0.2.6.dev0"), Some([0, 2, 6]));
+        assert_eq!(release("1.0rc1"), Some([1, 0, 0]));
+        assert_eq!(release("0.10"), Some([0, 10, 0]));
+        assert_eq!(release("dev"), None);
+        assert!(new_enough(Some(VERSION)));
+        assert!(new_enough(Some("99.0.0")));
+        assert!(!new_enough(Some("0.2.2")));
+        assert!(!new_enough(Some("unknown")));
+        assert!(!new_enough(None));
     }
 
     /// Paths in a temporary folder with a stand-in uv that runs `body` (its arguments are appended to calls.log).
@@ -716,7 +777,7 @@ mod tests {
         fs::create_dir_all(old.join("bin")).unwrap();
         fs::write(old.join(".openmymemo-ready"), "9.0.0\n").unwrap();
         std::os::unix::fs::symlink("venvs/9.0.0-1", root.join("support/venv")).unwrap();
-        let port = fake_server(&root.join("vault"));
+        let port = fake_server(&root.join("vault"), VERSION);
         core.ports = port..port + 1;
 
         let (found, _) = core.ensure(&|_, _| {}).expect("the running server");

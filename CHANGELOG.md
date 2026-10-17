@@ -4,6 +4,7 @@ What changed in each release, for people who use OpenMyMemo. Every release is al
 
 ## Unreleased
 
+- The Mac app's window can be moved again, and its close, minimise and zoom buttons no longer sit on top of the panel. When an AI app's older OpenMyMemo (such as a Claude Desktop extension that hasn't been updated) was already serving your memory folder, the app showed that version's panel, which predates the Mac layout. It now starts its own server beside it instead.
 - AI apps you've uninstalled no longer show as installed. Their settings folders stay behind after an uninstall, and some are shared: Gemini Code Assist and Antigravity also write `~/.gemini`, so Gemini CLI showed up without being installed. An app now counts as installed when its app, its command or its editor extension is there. On Windows and Linux, an app that has no command to look for, such as Claude Desktop, still goes by its settings folder.
 
 ## 0.2.5 — 2026-10-15
