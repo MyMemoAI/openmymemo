@@ -1,0 +1,138 @@
+import os
+import time
+
+import pytest
+from fastapi.testclient import TestClient
+from typer.testing import CliRunner
+
+from openmymemo import memfiles, transfer
+from openmymemo.cli import app
+from openmymemo.web import create_api
+
+H = {"X-OpenMyMemo": "1"}
+
+CLAUDE_MD = """---
+description: loaded every session
+---
+# Project memory
+
+@~/.claude/team.md
+
+## Preferences
+- Prefers **concise** answers with the conclusion first.
+- Uses [uv](https://docs.astral.sh/uv/) for Python,
+  never pip.
+- [x] Writes the tests first
+
+Coding style:
+- Two-space indentation in YAML
+
+We deploy to Fly.io from the main branch.
+Every release is tagged.
+
+***
+
+```bash
+npm test
+```
+
+| Command | What |
+|---|---|
+| make | builds |
+
+<!-- a note to self,
+over two lines -->
+## Gemini Added Memories
+- My favourite colour is green.
+"""
+
+
+def write(root, files):
+    for rel, text in files.items():
+        p = root / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(text) if isinstance(text, bytes) else p.write_text(text)
+
+
+def test_a_memory_file_reads_as_list_items_and_paragraphs_with_their_headings():
+    items = transfer.parse("claude-code", CLAUDE_MD)
+    assert [(i.hint, i.content) for i in items] == [
+        ("Preferences", "Prefers concise answers with the conclusion first."),
+        ("Preferences", "Uses uv for Python, never pip."),
+        ("Preferences", "Writes the tests first"),
+        ("Coding style", "Two-space indentation in YAML"),  # a "Label:" names the list under it…
+        ("Preferences", "We deploy to Fly.io from the main branch. Every release is tagged."),  # …not what follows
+        ("Gemini Added Memories", "My favourite colour is green."),
+    ]
+
+
+def test_the_document_parser_stays_fast_on_hostile_text():
+    start = time.perf_counter()
+    for text in ("[" * 200_000, "<!--" * 100_000, "**" * 200_000, "[a](" * 100_000, "- " + " " * 200_000 + "x",
+                 "---\n" + "a\n" * 100_000):
+        transfer.parse("file", text)
+    assert time.perf_counter() - start < 2
+
+
+def test_find_looks_where_each_app_keeps_its_files(tmp_path, vault):
+    home = tmp_path / "home"
+    write(home, {
+        ".claude/CLAUDE.md": "- a", ".claude/projects/-work-app/memory/MEMORY.md": "- b",
+        ".claude/projects/-work-app/memory/user_role.md": "- c", ".codex/AGENTS.md": "- d",
+        ".gemini/GEMINI.md": "- e", ".gemini/settings.json": "{}", ".cursor/rules/style.mdc": "- f",
+        ".codeium/windsurf/memories/global_rules.md": "- g", ".kiro/steering/product.md": "- h",
+        ".github/copilot-instructions.md": "- i", "Memories.MD": "- j", "notes.md": "- not a memory file",
+        "big/memory.md": "x", "memory.json": "", ".clinerules/rules.md": "- k",
+    })
+    write(home, {"MEMORY.txt": "a" * (memfiles.MAX_BYTES + 1)})
+    found = {os.path.relpath(f.path, home): f.source for f in memfiles.find(home)}
+    assert found == {
+        ".claude/CLAUDE.md": "claude-code", ".claude/projects/-work-app/memory/MEMORY.md": "claude-code",
+        ".claude/projects/-work-app/memory/user_role.md": "claude-code", ".codex/AGENTS.md": "codex",
+        ".gemini/GEMINI.md": "gemini-cli", ".cursor/rules/style.mdc": "cursor",
+        ".codeium/windsurf/memories/global_rules.md": "windsurf", ".kiro/steering/product.md": "kiro",
+        ".github/copilot-instructions.md": "copilot", "Memories.MD": "file", ".clinerules/rules.md": "cline",
+    }  # not notes.md, nothing in big/, not the empty memory.json or the oversized MEMORY.txt
+    # nothing is offered from inside the vault itself
+    write(vault.root, {"memories.md": "- mine"})
+    assert "memories.md" in [f.name for f in memfiles.find(vault.root)]
+    assert memfiles.find(vault.root, skip=vault.root) == []
+
+
+def test_read_only_opens_what_find_would_offer(tmp_path):
+    write(tmp_path, {"GEMINI.md": "- Likes tea", ".ssh/id_ed25519": "PRIVATE KEY", "notes.md": "- chosen by hand",
+                     "latin1.md": "caf\xe9".encode("latin-1")})
+    assert memfiles.read(tmp_path / "GEMINI.md") == ("gemini-cli", "- Likes tea")
+    assert memfiles.read(tmp_path / "notes.md")[0] == "file"  # a Markdown file the person picked
+    for bad in (tmp_path / ".ssh/id_ed25519", tmp_path / ".ssh", tmp_path / "latin1.md"):
+        with pytest.raises(ValueError):
+            memfiles.read(bad)
+
+
+def test_panel_finds_previews_and_imports_a_memory_file(tmp_path, vault):
+    api = TestClient(create_api(vault, 8787), base_url="http://127.0.0.1:8787")
+    write(tmp_path, {"proj/AGENTS.md": "# Conventions\n- Runs ruff before every commit\n", ".ssh/id_rsa": "KEY"})
+    listed = api.get("/api/import/files", params={"path": str(tmp_path / "proj")}, headers=H).json()
+    assert [(f["name"], f["source"], f["app"]) for f in listed["files"]] == [("AGENTS.md", "codex", "Codex")]
+    preview = api.post("/api/import/file", json={"path": listed["files"][0]["path"]}, headers=H).json()
+    assert preview["source"] == "codex" and [i["content"] for i in preview["items"]] == ["Runs ruff before every commit"]
+    assert preview["items"][0]["hint"] == "Conventions"
+    done = api.post("/api/import/commit", json={"source": "codex", "items": preview["items"]}, headers=H).json()
+    assert len(done["memory_ids"]) == 1
+    assert {t["slug"]: t["title"] for t in vault.topics()}["from-codex"] == "From Codex"
+    # a file the browser read: its name says what it is
+    picked = api.post("/api/import/file", json={"name": "GEMINI.md", "text": "- Lives in Lisbon"}, headers=H).json()
+    assert picked["source"] == "gemini-cli" and picked["items"][0]["content"] == "Lives in Lisbon"
+    # never an arbitrary file, a missing folder, or without the panel's header
+    assert api.post("/api/import/file", json={"path": str(tmp_path / ".ssh/id_rsa")}, headers=H).status_code == 400
+    assert api.get("/api/import/files", params={"path": str(tmp_path / "nope")}, headers=H).status_code == 400
+    assert api.get("/api/import/files", params={"path": str(tmp_path)}).status_code == 403
+
+
+def test_cli_imports_a_memory_file_by_its_name(tmp_path, vault):
+    write(tmp_path, {".claude/CLAUDE.md": "- Prefers tea over coffee\n- Works at Acme as CTO\n"})
+    res = CliRunner().invoke(app, ["--vault", str(vault.root), "import", "auto", str(tmp_path / ".claude/CLAUDE.md"),
+                                   "--yes"])
+    assert res.exit_code == 0, res.output
+    assert "reads as Claude Code" in res.output and "from-claude-code" in res.output
+    assert CliRunner().invoke(app, ["--vault", str(vault.root), "import", "auto"]).exit_code == 2

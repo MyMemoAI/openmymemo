@@ -55,6 +55,7 @@ openmymemo apps                              # the AI apps on this computer, and
 openmymemo connect cursor                    # connect one: claude-desktop, claude-code, codex, cursor, vscode, …
 openmymemo disconnect cursor                 # remove its OpenMyMemo entry and revoke its access
 openmymemo import chatgpt                    # paste ChatGPT's "Manage memories" page; it lands in "From ChatGPT"
+openmymemo import auto ~/.claude/CLAUDE.md   # another app's memory file: CLAUDE.md, AGENTS.md, GEMINI.md, rules, memory.md
 openmymemo sort                              # file imported memories into topics, one suggestion at a time
 openmymemo serve                             # open the panel at http://127.0.0.1:8787
 openmymemo review                            # what AI changed since you last looked: keep, edit or undo

@@ -27,7 +27,7 @@ from fastapi.staticfiles import StaticFiles
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel
 
-from . import __version__, clients, transfer
+from . import __version__, clients, memfiles, transfer
 from .cloud import CALLBACK_HEADERS, Cloud, CloudError, SettingLocked, callback_page
 from .connectors import Connector, Connectors
 from .context import compile_context
@@ -106,6 +106,13 @@ class ConnectorPatch(BaseModel):
 class ImportPreviewIn(BaseModel):
     source: str
     text: str
+
+
+class ImportFileIn(BaseModel):
+    """A memory file to preview: a ``path`` OpenMyMemo reads, or one the browser read (``name`` and ``text``)."""
+    path: str | None = None
+    name: str | None = None
+    text: str | None = None
 
 
 class ImportCommitIn(BaseModel):
@@ -464,6 +471,39 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
         return [i.to_dict() for i in transfer.plan(vault, items)]
+
+    @api.get("/api/import/files")
+    def import_files(path: str = "") -> dict:
+        """The memory files of other AI apps at a path (a file or a folder; the home folder when empty)."""
+        root = Path(path).expanduser() if path.strip() else Path.home()
+        try:
+            found = memfiles.find(root, skip=vault.root)
+        except (FileNotFoundError, OSError) as e:
+            raise HTTPException(400, str(e) if isinstance(e, FileNotFoundError) else f"Couldn't read {root}.") from None
+        return {"path": str(root), "home": str(Path.home()), "files": [f.to_dict() for f in found]}
+
+    @api.post("/api/import/file")
+    def import_file(body: ImportFileIn) -> dict:
+        """Preview one memory file. Only files `find` would offer are read: never an arbitrary path."""
+        if body.path:
+            try:
+                source, text = memfiles.read(Path(body.path))
+            except (ValueError, OSError) as e:
+                raise HTTPException(400, str(e) if isinstance(e, ValueError) else f"Couldn't read {body.path}.") from None
+            name = Path(body.path).name
+        elif body.text is not None and body.name:
+            if len(body.text.encode()) > memfiles.MAX_BYTES:
+                raise HTTPException(400, f"{body.name} is larger than OpenMyMemo imports (1 MB).")
+            name = Path(body.name).name
+            source = memfiles.detect(Path(name)) or ("json" if name.lower().endswith(".json") else "file")
+            text = body.text
+        else:
+            raise HTTPException(400, "Give a path, or a file's name and text.")
+        try:
+            items = transfer.parse(source, text)
+        except ValueError as e:
+            raise HTTPException(400, f"{name}: {e}") from None
+        return {"source": source, "name": name, "items": [i.to_dict() for i in transfer.plan(vault, items)]}
 
     @api.post("/api/import/commit")
     def import_commit(body: ImportCommitIn) -> dict:

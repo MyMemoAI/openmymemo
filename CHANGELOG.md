@@ -4,6 +4,8 @@ What changed in each release, for people who use OpenMyMemo. Every release is al
 
 ## Unreleased
 
+- **Import from files.** The Import page has a Files tab that finds the memory files other AI apps keep on your computer and imports them after a preview. It looks in your home folder or a folder you pick, or you can choose a file. It knows `CLAUDE.md`, Claude Code's auto memory, `AGENTS.md`, `GEMINI.md`, Cursor and Windsurf rules, Cline rules and memory bank, Copilot instructions, Kiro steering files and `memory.md`. Each list item or paragraph becomes a memory, in a topic named after the app. From the terminal: `openmymemo import auto <file>`.
+
 ## 0.2.5 — 2026-10-15
 
 - **`openmymemo doctor`.** Checks the setup and says what to fix: the memory folder and its state files, the panel's port, each AI app's connection (including one pointed at another folder) and MyMemo Cloud. It only reads, never changes anything, and leaves out memory text, so you can paste its output into an issue.
