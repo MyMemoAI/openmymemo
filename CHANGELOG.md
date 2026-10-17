@@ -4,6 +4,8 @@ What changed in each release, for people who use OpenMyMemo. Every release is al
 
 ## Unreleased
 
+- AI apps you've uninstalled no longer show as installed. Their settings folders stay behind after an uninstall, and some are shared: Gemini Code Assist and Antigravity also write `~/.gemini`, so Gemini CLI showed up without being installed. An app now counts as installed when its app, its command or its editor extension is there. On Windows and Linux, an app that has no command to look for, such as Claude Desktop, still goes by its settings folder.
+
 ## 0.2.5 — 2026-10-15
 
 - **`openmymemo doctor`.** Checks the setup and says what to fix: the memory folder and its state files, the panel's port, each AI app's connection (including one pointed at another folder) and MyMemo Cloud. It only reads, never changes anything, and leaves out memory text, so you can paste its output into an issue.
