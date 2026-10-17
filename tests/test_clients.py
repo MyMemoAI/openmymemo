@@ -773,11 +773,13 @@ def test_detection_finds_bundles_commands_in_bundles_and_config_folders(vault, e
         exe.write_text("#!/bin/sh\n")
         exe.chmod(0o755)
     (env.home / ".gemini").mkdir()
-    (env.home / ".gemini/settings.json").write_text("{}")
+    (env.home / ".gemini/settings.json").write_text("{}")  # Gemini Code Assist writes it too: not Gemini CLI
     fake_cli(env, "opencode")
     rows = {r["id"]: r for r in clients.catalog(vault, env)}
     found = {i for i, r in rows.items() if r["installed"]}
-    assert found == {"cursor", "jetbrains", "vscode", "codex", "gemini-cli", "opencode"}
+    assert found == {"cursor", "jetbrains", "vscode", "codex", "opencode"}
+    fake_cli(env, "gemini")
+    assert clients.app_status(vault, clients.get("gemini-cli"), env)["installed"]
     assert clients.find_command(clients.get("vscode"), env) == code
 
 

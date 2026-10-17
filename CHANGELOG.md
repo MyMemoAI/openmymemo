@@ -4,6 +4,8 @@ What changed in each release, for people who use OpenMyMemo. Every release is al
 
 ## Unreleased
 
+- Gemini CLI no longer shows as installed just because `~/.gemini/settings.json` exists. Gemini Code Assist and other Google tools write that file too, and it stays after Gemini CLI is uninstalled. Now only the `gemini` command or the OpenMyMemo extension counts.
+
 ## 0.2.5 — 2026-10-15
 
 - **`openmymemo doctor`.** Checks the setup and says what to fix: the memory folder and its state files, the panel's port, each AI app's connection (including one pointed at another folder) and MyMemo Cloud. It only reads, never changes anything, and leaves out memory text, so you can paste its output into an issue.

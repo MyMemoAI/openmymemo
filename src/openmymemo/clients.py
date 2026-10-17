@@ -957,7 +957,10 @@ CLIENTS: list[Client] = [
     # of the same name in settings.json takes precedence over the extension's)
     Client("gemini-cli", "Gemini CLI", "file",
            docs="https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md",
-           site="https://github.com/google-gemini/gemini-cli", commands=("gemini",), dirs=(".gemini/settings.json",),
+           # No `dirs`: ~/.gemini/settings.json is also written by Gemini Code Assist's agent mode (VS Code,
+           # JetBrains) and other Google tools, and stays after Gemini CLI is uninstalled, so only the `gemini`
+           # command (or the extension, as `via`) shows it's installed.
+           site="https://github.com/google-gemini/gemini-cli", commands=("gemini",),
            config=lambda e: e.home / ".gemini/settings.json", fmt="jsonc", session=True,
            plugin=_gemini_extension, plugin_where="`gemini extensions uninstall openmymemo`",
            plugin_home_only=True),
