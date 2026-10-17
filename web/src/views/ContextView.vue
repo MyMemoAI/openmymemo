@@ -23,14 +23,14 @@ watch([connector, maxChars, () => store.memories], load, { immediate: true });
     <PageHeader :title="t('nav.context')" :subtitle="t('ctx.explain')" />
 
     <div class="card flex flex-wrap items-center gap-x-6 gap-y-3 px-4.5 py-3.5">
-      <label class="flex items-center gap-2.5 text-sm">
-        <span class="text-muted">{{ t("ctx.who") }}</span>
-        <select v-model="connector" class="input select w-auto font-medium">
+      <label class="flex max-w-full min-w-0 items-center gap-2.5 text-sm">
+        <span class="shrink-0 text-muted">{{ t("ctx.who") }}</span>
+        <select v-model="connector" class="input select w-auto max-w-full min-w-0 truncate font-medium">
           <option :value="null">{{ t("ctx.default") }}</option>
           <option v-for="c in store.connectors" :key="c.id" :value="c.id">{{ c.name }}</option>
         </select>
       </label>
-      <label class="flex min-w-[240px] flex-1 items-center gap-3 text-sm">
+      <label class="flex min-w-[min(240px,100%)] flex-1 items-center gap-3 text-sm">
         <span class="shrink-0 text-muted">{{ t("ctx.budget") }}</span>
         <input v-model.number="maxChars" type="range" min="1000" max="30000" step="500" class="flex-1 accent-accent" />
         <span class="w-16 text-right tabular-nums">{{ maxChars.toLocaleString("en") }}</span>
