@@ -148,3 +148,32 @@ def test_cli_imports_a_memory_file_by_its_name(tmp_path, vault):
     assert res.exit_code == 0, res.output
     assert "reads as Claude Code" in res.output and "from-claude-code" in res.output
     assert CliRunner().invoke(app, ["--vault", str(vault.root), "import", "auto"]).exit_code == 2
+
+
+def test_a_file_reads_as_the_same_app_whether_found_or_opened(tmp_path):
+    # one file for every place `find` looks, including generic names in an app's own folder
+    files = {".claude/CLAUDE.md": "claude-code", ".claude/projects/-app/memory/MEMORY.md": "claude-code",
+             ".claude/projects/-app/memory/memories.md": "claude-code", "memory/MEMORY.md": "file",
+             ".codex/AGENTS.md": "codex", ".gemini/GEMINI.md": "gemini-cli", ".cursor/rules/a.mdc": "cursor",
+             ".cursor/rules/memory.md": "cursor", ".codeium/windsurf/memories/global_rules.md": "windsurf",
+             ".windsurf/rules/memory.md": "windsurf", ".clinerules/memory.md": "cline", "memory-bank/a.md": "cline",
+             "Documents/Cline/Rules/style.md": "cline", ".github/copilot-instructions.md": "copilot",
+             ".github/instructions/py.instructions.md": "copilot", ".kiro/steering/memory.md": "kiro",
+             "memory.md": "file", "AGENTS.md": "codex"}
+    write(tmp_path, {rel: "- something to remember" for rel in files})
+    found = {os.path.relpath(f.path, tmp_path): f.source for f in memfiles.find(tmp_path)}
+    assert found == files
+    assert all(memfiles.read(tmp_path / rel)[0] == source for rel, source in files.items())
+    assert all(memfiles.find(tmp_path / rel)[0].source == source for rel, source in files.items())
+
+
+def test_code_blocks_end_only_at_a_matching_fence():
+    def parse(text):
+        return [i.content for i in transfer.parse("file", text)]
+
+    # a longer fence holds a shorter one; a fence of the other character doesn't close it
+    assert parse("Before paragraph.\n\n````markdown\n```sh\nrm -rf build\n```\n````\n\nAfter paragraph.") == [
+        "Before paragraph.", "After paragraph."]
+    assert parse("One thing.\n~~~\n```\nnot this\n~~~~\nTwo things.") == ["One thing.", "Two things."]
+    assert parse("One thing.\n```\ncode\n``` text after it\nstill code\n```\nTwo things.") == ["One thing.", "Two things."]
+    assert parse("One thing.\n```\nnever closed\n- not a memory") == ["One thing."]

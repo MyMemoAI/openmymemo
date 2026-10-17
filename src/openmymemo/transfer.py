@@ -159,7 +159,7 @@ def _parse_document(text: str) -> list[ImportItem]:
     label: str | None = None  # a "Label:" line; it names the list after it, until a paragraph or heading
     current: list[str] = []  # the lines of the item being read
     bullet = False  # whether that item is a list item
-    in_fence = False
+    fence = ""  # the open code fence (``` or ~~~~, …): only the same character, as many or more, closes it
 
     def flush() -> None:
         nonlocal label
@@ -181,11 +181,14 @@ def _parse_document(text: str) -> list[ImportItem]:
 
     for raw in text.split("\n"):
         stripped = raw.strip()
+        if fence:
+            run = len(stripped) - len(stripped.lstrip(fence[0]))
+            if run >= len(fence) and not stripped[run:].strip():
+                fence = ""
+            continue
         if stripped.startswith(("```", "~~~")):
             flush()
-            in_fence = not in_fence
-            continue
-        if in_fence:
+            fence = stripped[: len(stripped) - len(stripped.lstrip(stripped[0]))]
             continue
         if not stripped or stripped.startswith("|") or re.fullmatch(r"@\S+", stripped) or _RULE.fullmatch(stripped):
             flush()

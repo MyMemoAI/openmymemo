@@ -29,18 +29,19 @@ NAMES = {
     "memory.json": "json", "memories.json": "json",
 }
 
-# Where the apps keep their files, relative to the folder chosen (globs; the home folder for global ones).
+# Where the apps keep their files, relative to the folder chosen (globs; the home folder for global ones). Only
+# where to look: what each file is comes from detect(), the same for a file found here and one opened directly.
 PLACES = (
-    (".claude/CLAUDE.md", "claude-code"),
-    (".claude/projects/*/memory/*.md", "claude-code"),  # Claude Code's auto memory: MEMORY.md and its topic files
-    ("memory/*.md", "claude-code"),  # the same folder, chosen itself
-    (".codex/AGENTS.md", "codex"),
-    (".gemini/GEMINI.md", "gemini-cli"),
-    (".cursor/rules/*.mdc", "cursor"), (".cursor/rules/*.md", "cursor"),
-    (".codeium/windsurf/memories/global_rules.md", "windsurf"), (".windsurf/rules/*.md", "windsurf"),
-    (".clinerules/*.md", "cline"), ("memory-bank/*.md", "cline"), ("Documents/Cline/Rules/*.md", "cline"),
-    (".github/copilot-instructions.md", "copilot"), (".github/instructions/*.instructions.md", "copilot"),
-    (".kiro/steering/*.md", "kiro"),
+    ".claude/CLAUDE.md",
+    ".claude/projects/*/memory/*.md",  # Claude Code's auto memory: MEMORY.md and its topic files
+    "memory/*.md",  # that folder (or any memory folder), chosen itself
+    ".codex/AGENTS.md",
+    ".gemini/GEMINI.md",
+    ".cursor/rules/*.mdc", ".cursor/rules/*.md",
+    ".codeium/windsurf/memories/global_rules.md", ".windsurf/rules/*.md",
+    ".clinerules/*.md", "memory-bank/*.md", "Documents/Cline/Rules/*.md",
+    ".github/copilot-instructions.md", ".github/instructions/*.instructions.md",
+    ".kiro/steering/*.md",
 )
 
 LABELS = {"claude-code": "Claude Code", "codex": "Codex", "gemini-cli": "Gemini CLI", "cursor": "Cursor",
@@ -62,25 +63,30 @@ class Found:
 
 
 def detect(path: Path) -> str | None:
-    """The import source of a memory file, from its name and the folder it's in; None for anything else."""
+    """The import source of a memory file, from the folder it's in and then its name; None for anything else.
+
+    The folder comes first: an app's own place says more than a generic name (Claude Code's auto memory is a
+    MEMORY.md, a Cline rule can be any name.md)."""
     name = path.name.lower()
+    parts = [p.lower() for p in path.parts[:-1]]
+    text = name.endswith((".md", ".txt"))
+    if name.endswith(".mdc") and ".cursor" in parts or text and parts[-2:] == [".cursor", "rules"]:
+        return "cursor"
+    if text:
+        if parts[-2:] == [".kiro", "steering"]:
+            return "kiro"
+        if parts[-2:] == [".windsurf", "rules"] or parts[-3:] == [".codeium", "windsurf", "memories"]:
+            return "windsurf"
+        if parts[-1:] in ([".clinerules"], ["memory-bank"]) or parts[-2:] == ["cline", "rules"]:
+            return "cline"
+        if name.endswith(".instructions.md") and parts[-2:] == [".github", "instructions"]:
+            return "copilot"
+        if parts[-1:] in (["memory"], ["memories"]) and ".claude" in parts:
+            return "claude-code"
     if name in NAMES:
         return NAMES[name]
-    parts = [p.lower() for p in path.parts[:-1]]
-    if name.endswith(".mdc") and ".cursor" in parts:
-        return "cursor"
-    if not name.endswith((".md", ".txt")):
-        return None
-    if parts[-2:] == [".kiro", "steering"]:
-        return "kiro"
-    if parts[-2:] == [".windsurf", "rules"] or parts[-1:] == [".clinerules"] or parts[-1:] == ["memory-bank"]:
-        return "windsurf" if ".windsurf" in parts[-2:] else "cline"
-    if parts[-2:] == [".cursor", "rules"]:
-        return "cursor"
-    if name.endswith(".instructions.md") and parts[-2:] == [".github", "instructions"]:
-        return "copilot"
-    if parts[-1:] in (["memory"], ["memories"]):
-        return "claude-code" if ".claude" in parts else "file"
+    if text and parts[-1:] in (["memory"], ["memories"]):
+        return "file"
     return None
 
 
@@ -107,13 +113,14 @@ def find(root: Path, *, skip: Path | None = None) -> list[Found]:
     paths: dict[str, str] = {}
     try:
         for entry in os.scandir(root):
-            if entry.is_file() and entry.name.lower() in NAMES:
-                paths.setdefault(entry.path, NAMES[entry.name.lower()])
+            if entry.is_file() and entry.name.lower() in NAMES and (source := detect(Path(entry.path))):
+                paths.setdefault(entry.path, source)
     except OSError:
         pass
-    for pattern, source in PLACES:
+    for pattern in PLACES:
         for p in sorted(glob.glob(str(root / pattern)))[:MAX_FILES]:
-            paths.setdefault(p, source)
+            if source := detect(Path(p)):
+                paths.setdefault(p, source)
     skipped = skip.resolve() if skip else None
     out = []
     seen: set[Path] = set()
