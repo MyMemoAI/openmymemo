@@ -4,7 +4,9 @@ import { api, type Kind, type Memory } from "../api";
 import AppIcon from "./AppIcon.vue";
 import DropMenu from "./DropMenu.vue";
 import { relTime, sourceLabel, t } from "../i18n";
-import { act, connectorName, store } from "../store";
+import { srcLabel } from "../memoryList";
+import { SUPERSEDED, saveText, saving } from "../memorySaves";
+import { act, connectorName, store, toast } from "../store";
 
 /** `freshFrom`: the app whose change to this memory is still in the digest (shows a "New" chip). */
 const props = defineProps<{ memory: Memory; showTopic?: string; freshFrom?: string }>();
@@ -14,17 +16,32 @@ const editing = ref(false);
 const draft = ref("");
 const input = ref<HTMLTextAreaElement | null>(null);
 
+// Only what the user typed is written back: an edit box left without typing writes nothing, even when an
+// AI app or an editor changed the memory while it was open. Typing is counted, not inferred from the text.
+let typed = 0; // input events so far
+let startedAt = 0; // the count when this edit began
+let baseline = ""; // the memory's text when this edit began
+
 async function startEdit() {
-  draft.value = props.memory.content;
+  draft.value = baseline = props.memory.content;
+  startedAt = typed;
   editing.value = true;
   await nextTick();
   input.value?.focus();
 }
 
 async function save() {
-  const text = draft.value.trim();
+  if (!editing.value) return; // Return already saved; the box going away mustn't save again
   editing.value = false;
-  if (text && text !== props.memory.content) await act(() => api.patchMemory(props.memory.id, { content: text }));
+  const { id, content, last_actor } = props.memory;
+  const text = draft.value.trim();
+  if (typed === startedAt || !text) return;
+  // With a save on its way, the memory's text here is out of date, so it can't tell that nothing changed.
+  if (!saving(id) && text === content) return;
+  // Someone else changed it meanwhile: the user's words win, and they hear that theirs is in the history.
+  const meanwhile = content !== baseline && last_actor !== "user";
+  const saved = await saveText(id, text); // one save per memory at a time, newest last (memorySaves.ts)
+  if (saved && saved !== SUPERSEDED && meanwhile) toast(t("ins.changedMeanwhile", { who: srcLabel(last_actor) }));
 }
 
 function onKey(e: KeyboardEvent) {
@@ -54,6 +71,7 @@ const move = (topic: string) => patch({ topic });
         v-model="draft"
         rows="2"
         class="input text-[15px]"
+        @input="typed++"
         @keydown="onKey"
         @blur="save"
       />

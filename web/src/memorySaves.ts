@@ -2,10 +2,11 @@ import { api, type Memory } from "./api";
 import { act } from "./store";
 
 /**
- * Saving a memory's text from the Mac inspector: one request at a time per memory, the newest text last.
- * The queue lives here rather than in the inspector because selecting another memory and coming back
- * mounts a new inspector while the old one's save may still be on its way; both must share one queue,
- * so an older edit can never land after a newer one.
+ * Saving a memory's text from the panel (the Mac inspector, and editing a row in the list): one request
+ * at a time per memory, the newest text last. The queue lives here rather than in a component because a
+ * component can go away while its save is on its way (selecting another memory and coming back mounts a
+ * new inspector; a row's edit box closes) and the next edit of the same memory must queue behind it, so
+ * an older edit can never land after a newer one.
  */
 export const SUPERSEDED = Symbol("superseded");
 export type SaveResult = Memory | undefined | typeof SUPERSEDED;
