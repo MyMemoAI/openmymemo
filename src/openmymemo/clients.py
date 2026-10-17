@@ -51,7 +51,7 @@ CLI_TIMEOUT = 30  # seconds for an app's own `mcp add` / `mcp remove`
 # Where command-line tools usually live. An app opened from the Finder (the Mac app's server) has no shell PATH.
 BIN_DIRS = (".local/bin", "/opt/homebrew/bin", "/usr/local/bin", ".npm-global/bin", ".bun/bin", ".volta/bin",
             "Library/pnpm", ".local/share/pnpm", ".claude/local", ".opencode/bin", ".amp/bin",
-            ".nvm/versions/node/*/bin", ".cargo/bin")
+            ".nvm/versions/node/*/bin", ".cargo/bin", ".lmstudio/bin")
 
 
 class Refused(VaultError):
@@ -149,7 +149,8 @@ class Client:
     bundles: tuple[str, ...] = ()  # macOS app bundles (globs allowed)
     commands: tuple[str, ...] = ()  # executables
     bundle_bins: tuple[str, ...] = ()  # folders inside app bundles that hold its CLI
-    dirs: tuple[str, ...] = ()  # folders under home (globs allowed) that mean the app is set up here
+    installs: tuple[str, ...] = ()  # folders under home (globs) that exist only while it's installed: editor extensions
+    dirs: tuple[str, ...] = ()  # its settings folders under home (globs allowed); see installed()
     config: Callable[[Env], Path] | None = None  # its MCP config file, also read for status
     fmt: str = "json"  # how to read `config`: json | jsonc | toml | yaml
     key: tuple[str, ...] = ("mcpServers",)  # where servers live in it
@@ -459,8 +460,17 @@ def find_command(client: Client, env: Env) -> Path | None:
 
 
 def installed(client: Client, env: Env) -> bool:
+    """The app is on this computer: its app bundle, its command or an editor extension of it is there.
+
+    Settings folders outlive an uninstall, and some are shared (Gemini Code Assist writes ~/.gemini too), so
+    they count only for an app this computer can't otherwise look for: no command, and no app bundle to find
+    outside macOS (Claude Desktop or Trae on Windows and Linux)."""
     if any(env.bundle(b) for b in client.bundles) or find_command(client, env):
         return True
+    if any(glob.glob(str(env.home / d)) for d in client.installs):
+        return True
+    if client.commands or (env.mac and client.bundles):
+        return False
     return any(glob.glob(str(env.home / d)) for d in client.dirs)
 
 
@@ -926,6 +936,7 @@ CLIENTS: list[Client] = [
     Client("codex", "Codex", "file", docs="https://learn.chatgpt.com/docs/extend/mcp?surface=cli",
            site="https://chatgpt.com/download", commands=("codex",),
            bundle_bins=("ChatGPT.app/Contents/Resources/codex-cli/bin",), dirs=(".codex",),
+           installs=(".vscode/extensions/openai.chatgpt-*", ".cursor/extensions/openai.chatgpt-*"),
            config=lambda e: e.codex_home / "config.toml", fmt="toml", key=("mcp_servers",),
            # Codex gives a server 10 s to start; the Mac app's launcher may first have to install it.
            entry=lambda cmd: {**plain(cmd), "startup_timeout_sec": 60},
@@ -957,9 +968,6 @@ CLIENTS: list[Client] = [
     # of the same name in settings.json takes precedence over the extension's)
     Client("gemini-cli", "Gemini CLI", "file",
            docs="https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md",
-           # No `dirs`: ~/.gemini/settings.json is also written by Gemini Code Assist's agent mode (VS Code,
-           # JetBrains) and other Google tools, and stays after Gemini CLI is uninstalled, so only the `gemini`
-           # command (or the extension, as `via`) shows it's installed.
            site="https://github.com/google-gemini/gemini-cli", commands=("gemini",),
            config=lambda e: e.home / ".gemini/settings.json", fmt="jsonc", session=True,
            plugin=_gemini_extension, plugin_where="`gemini extensions uninstall openmymemo`",
@@ -974,7 +982,8 @@ CLIENTS: list[Client] = [
     # shared by the extension, the CLI and the JetBrains plugin since Cline 4.0 (CHANGELOG 4.0.0).
     Client("cline", "Cline", "file", docs="https://docs.cline.bot/mcp/adding-and-configuring-servers",
            site="https://cline.bot", commands=("cline",),
-           dirs=(".cline", ".vscode/extensions/saoudrizwan.claude-dev-*"),
+           dirs=(".cline",),
+           installs=(".vscode/extensions/saoudrizwan.claude-dev-*", ".cursor/extensions/saoudrizwan.claude-dev-*"),
            config=lambda e: e.home / ".cline/data/settings/cline_mcp_settings.json"),
     # https://lmstudio.ai/docs/app/mcp (Cursor's notation, the deeplink) and https://lmstudio.ai/blog/mcp (the path)
     Client("lm-studio", "LM Studio", "file", docs="https://lmstudio.ai/docs/app/mcp", site="https://lmstudio.ai",

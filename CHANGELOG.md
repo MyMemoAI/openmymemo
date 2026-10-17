@@ -4,7 +4,7 @@ What changed in each release, for people who use OpenMyMemo. Every release is al
 
 ## Unreleased
 
-- Gemini CLI no longer shows as installed just because `~/.gemini/settings.json` exists. Gemini Code Assist and other Google tools write that file too, and it stays after Gemini CLI is uninstalled. Now only the `gemini` command or the OpenMyMemo extension counts.
+- AI apps you've uninstalled no longer show as installed. Their settings folders stay behind after an uninstall, and some are shared: Gemini Code Assist and Antigravity also write `~/.gemini`, so Gemini CLI showed up without being installed. An app now counts as installed when its app, its command or its editor extension is there. On Windows and Linux, an app that has no command to look for, such as Claude Desktop, still goes by its settings folder.
 
 ## 0.2.5 — 2026-10-15
 
