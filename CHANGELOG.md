@@ -2,6 +2,10 @@
 
 What changed in each release, for people who use OpenMyMemo. Every release is also on [GitHub](https://github.com/MyMemoAI/openmymemo/releases).
 
+## Unreleased
+
+- An archived memory no longer stays in what AI apps read until OpenMyMemo restarts. After you archived a memory, the same running server kept serving it in the memory context and wrote it back into `MEMORY.md`; a restored or moved memory could also be missing or listed under its old topic.
+
 ## 0.2.6 — 2026-10-16
 
 - **Import from files.** The Import page has a Files tab that finds the memory files other AI apps keep on your computer and imports them after a preview. It looks in your home folder or a folder you pick, or you can choose a file. It knows `CLAUDE.md`, Claude Code's auto memory, `AGENTS.md`, `GEMINI.md`, Cursor and Windsurf rules, Cline rules and memory bank, Copilot instructions, Kiro steering files and `memory.md`. Each list item or paragraph becomes a memory, in a topic named after the app. From the terminal: `openmymemo import auto <file>`.

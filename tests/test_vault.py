@@ -156,3 +156,29 @@ def test_open_or_create_for_plugins(tmp_path):
     (busy / "notes.txt").write_text("mine")
     with pytest.raises(VaultError):
         Vault.open_or_create(busy)
+
+
+def test_writes_keep_the_in_process_listing_current(vault):
+    """The same Vault instance lists exactly what the files hold after archive, restore and move, without a
+    re-read from disk, and MEMORY.md and the served context follow it."""
+    from openmymemo.context import compile_context
+
+    tea = vault.add("work", "Likes green tea")
+    coffee = vault.add("work", "Drinks coffee before 10am")
+
+    vault.archive(tea.id)
+    assert [m.id for m in vault.memories()] == [coffee.id]
+    assert tea.id not in compile_context(vault)["text"]
+    assert tea.id not in vault.memory_md_path.read_text(encoding="utf-8")
+
+    vault.restore(tea.id)
+    assert {m.id for m in vault.memories()} == {tea.id, coffee.id}
+    assert tea.id in vault.memory_md_path.read_text(encoding="utf-8")
+
+    vault.update(coffee.id, topic="history")
+    listed = [(m.id, m.topic) for m in vault.memories()]
+    assert listed.count((coffee.id, "history")) == 1 and len(listed) == 2
+    assert [m.id for m in vault.memories() if m.topic == "work"] == [tea.id]
+
+    fresh = Vault(vault.root)
+    assert [(m.id, m.topic) for m in fresh.memories()] == [(m.id, m.topic) for m in vault.memories()]
