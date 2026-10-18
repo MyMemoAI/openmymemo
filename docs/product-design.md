@@ -212,7 +212,7 @@ Hooks call `openmymemo context --hook`, which registers the connector on first u
 - **The digest:** an applied proposal stays "unreviewed" until the user has seen it (`reviewed_at` on the proposal). The digest is the list of unreviewed applied proposals. It surfaces on the panel's Changes page, as the first line of the session-start hook output, in `openmymemo review` and `status`, in the generated `log.md`, and later as system notifications. "Looks good" marks everything seen; keeping, editing or undoing a single change marks that one.
 - **Undo without a window:** undo is available for as long as the change is still the memory's latest version — undoing an add archives the memory, undoing an update restores the previous text and topic, undoing an archive restores the memory. Once something else has changed the memory (the user, an editor, another app, or an undo of a later change), the panel offers its version history instead. Undoing or editing a change also marks it seen; editing makes the memory the user's, so it becomes protected. `history.jsonl` is append-only, so nothing is ever lost. (v0.1 used a 7-day window.)
 - **Proposal lifecycle:** `pending → accepted | edited_accepted | rejected | expired (30 days)`; `applied` (reviewed or not) `→ undone`. Accepted proposals can be undone the same way as applied ones.
-- **Duplicates and conflicts:** before a proposal is stored it is compared with the memories that connector can read (Jaccard over Chinese character bigrams and English words, combined with edit distance). At ≥ 0.92 it is a duplicate and no proposal is created. An `add` at ≥ 0.6 becomes an `update` of the closest memory and is shown as a diff; the user can still "add as a new memory". If one side contains a negation and the other doesn't, it is flagged as contradicting. Embedding-based matching with a configured model is optional (§10).
+- **Duplicates and conflicts:** before a proposal is stored it is compared with the memories that connector can read (Jaccard over Chinese character bigrams and English words, combined with edit distance). At ≥ 0.92 it is a duplicate and no proposal is created. An `add` at ≥ 0.6 becomes an `update` of the closest memory and is shown as a diff; the user can still "add as a new memory". If one side contains a negation and the other doesn't, it is flagged as contradicting. Embedding-based matching with a configured model is optional (§17).
 - **Revocation:** removing a connector leaves a `revoked_at` tombstone. A stdio app keeps launching with the same `--connector` after removal, and without the tombstone its next call would quietly re-register it. After revocation every call returns "revoked"; adding the same id again is an explicit re-grant.
 - **Rules:** a rejection or an undo can become a rule: "stop accepting this app's proposals about this topic", enforced per connector × topic at the point of proposal. An `add` that turns into an update of a memory in a blocked topic is refused too, so apply-now can never slip into a blocked topic.
 - **Notifications:** a badge in the panel navigation, refreshed every 4 seconds; the hook line in AI apps; `openmymemo review` in the terminal. System notifications come later.
@@ -347,7 +347,7 @@ File format with parse and rewrite; `init` / `import` / `export`; stdio MCP (`me
 **v0.2 — defaults for people, a format for the long run** (decided 2026-10-08, §13)
 Format 2 (frontmatter, `log.md`, `from-*` import topics) with migration and `MEMORY_FORMAT.md`; apply-now with the digest, protected memories, undo without a window; `sort`; the Changes page and the hook line; repository rename and the PyPI release; the first real installs in Claude Desktop, Claude Code, Codex and Cursor, with the team using it daily and measuring how often models write and how many people turn approval on.
 
-**v0.3 — documents and optional model help**
+**v0.3 — documents and optional model help** (the model help is designed in §17, OpenMyMemo Assistant)
 Document memories with diff review (import of `CLAUDE.md` / `AGENTS.md` / Cursor rules); with a model endpoint configured: model-based sorting and semantic dedupe, extracting proposals from ChatGPT `conversations.json` and local chat logs; system notifications; in-chat approval via MCP elicitation where clients support it.
 
 **Consumer shells**
@@ -595,3 +595,146 @@ MyMemo Cloud is opt-in twice over: it isn't listed until the person turns it on,
 - **Settings → MyMemo Cloud → Show MyMemo Cloud** (off by default) lists it on the Connectors page and in `openmymemo apps`. While this computer is linked it is always listed, whatever the switch says, so a link can always be seen and undone; the switch is disabled then. Linking from the CLI (`openmymemo cloud link`) works while it is hidden.
 - **Service** (shown with the switch on): the MyMemo service a new link goes to, MyMemo's own (`https://api.mymemo.ai`) unless the person enters another. It must be `https://` (`http://` only for a service on this computer's loopback), without user, query or fragment; it is stored without a trailing slash and is the issuer the callback must name. A link keeps the service it was made with, so the service can't change while linked (unlink first). `OPENMYMEMO_CLOUD_URL`, when set, decides the service and the field only shows it.
 - **Stored** per computer, like the link and never in the folder: `settings.json` next to `cloud.json` (mode 0600), `{"show": bool, "service": url | null}`; keys a later version adds are kept, and an unreadable file or an unusable service counts as hidden and MyMemo's own. The panel changes it with `PATCH /api/cloud/settings` (`{"show"?, "service"?}`, `""` for MyMemo's own; 400 for an unusable address, 409 while it can't change), the CLI with `openmymemo cloud settings [--show|--hide] [--service URL]`; `GET /api/cloud` reports `shown` and `settings`.
+
+## 17. OpenMyMemo Assistant: optional model help (2026-10-18, design)
+
+OpenMyMemo works without a model, and it keeps working that way. The Assistant is the optional model-powered layer that principle 4 (§2) and v0.3 (§10) have always left room for. It makes recall more accurate, does the import and housekeeping work that rules do badly, and helps the AI apps you connect write better memories. Turning it off returns everything to the behaviour described in §5.
+
+Decided by the product owner on 2026-10-18:
+1. The name is **OpenMyMemo Assistant**.
+2. It is optional and off by default, and every feature that uses it has a rule-based or keyword fallback.
+3. It can use a model the person configures: their own API key, or a model on their own computer.
+4. Or it can use **MyMemo's hosted model**. That is a MyMemo service with its own monthly plan, using Claude models only, built in the closed-source MyMemo service the way MyMemo Cloud is (§16.8).
+5. Everything below is in scope, delivered in the steps in §17.9. Pricing, the hosted model and limits are the service's decisions and will be filled in there.
+
+### 17.1 What changes in the principles
+
+- **Principle 2 holds unchanged.** The Assistant is a connector like any AI app, so everything it changes is a proposal (§17.3).
+- **Principle 4 holds.** Install and go still needs no key. The Assistant's code only talks HTTP to an endpoint; it adds no model runtime, no GPU libraries and no database to the default install.
+- **AGENTS.md, "Local only".** The exception grows by one clause: memory text leaves the computer only when the person turns the Assistant on with a remote model, and only to that model. A local model keeps everything on the computer.
+- **AGENTS.md, "No dependency on MyMemo services".** MyMemo's hosted model is one of the endpoints the Assistant can use, chosen explicitly. The Assistant works the same with any other endpoint.
+- **Principle 3 ("what you see is what it gets").** This extends to the Assistant: the panel shows which model it uses and where that model runs, and the activity log records each call, as for any app reading memory.
+
+### 17.2 Choosing a model
+
+**Settings → Assistant** has these choices:
+
+| Choice | What it is | Where memory text goes |
+| --- | --- | --- |
+| Off (default) | Everything as in §5 | Nowhere |
+| On this computer | Any OpenAI-compatible server on loopback: Ollama, LM Studio, llama.cpp, vLLM | Stays on the computer |
+| Your own API key | Anthropic (Messages API) or any OpenAI-compatible endpoint (OpenAI, DeepSeek, Qwen, OpenRouter, …): base URL, model, key | That provider, under its terms |
+| MyMemo | MyMemo's hosted Claude model, through the MyMemo account (§17.8) | MyMemo's service and Anthropic, under MyMemo's privacy policy |
+
+- **Two protocols cover every choice.** These are the OpenAI-compatible chat API and the Anthropic Messages API, both called with `httpx`, which is already a dependency. No vendor SDK is needed. Embeddings (§17.4) use the OpenAI-compatible `/embeddings` shape, or the optional local model; MyMemo's hosted model offers none (§17.8).
+- **Where the key is kept.** Like the MyMemo Cloud link, the key is stored per computer, never in the folder, since the folder may be synced or kept in git. It goes in the macOS Keychain where available, and otherwise in a 0600 `assistant.json` next to `cloud.json` (§16.4). `OPENMYMEMO_ASSISTANT_*` environment variables override the file for scripts.
+- **Test.** A "Test" button sends one tiny request and shows the model's name and how long it took.
+- **Per feature.** Each feature in §17.4–§17.6 has its own switch under the Assistant, so someone can use it for imports but not for recall, for example.
+- **Private topics.** These are never sent to a remote model; this can't be switched off. With a model on this computer they can be included, but that is opt-in per topic.
+- **Spending limits.** A monthly cap on calls, and on tokens where the endpoint reports them. Background jobs (§17.6) stop at the cap and say so; interactive features fall back to the keyword path.
+
+### 17.3 The Assistant is a connector
+
+- **Its own connector.** The Assistant is a connector with the id `assistant`, kind `assistant`, named "OpenMyMemo Assistant". It has a read scope, a writing mode, blocked topics, "What AI sees", an activity log and revocation, like every other app (§5.5).
+- **Writes go through proposals.** Anything it adds, merges, rewrites, moves or archives goes through `proposals.py`, with a `reason` and, where there is one, `evidence`.
+  - With the default writing mode, additions apply and show up in the digest; changes to memories the person wrote wait.
+  - It never writes into a private topic.
+  - The person can block it from topics, and setting its mode to `none` makes it advisory only.
+- **Previews are not writes.** Import (§17.5) and sorting (§5.6) already work as a preview the person ticks through. With the Assistant, the model fills the preview, and what the person keeps is saved as their own import or move, as today.
+- **Model output is data.** Imported files, chat exports and transcripts can contain text addressed to a model ("ignore your instructions and …"). The Assistant's prompts put that material in clearly delimited data blocks. Its output is parsed against a fixed JSON schema, and anything that doesn't validate is dropped. Its only effect is previews and proposals, so the worst a hostile input can do is suggest a wrong memory the person can see and undo.
+
+### 17.4 Recall: search that understands meaning
+
+Today `memory_search` and `openmymemo search` score keywords: Chinese character bigrams and English words (§11, question 5). "What do I like to drink?" doesn't find "Prefers tea over coffee", because the two share no word.
+
+- **Embedding index.** With the Assistant on, each memory gets an embedding. Vectors live in `.openmymemo/index/` as a plain-file cache: a JSON manifest of memory id, content hash and model, plus a float32 file. Removing the folder loses nothing, because it is rebuilt from `memories/*.md` (principle 1). It updates incrementally when a memory's hash changes, including after edits in another editor, and it is rebuilt when the embedding model changes. It is rebuilt on whichever computer runs OpenMyMemo, so a synced folder doesn't need to sync it.
+- **Hybrid search.** The keyword score and the vector similarity are combined with reciprocal rank fusion, so exact names and ids still win, and with no index the keyword path is unchanged.
+- **Optional rerank and query expansion.** When there are more candidates than the limit, the chat model reranks the top 30 for the query. Without an embedding index (for example on MyMemo's hosted model, §17.8), the chat model first expands the query into keywords and synonyms in the vault's languages. This is used by `memory_search` and `recall` only, never by `memory_context`, which stays fast and deterministic.
+- **`openmymemo recall "<question>" [--max-chars N] [--connector id]`.** Prints the memories most relevant to a question, ranked and cut to a budget, ready to paste into a prompt or a hook. Without the Assistant it uses keyword search. A matching MCP tool isn't needed: `memory_search` gets the same ranking.
+- **A local embedding model**, for anyone who wants vectors without sending memory anywhere, whatever chat model the Assistant uses (none, local, a key, or MyMemo's):
+  - **Turned on in Settings → Assistant → "Search by meaning on this computer".** The switch downloads and starts it. Nothing is bundled into the app or the default install, so people who never turn it on download nothing. `openmymemo semantic on|off|status` does the same from the terminal.
+  - **What it downloads:**
+    - the ONNX Runtime and `tokenizers` wheels (about 20 MB, as the extra `openmymemo[semantic]`; torch is never required);
+    - the model, into the per-computer application folder next to `cloud.json` (§16.4), never into the memory folder.
+
+    The model is fetched from a fixed URL with its SHA-256 pinned in the code, and a file that doesn't match is deleted. The panel shows progress and the size before starting. Turning the switch off deletes the model and the index.
+  - **The person picks the model; one is recommended.** Settings → Assistant shows a short list with each model's download size, languages and license. The recommended one is preselected:
+
+    | Model | Download | License | |
+    | --- | --- | --- | --- |
+    | `multilingual-e5-small`, int8 ONNX | about 120 MB | MIT | **Recommended (default).** 384 dimensions, about 100 languages including Chinese and English. Embeds a 1,000-memory vault in well under a minute on a laptop CPU, and a query in milliseconds. |
+    | `granite-embedding-97m-multilingual-r2` (IBM) | about 100 MB | Apache 2.0 | Similar size. IBM reports 60.3 vs 50.9 for `multilingual-e5-small` on multilingual MTEB retrieval; its Chinese quality is unpublished. |
+    | `EmbeddingGemma-300m` (Google) | under 200 MB quantized | Gemma Terms of Use | Mid-size, built for on-device use. |
+    | `Qwen3-Embedding-0.6B` | about 640 MB at 8-bit | Apache 2.0 | **Best quality, larger download.** The strongest of these for Chinese. |
+
+    - The list lives in the code with each model's URL and pinned SHA-256, so a release can add or replace a model.
+    - The recall test set reports every listed model's hit rate in CI. A model that falls behind is dropped from the list, and if another one clearly beats the recommended model, the recommendation changes in a release.
+    - People who already use a model keep it until they choose another.
+  - **Not considered:** models with non-commercial licenses, such as the Jina v5 embeddings (CC BY-NC 4.0), and single-language models such as `bge-small-zh`.
+  - **Switching models.** Changing the model rebuilds the index (§17.4, embedding index). The model name is stored in the index manifest, so an index is never mixed across models.
+- **Measured, not assumed.** `tests/recall/` holds a fixed English and Chinese question set over a demo vault. CI reports hit rate for keyword, keyword + vectors, and keyword + vectors + rerank (the last with a recorded model response), so a change that makes recall worse is visible.
+
+### 17.5 Import and sorting
+
+- **Splitting files.** For memory files (§5.6, the Files tab), pasted lists and Markdown, the model splits the text into memories instead of using one memory per list item or paragraph. It drops instructions to tools that aren't facts about the person (build commands, code style for one repository), rewrites each memory as one standalone statement, and suggests a topic. The rule-based parser stays as the fallback and as a cross-check: the preview flags any line the model left out that the parser would have kept, so nothing disappears silently.
+- **Chat exports.** ChatGPT `conversations.json`, Claude's export, and local agent transcripts (Claude Code, Codex) need a model to read (§5.6, §10). They are processed in chunks, newest first, with the cost estimated before starting. Candidates go to the same preview, each with its evidence (the quoted message and date).
+- **Sorting** (`openmymemo sort`, "Sort into topics"). Suggestions come from the model, with a confidence, when the Assistant is on (§5.6 already says so). The rule-based classifier remains the fallback.
+
+### 17.6 Keeping memory tidy
+
+- **Tidy up.** `openmymemo tidy`, or "Tidy up" on the Changes page, runs on demand or on a schedule the person sets: weekly by default once turned on. It is off until then. It produces one batch of proposals:
+  - **Merges** of near-duplicates, with semantic dedupe replacing the Jaccard thresholds of §5.5 when the Assistant is on.
+  - **Contradictions**: "lives in Shanghai" vs "moved to Lisbon in 2026-09". The later one is proposed as an update of the earlier one, and the earlier one is shown as the "before".
+  - **Possibly outdated** memories: "looking for a job (said 2026-04) — still true?", proposed as an archive that waits, never applied.
+  - **`until` suggestions** for time-bound memories (§5.1).
+  - **Rewrites** of memories that are too long or depend on context.
+- **Same rules as any app.** The batch follows the Assistant's writing mode. Changes to memories the person wrote always wait. The digest groups the batch as "Tidy-up, 2026-10-25: 6 changes" with Keep all / Undo all, as well as per item.
+- **Not twice.** A rejected or undone suggestion is not suggested again: the Assistant reads its own `memory_proposals` like any app (§5.4).
+
+### 17.7 Helping the AI apps you connect
+
+The connected AI apps are models themselves, so the Assistant doesn't sit in front of every read. It helps where a second look pays:
+
+- **Recall:** `memory_search` gets the hybrid ranking and rerank of §17.4. `memory_context` is unchanged: it is the exact, reviewable text an app receives (principle 3).
+- **Writes:** when an app calls `memory_propose`, the Assistant checks the proposal before it is filed. It catches duplicates and contradictions that word overlap misses, picks a topic when the app gave none, and flags text that looks sensitive (health, money, credentials) to be routed to a private topic or to wait. This runs within a short time budget (2 s by default). If it times out, the proposal is filed by today's rules, so it never blocks the app (§5.4: "never blocks the AI").
+- **After a session:** the Claude Code and Codex hooks (§5.4.1) gain an end-of-session step. With the person's consent per app, the Assistant reads the session's transcript, extracts durable facts the app didn't save, and files them as the Assistant's proposals, each with its evidence quoted. Many apps rarely call `memory_propose` on their own, so this is where people will notice the difference. Transcripts are read locally and never stored. Only the extracted candidates and their quotes are kept, in the proposal.
+- **Later:** MCP sampling lets a server borrow the client's own model, so no key is needed. It will be offered as one more endpoint once mainstream clients support it.
+
+### 17.8 MyMemo's hosted model
+
+For people who want the Assistant without managing keys or running a model:
+
+- **How to turn it on.** Choose "MyMemo" in Settings → Assistant and sign in with a MyMemo account: the same PKCE loopback sign-in as §16.4, or the existing link if this computer is already linked to MyMemo Cloud. The Assistant gets a token scoped to the model endpoint only.
+- **One endpoint, Claude only.** The service exposes one chat endpoint, in the OpenAI-compatible shape of §17.2. OpenMyMemo treats it like any other endpoint. Behind it, the service calls only Anthropic's Claude models, starting with a small, fast one. The model can change without an OpenMyMemo release.
+- **No embeddings.** Claude has no embeddings model, so the hosted plan offers none. With it, recall uses keyword search plus Claude for query expansion (synonyms and both languages) and rerank (§17.4). People who also want vectors add the local embedding model (`openmymemo[semantic]`), which keeps that work on the computer.
+- **Billing.** The hosted model is its own monthly plan, the OpenMyMemo Assistant plan, separate from MyMemo Cloud and from MyMemo memberships. Its price, included usage and limits are the service's decisions. The panel shows them from the service's answer and never hard-codes them; when the month's allowance is used up, the Assistant falls back to the rule and keyword path until it resets.
+- **Privacy.** The service processes the text of each call to answer it. It does not keep memory text or results after answering, and it logs only metadata (member, feature, model, token counts, time, outcome), as MyMemo Cloud does (§16.7). PRIVACY.md gets a section like the MyMemo Cloud one before this ships.
+- **Code location.** The service side is closed source, in the MyMemo service. This repository has only the generic endpoint client and the sign-in.
+
+### 17.9 Order of work
+
+Each step is its own release-sized piece and its own PRs. Each step is useful alone and leaves everything working with the Assistant off.
+
+1. **Configuration and the connector:**
+   - Settings → Assistant, with Off, this computer, your own key and Test;
+   - the `assistant` connector;
+   - the endpoint client with call logging and spending limits;
+   - model-powered import splitting (§17.5) and sorting.
+2. **Recall:**
+   - the embedding index;
+   - hybrid `search` and `memory_search`;
+   - rerank;
+   - `openmymemo recall`;
+   - the recall test set;
+   - the optional local embedding extra.
+3. **Writes:** checking proposals as they are filed (§17.7) and session-end extraction from Claude Code and Codex transcripts, plus chat-export import (§17.5).
+4. **Tidy up** (§17.6).
+5. **MyMemo's hosted model** (§17.8). This can start alongside step 1 on the service side, since OpenMyMemo only needs the endpoint and the sign-in.
+
+### 17.10 Open questions
+
+1. Where tidy-up runs on a schedule: in the Mac app and any running panel, or also as an OS scheduled task when nothing is running?
+2. ~~The default local embedding model and its download size~~ Decided 2026-10-18: opt-in from Settings, downloaded when turned on, never bundled; about 120 MB for the default (§17.4). The person chooses from a short list; `multilingual-e5-small` is the recommended default, and `Qwen3-Embedding-0.6B` the larger, better-quality choice.
+3. Should session-end extraction be on by default for an app once the Assistant is on, or always asked per app? Leaning: asked per app on first use.
+4. Should a proposal's evidence from transcripts expire (§11, question 2), given it is now gathered automatically?
+5. Reverse sync — writing selected topics back to `CLAUDE.md` / `AGENTS.md` for apps without MCP — needs no model. Should it be its own feature outside the Assistant?
