@@ -692,8 +692,9 @@ def _problem(path: Path, e: Exception) -> str:
     return str(e)
 
 
-CODEX_TRUST = (f'Trust "{codex.STATUS_MESSAGE}" once: in the ChatGPT app under Settings → Coding → Hooks, or in a '
-               "terminal: run `codex`, type /hooks and trust it under SessionStart. Either place covers both.")
+CODEX_TRUST = (f'Trust "{codex.STATUS_MESSAGE}" and "{codex.END_STATUS_MESSAGE}" once: in the ChatGPT app under '
+               "Settings → Coding → Hooks, or in a terminal: run `codex`, type /hooks and trust them under SessionStart "
+               "and Stop. Either place covers both.")
 
 
 def _codex_hook(vault: Vault, env: Env, result: Result, plugin: bool) -> None:
@@ -704,7 +705,8 @@ def _codex_hook(vault: Vault, env: Env, result: Result, plugin: bool) -> None:
         return
     path = env.codex_home / "hooks.json"
     try:
-        changed = codex.install(codex.hook_command(None if plugin else command_for(vault.root)), path)
+        cli = None if plugin else command_for(vault.root)
+        changed = codex.install(codex.hook_command(cli), path, end_command=codex.end_command(cli))
     except (VaultError, OSError, ValueError) as e:  # the entry is in; only memory at session start is missing
         result.steps.append(f"The session hook wasn't added: {_problem(path, e)}")
         return

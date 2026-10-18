@@ -4,6 +4,7 @@ import { api, type AssistantFeature, type AssistantKind, type AssistantPatch, ty
 import { t } from "../i18n";
 import { store, toast } from "../store";
 import AppIcon from "./AppIcon.vue";
+import SessionConsent from "./SessionConsent.vue";
 import SemanticSettings from "./SemanticSettings.vue";
 
 /**
@@ -223,22 +224,25 @@ const fmt = (n: number) => n.toLocaleString("en-US");
       </form>
 
       <div v-if="status.enabled" class="divide-y divide-sep">
-        <div v-for="f in FEATURES" :key="f" class="flex items-center gap-4 px-4.5 py-3">
-          <div class="min-w-0 flex-1 space-y-0.5">
-            <div class="font-semibold">{{ t(`ast.feature.${f}`) }}</div>
-            <p class="text-[13px] text-muted">{{ t(`ast.featureHelp.${f}`) }}</p>
+        <div v-for="f in FEATURES" :key="f">
+          <div class="flex items-center gap-4 px-4.5 py-3">
+            <div class="min-w-0 flex-1 space-y-0.5">
+              <div class="font-semibold">{{ t(`ast.feature.${f}`) }}</div>
+              <p class="text-[13px] text-muted">{{ t(`ast.featureHelp.${f}`) }}</p>
+            </div>
+            <button
+              role="switch"
+              type="button"
+              class="switch disabled:opacity-50"
+              :aria-checked="status.features[f]"
+              :aria-label="t(`ast.feature.${f}`)"
+              :disabled="busy || locked('features')"
+              @click="toggleFeature(f)"
+            >
+              <span class="switch-knob" />
+            </button>
           </div>
-          <button
-            role="switch"
-            type="button"
-            class="switch disabled:opacity-50"
-            :aria-checked="status.features[f]"
-            :aria-label="t(`ast.feature.${f}`)"
-            :disabled="busy || locked('features')"
-            @click="toggleFeature(f)"
-          >
-            <span class="switch-knob" />
-          </button>
+          <SessionConsent v-if="f === 'session'" :status="status" @changed="take" />
         </div>
       </div>
 

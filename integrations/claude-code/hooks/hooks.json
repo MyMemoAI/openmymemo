@@ -1,5 +1,5 @@
 {
-  "description": "Load the user's OpenMyMemo memory into each new session.",
+  "description": "Load the user's OpenMyMemo memory into each new session, and at its end let the OpenMyMemo Assistant file what the session taught (only with its session feature on and the user's consent).",
   "hooks": {
     "SessionStart": [
       {
@@ -11,6 +11,18 @@
             "args": ["${CLAUDE_PLUGIN_ROOT}/integrations/hooks/session-start.sh", "${CLAUDE_PLUGIN_ROOT}", "claude-code"],
             "timeout": 30,
             "statusMessage": "Loading your OpenMyMemo memory"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/integrations/hooks/session-end.sh", "${CLAUDE_PLUGIN_ROOT}", "claude-code"],
+            "timeout": 15
           }
         ]
       }

@@ -1,0 +1,14 @@
+[
+ {
+  "uuid": "a1",
+  "name": "Garden planning",
+  "created_at": "2026-05-01T10:00:00.000000Z",
+  "updated_at": "2026-05-01T10:05:00.000000Z",
+  "chat_messages": [
+   {"uuid": "x1", "sender": "human", "text": "", "content": [{"type": "text", "text": "I grow tomatoes on my balcony in Berlin."}], "created_at": "2026-05-01T10:00:00.000000Z"},
+   {"uuid": "x2", "sender": "assistant", "text": "Great, here are some tips.", "content": [{"type": "text", "text": "Great, here are some tips."}, {"type": "tool_use", "name": "x"}], "created_at": "2026-05-01T10:01:00.000000Z"},
+   {"uuid": "x3", "sender": "human", "text": "Please always answer in German.", "created_at": "2026-05-01T10:05:00.000000Z"}
+  ]
+ },
+ {"uuid": "a2", "name": "Empty", "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z", "chat_messages": []}
+]

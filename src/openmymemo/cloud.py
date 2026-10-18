@@ -1089,7 +1089,7 @@ class Bridge:
                 self._connector(client), op, **fields,
                 # The AI's own key, so retrying the same call live once the computer is back is a duplicate;
                 # without one, the queue id, which a replayed item carries again.
-                idempotency_key=key or qid, created_at=made_at, queue_id=qid)
+                idempotency_key=key or qid, created_at=made_at, queue_id=qid, check=True)
         except VaultError:  # revoked, read-only, a blocked topic, a bad proposal
             self._refused(client, op, qid)
             return "rejected"

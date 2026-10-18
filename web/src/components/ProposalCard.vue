@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 import { api, type Proposal } from "../api";
 import type { IconName } from "../icons";
 import { relTime, t } from "../i18n";
-import { act, store, topicTitle } from "../store";
+import { act, quoted, store, topicTitle } from "../store";
 import AppIcon from "./AppIcon.vue";
 
 /** A proposal that waits for the user's decision, or (in History) one that was decided. */
@@ -23,6 +23,7 @@ const HOLD: Record<string, { cls: string; icon: IconName | null }> = {
   private: { cls: "chip-private", icon: "lock" },
   protected: { cls: "chip-wait", icon: "pencil" },
   approval: { cls: "", icon: null },
+  sensitive: { cls: "chip-private", icon: "warning" },
   review: { cls: "chip-wait", icon: null },
 };
 const DONE = ["accepted", "edited_accepted", "applied"];
@@ -94,9 +95,10 @@ const undo = () => run(() => api.undo(p.value.id), t("chg.undone"));
       <div v-if="p.conflict" class="flex items-center gap-1.5 text-danger-ink"><AppIcon name="warning" :size="14" />{{ t("rev.conflict") }}</div>
     </div>
 
-    <dl v-if="!compact && (p.reason || p.evidence)" class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-[13px] text-ink-2">
+    <dl v-if="!compact && (p.reason || p.evidence || p.check_note)" class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-[13px] text-ink-2">
       <template v-if="p.reason"><dt class="text-muted">{{ t("rev.why") }}</dt><dd>{{ p.reason }}</dd></template>
-      <template v-if="p.evidence"><dt class="text-muted">{{ t("rev.said") }}</dt><dd class="italic">“{{ p.evidence }}”</dd></template>
+      <template v-if="p.evidence"><dt class="text-muted">{{ t("rev.said") }}</dt><dd class="italic">{{ quoted(p.evidence) }}</dd></template>
+      <template v-if="p.check_note"><dt class="text-muted">{{ t("rev.checked") }}</dt><dd data-test="check-note">{{ p.check_note }}</dd></template>
     </dl>
 
     <div v-if="isPending" class="flex flex-wrap items-center gap-2 pt-0.5">

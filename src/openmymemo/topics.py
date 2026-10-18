@@ -33,7 +33,10 @@ IMPORT_SOURCE_NAMES = {"chatgpt": "ChatGPT", "claude": "Claude", "gemini": "Gemi
                        # memory and instruction files read from disk (memfiles.py)
                        "claude-code": "Claude Code", "codex": "Codex", "gemini-cli": "Gemini CLI", "cursor": "Cursor",
                        "windsurf": "Windsurf", "cline": "Cline", "copilot": "GitHub Copilot", "kiro": "Kiro",
-                       "file": "memory files"}
+                       "file": "memory files",
+                       # chats read by the OpenMyMemo Assistant (assistant/chats.py)
+                       "chatgpt-export": "ChatGPT chats", "claude-export": "Claude chats",
+                       "claude-code-sessions": "Claude Code sessions", "codex-sessions": "Codex sessions"}
 
 # Topics whose content goes first in what an AI sees.
 CONTEXT_PRIORITY = ["how-to-work-with-me", "identity", "work", "projects", "goals"]

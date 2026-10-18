@@ -187,6 +187,20 @@ class AssistantPatch(BaseModel):
     private_topics: list[str] | None = None
     caps: AssistantCaps | None = None
     timeout: float | None = None
+    check_budget: float | None = None
+    session_apps: dict[str, str] | None = None  # app → allowed | declined
+
+
+class ChatPlanIn(BaseModel):
+    """A chat export or agent sessions to read with the Assistant: a path in the home folder, or an uploaded file."""
+    source: str
+    path: str | None = None
+    name: str | None = None
+    text: str | None = None
+
+
+class ChatStartIn(BaseModel):
+    max_calls: int | None = None
 
 
 class SemanticPatch(BaseModel):
@@ -529,6 +543,17 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
             ensure_connector(vault, regrant=bool(changes.get("enabled")))
         return Assistant(vault, settings).status()
 
+    @api.post("/api/assistant/sessions/{app_id}")
+    def assistant_session_consent(app_id: str, body: dict[str, bool]) -> dict:
+        """Allow or decline reading an app's sessions when they end (``{"allow": true|false}``)."""
+        if "allow" not in body:
+            raise HTTPException(400, "Say whether to allow it.")
+        try:
+            settings = save_settings(session_apps={app_id: "allowed" if body["allow"] else "declined"})
+        except SettingsError as e:
+            raise HTTPException(400, str(e)) from None
+        return Assistant(vault, settings).status()
+
     @api.post("/api/assistant/test")
     def test_assistant() -> dict:
         return Assistant.from_settings(vault).test()
@@ -661,6 +686,119 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
             raise HTTPException(400, f"{name}: {e}") from None
         return {"source": source, "name": name, "items": [i.to_dict() for i in items]}
 
+    # ---- chat exports and agent sessions, read by the Assistant (product-design.md §17.5) ----------------------
+    # Parsed once, kept in this process (never on disk) between the cost estimate and the run; a few at a time.
+
+    chat_jobs: dict[str, dict[str, Any]] = {}
+    chat_lock = threading.Lock()
+
+    def chat_job(job_id: str) -> dict[str, Any]:
+        with chat_lock:
+            job = chat_jobs.get(job_id)
+        if job is None:
+            raise HTTPException(404, "That import isn't here any more. Choose the file again.")
+        return job
+
+    def chat_view(job_id: str, job: dict[str, Any]) -> dict:
+        out = {"job": job_id, "state": job["state"], "done": job["done"], "total": job["total"],
+               "error": job["runner"].error, "failed": job["runner"].failed, **job["plan"]}
+        if job["state"] == "done":
+            out["items"] = [i.to_dict() for i in job["items"]]
+        return out
+
+    @api.post("/api/import/chats")
+    def chat_plan(body: ChatPlanIn) -> dict:
+        """Read a chat export or sessions and say what reading them with the Assistant would cost. No call yet."""
+        import secrets
+        import zipfile
+
+        from .assistant import chats
+
+        if body.source not in chats.CHAT_SOURCES:
+            raise HTTPException(400, f"source must be one of {', '.join(chats.CHAT_SOURCES)}")
+        try:
+            if body.path is not None and body.path.strip():
+                real, home = resolved(body.path), home_dir()
+                if not real.startswith(home) or past_home(real, home):
+                    raise HTTPException(400, outside_home)
+                target = Path(real)
+                if body.source in chats.EXPORT_SOURCES:
+                    convs = chats.read_export(body.source, target)
+                elif target.is_dir():
+                    convs = chats.read_sessions(body.source, target)
+                else:
+                    conv = chats.read_transcript(body.source, target)
+                    convs = [conv] if conv else []
+            elif body.text is not None and body.name:
+                if len(body.text) > chats.MAX_UPLOAD_BYTES:
+                    raise HTTPException(400, f"{Path(body.name).name} is larger than the panel reads (50 MB); "
+                                             "give its path in your home folder instead.")
+                if body.source in chats.EXPORT_SOURCES:
+                    convs = chats.parse_export(body.source, body.text)
+                else:
+                    parse = chats.parse_claude_code if body.source == "claude-code-sessions" else chats.parse_codex
+                    conv = parse(body.text.splitlines(), Path(body.name).stem)
+                    convs = [conv] if conv else []
+            else:
+                raise HTTPException(400, "Give a path, or a file's name and text.")
+        except (ValueError, zipfile.BadZipFile) as e:
+            raise HTTPException(400, str(e) if isinstance(e, ValueError) else "That .zip can't be read.") from None
+        except OSError:
+            raise HTTPException(400, "Couldn't read that file or folder.") from None
+        runner = chats.ChatImport(vault, body.source, convs)
+        job_id = secrets.token_hex(8)
+        job = {"runner": runner, "plan": runner.plan(), "state": "planned", "done": 0,
+               "total": len(runner.chunks), "items": [], "cancel": False}
+        with chat_lock:
+            while len(chat_jobs) >= 3:
+                chat_jobs.pop(next(iter(chat_jobs)))["cancel"] = True
+            chat_jobs[job_id] = job
+        return chat_view(job_id, job)
+
+    @api.post("/api/import/chats/{job_id}/start")
+    def chat_start(job_id: str, body: ChatStartIn) -> dict:
+        job = chat_job(job_id)
+        runner = job["runner"]
+        if job["state"] != "planned":
+            raise HTTPException(409, "This import has already started.")
+        from .assistant import chats
+
+        current = chats.permitted(runner.assistant, "import", runner.planned)
+        if current is None:
+            with chat_lock:
+                chat_jobs.pop(job_id, None)
+            raise HTTPException(409, chats.SETTINGS_CHANGED)
+        if not current.available("import"):  # a monthly limit
+            raise HTTPException(400, current.unavailable_reason("import") or "The Assistant isn't available.")
+        total = len(runner.chunks) if body.max_calls is None else min(len(runner.chunks), max(1, body.max_calls))
+        job.update(state="running", total=total)
+
+        def progress(done: int, _total: int) -> None:
+            job["done"] = done
+
+        def run() -> None:
+            try:
+                job["items"] = runner.run(total, progress=progress, cancelled=lambda: job["cancel"])
+                job["state"] = "cancelled" if job["cancel"] else "done"
+            except Exception:  # noqa: BLE001 - reported as a state, never as a stack trace
+                runner.error = runner.error or "Something went wrong reading the chats."
+                job["state"] = "failed"
+
+        threading.Thread(target=run, name="openmymemo-chat-import", daemon=True).start()
+        return chat_view(job_id, job)
+
+    @api.get("/api/import/chats/{job_id}")
+    def chat_status(job_id: str) -> dict:
+        return chat_view(job_id, chat_job(job_id))
+
+    @api.delete("/api/import/chats/{job_id}")
+    def chat_cancel(job_id: str) -> dict:
+        with chat_lock:
+            job = chat_jobs.pop(job_id, None)
+        if job is not None:
+            job["cancel"] = True
+        return {"ok": True}
+
     @api.post("/api/import/commit")
     def import_commit(body: ImportCommitIn) -> dict:
         fields = transfer.ImportItem.__dataclass_fields__
@@ -714,7 +852,7 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
 
     @api.post("/v1/propose")
     def v1_propose(body: ProposeIn, c: Connector = bearer) -> dict:
-        out = proposals.propose(c, body.op, **body.model_dump(exclude={"op"}))  # includes `hold`
+        out = proposals.propose(c, body.op, **body.model_dump(exclude={"op"}), check=True)  # includes `hold`
         if out.get("status") in ("applied", "pending"):
             out["review_url"] = f"{base_url}/#/changes"
         return out

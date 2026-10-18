@@ -37,6 +37,11 @@ PROTOCOLS = ("openai", "anthropic")
 DEFAULT_FEATURES = {"import": True, "sort": True, "recall": True, "check": True, "session": False, "tidy": False}
 DEFAULT_CAPS = {"calls": 1000, "tokens": 2_000_000}
 DEFAULT_TIMEOUT = 60.0
+DEFAULT_CHECK_BUDGET = 2.0  # seconds a proposal may wait for the Assistant's check before today's rules file it
+CHECK_BUDGET_RANGE = (0.5, 30.0)
+# Session-end extraction asks per app (§17.7): the apps whose hooks can call it, and what the person said.
+SESSION_APPS = ("claude-code", "codex")
+CONSENT = ("allowed", "declined", "asked")
 DEFAULT_URLS = {
     ("local", "openai"): "http://127.0.0.1:11434/v1",  # Ollama; LM Studio is :1234/v1, llama.cpp :8080/v1
     ("key", "openai"): "https://api.openai.com/v1",
@@ -80,6 +85,8 @@ class Settings:
     caps: dict[str, int | None] = field(default_factory=lambda: dict(DEFAULT_CAPS))
     usage: dict[str, Any] = field(default_factory=dict)  # {"month": "2026-10", "calls": n, "tokens": n}
     timeout: float = DEFAULT_TIMEOUT
+    check_budget: float = DEFAULT_CHECK_BUDGET
+    session_apps: dict[str, str] = field(default_factory=dict)  # app id → allowed | declined | asked
     from_env: list[str] = field(default_factory=list)  # fields an OPENMYMEMO_ASSISTANT_* variable sets
     key_store: str | None = None  # where the secret in use came from: keychain | file | env | None
 
@@ -259,6 +266,10 @@ def _cap(value: Any) -> int | None:
     return n if n > 0 else None
 
 
+def _budget(value: float) -> float:
+    return min(max(float(value), CHECK_BUDGET_RANGE[0]), CHECK_BUDGET_RANGE[1])
+
+
 def _truthy(text: str) -> bool:
     return text.strip().lower() in ("1", "true", "yes", "on")
 
@@ -286,6 +297,11 @@ def _from_raw(data: Mapping[str, Any]) -> Settings:
         s.usage = dict(data["usage"])
     if isinstance(data.get("timeout"), int | float) and not isinstance(data.get("timeout"), bool):
         s.timeout = min(max(float(data["timeout"]), 5.0), 600.0)
+    if isinstance(data.get("check_budget"), int | float) and not isinstance(data.get("check_budget"), bool):
+        s.check_budget = _budget(data["check_budget"])
+    apps = data.get("session_apps")
+    if isinstance(apps, dict):
+        s.session_apps = {k: v for k, v in apps.items() if k in SESSION_APPS and v in CONSENT}
     for name, account in SECRETS.items():
         where = data.get(f"{name}_in")
         if where == "keychain":
@@ -340,6 +356,10 @@ def _apply_env(s: Settings, env: Mapping[str, str]) -> None:
         with contextlib.suppress(ValueError):
             s.timeout = min(max(float(v), 5.0), 600.0)
             s.from_env.append("timeout")
+    if (v := get("CHECK_BUDGET")) is not None:
+        with contextlib.suppress(ValueError):
+            s.check_budget = _budget(float(v))
+            s.from_env.append("check_budget")
 
 
 def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
@@ -379,7 +399,8 @@ def save_settings(*, enabled: bool | None = None, kind: str | None = None, proto
                   api_key: str | None = None,
                   mymemo_token: str | None = None, features: Mapping[str, bool] | None = None,
                   private_topics: list[str] | None = None, caps: Mapping[str, Any] | None = None,
-                  timeout: float | None = None) -> Settings:
+                  timeout: float | None = None, check_budget: float | None = None,
+                  session_apps: Mapping[str, str] | None = None) -> Settings:
     """Change the stored settings (None leaves a field alone; ``""`` clears a URL, model or secret). Validates
     before writing anything; raises SettingsError. Returns the settings now in force (environment included)."""
     with _lock():
@@ -432,6 +453,14 @@ def save_settings(*, enabled: bool | None = None, kind: str | None = None, proto
             raw["caps"] = {**DEFAULT_CAPS, **stored, **{k: _cap(v) for k, v in caps.items()}}
         if timeout is not None:
             raw["timeout"] = min(max(float(timeout), 5.0), 600.0)
+        if check_budget is not None:
+            raw["check_budget"] = _budget(check_budget)
+        if session_apps is not None:
+            bad = [k for k, v in session_apps.items() if k not in SESSION_APPS or v not in CONSENT]
+            if bad:
+                raise SettingsError(f"Unknown app or answer: {', '.join(sorted(bad))}")
+            stored = raw.get("session_apps") if isinstance(raw.get("session_apps"), dict) else {}
+            raw["session_apps"] = {**stored, **session_apps}
         for name, value in (("api_key", api_key), ("mymemo_token", mymemo_token)):
             if value is None:
                 continue
@@ -488,3 +517,19 @@ def reserve_call(caps: Mapping[str, int | None]) -> str | None:
         raw["usage"] = usage
         _write(raw)
         return None
+
+
+def ask_session_consent(app: str) -> str | None:
+    """What the person said about reading ``app``'s sessions; the first time, records the question as ``asked`` so
+    the panel shows it (product-design.md §17.7: asked per app on first use). Returns the answer, or ``asked``."""
+    if app not in SESSION_APPS:
+        return None
+    with _lock():
+        raw = _read_raw()
+        apps = raw.get("session_apps") if isinstance(raw.get("session_apps"), dict) else {}
+        answer = apps.get(app)
+        if answer in CONSENT:
+            return answer
+        raw["session_apps"] = {**apps, app: "asked"}
+        _write(raw)
+        return "asked"

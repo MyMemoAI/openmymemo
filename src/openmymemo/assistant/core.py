@@ -39,7 +39,7 @@ from ..vault import Memory, NotFound, Vault, VaultError, now_iso
 from . import client as endpoint
 from .guard import Guard
 from .schema import Invalid, clean, extract_json, wire_schema
-from .settings import FEATURES, Settings, load_settings, record_usage, reserve_call
+from .settings import FEATURES, SESSION_APPS, Settings, load_settings, record_usage, reserve_call
 
 log = logging.getLogger("openmymemo.assistant")
 
@@ -153,7 +153,8 @@ class Assistant:
             "embeddings_model": s.embeddings_model, "embeddings": s.embeddings_available, "has_key": bool(s.secret),
             "key_store": s.key_store if s.secret else None, "features": {k: s.features.get(k, False) for k in FEATURES},
             "private_topics": list(s.private_topics), "caps": dict(s.caps), "usage": s.month_usage(),
-            "timeout": s.timeout, "from_env": list(s.from_env), "local": s.local, "problem": s.problem(),
+            "timeout": s.timeout, "check_budget": s.check_budget,
+            "session_apps": {app: s.session_apps.get(app) for app in SESSION_APPS}, "from_env": list(s.from_env), "local": s.local, "problem": s.problem(),
             "ready": s.enabled and self.unavailable_reason() is None, "reason": self.unavailable_reason(),
             "where": where_text_goes(s), "connector_id": CONNECTOR_ID if c else None, "revoked": revoked,
             "kinds": {"local": True, "key": True, "mymemo": False},  # MyMemo's hosted model: coming (§17.8)

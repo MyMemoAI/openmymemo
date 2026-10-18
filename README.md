@@ -137,7 +137,18 @@ openmymemo assistant test                                        # one tiny requ
 openmymemo assistant status | off
 ```
 
-With it on, imports are split into memories by the model (the preview flags any line it left out), and "Sort into topics" gets the model's suggestions. AI apps' searches and `openmymemo recall` get related words and translations added and the best matches put first.
+With it on, imports are split into memories by the model (the preview flags any line it left out), and "Sort into topics" gets the model's suggestions. AI apps' searches and `openmymemo recall` get related words and translations added and the best matches put first. It also:
+
+- **checks what AI apps propose** before it is filed: duplicates and contradictions that word overlap misses, a topic when the app gave none, and anything that looks like health, money or credentials goes to a private topic or waits for you. It gets 2 seconds (`openmymemo assistant set --check-budget 3` to change); if it takes longer or fails, the change is filed as without it, and the app is never held up.
+- **reads chat exports and agent sessions** on the Import page's Chats tab or from the terminal, newest first, with the cost shown before it starts. Each suggestion comes with the words it came from, in the usual preview:
+
+  ```bash
+  openmymemo import chatgpt-export ~/Downloads/chatgpt-export.zip   # or the conversations.json inside it
+  openmymemo import claude-export ~/Downloads/claude-export.zip
+  openmymemo import claude-code-sessions                             # ~/.claude/projects, or one project or session file
+  openmymemo import codex-sessions --max-calls 20                    # ~/.codex/sessions, the newest 20 parts
+  ```
+- **saves what a Claude Code or Codex session taught** that the app didn't, when the session ends (off until you turn on "Reading sessions", then asked per app: `openmymemo assistant sessions --allow claude-code`). The plugin's session-end hook and the Codex hook from `openmymemo setup codex` run it; the transcript is read on your computer and never stored, and what it saves are the Assistant's proposals, each with your quoted words.
 
 **Tidy up** (turn it on with `--feature tidy=on` or its switch in Settings → Assistant) looks through your memories and files one batch of changes: merging near-duplicates, replacing a memory a later one contradicts, adding review dates to time-bound memories, rewriting memories that are too long, and asking about memories that may be outdated (those only go if you say so). Changes to memories you wrote wait for you too; the rest apply and can be undone. The batch shows up as "Tidy-up, <date>: N changes" with Keep all / Undo all on the Changes page and in `openmymemo review`, and a suggestion you rejected or undid isn't made again. Private topics are never included.
 

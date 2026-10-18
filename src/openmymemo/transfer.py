@@ -13,6 +13,11 @@ Supported import sources:
   — a memory or instructions file another AI app keeps on disk (CLAUDE.md, AGENTS.md, GEMINI.md, Cursor rules,
   memory.md, …; ``memfiles`` finds them). Each list item or paragraph is one memory.
 
+Chat exports and agent transcripts (``chatgpt-export``, ``claude-export``, ``claude-code-sessions``,
+``codex-sessions``; ``CHAT_SOURCES``) need the OpenMyMemo Assistant to read: ``assistant.chats`` turns them into the
+same preview items, each with its evidence (the person's quoted message and its date), and ``commit`` saves them like
+any import.
+
 Imports always go through a preview: parse → check duplicates → commit. With the OpenMyMemo Assistant on for imports,
 ``assistant.features.import_preview`` splits the text with the model instead and cross-checks it against ``parse``. Nothing is classified into a topic at
 import time: memories land in a topic of their own, ``from-<source>`` in the "Imported" group, in the source's
@@ -33,6 +38,8 @@ from .vault import NotFound, Vault, VaultError, now_iso
 
 DOCUMENT_SOURCES = ("claude-code", "codex", "gemini-cli", "cursor", "windsurf", "cline", "copilot", "kiro", "file")
 SOURCES = ("chatgpt", "claude", "gemini", "text", "markdown", "json", *DOCUMENT_SOURCES)
+# Read by the Assistant only (assistant/chats.py); they share the preview and commit.
+CHAT_SOURCES = ("chatgpt-export", "claude-export", "claude-code-sessions", "codex-sessions")
 EXPORT_FORMATS = ("markdown", "claude", "chatgpt", "json")
 SORT_SURE_AT = 0.5  # suggestions at or above this confidence are applied by `sort --yes`
 
@@ -61,7 +68,9 @@ class ImportItem:
     similar_content: str | None = None
     include: bool = True
     by: str | None = None  # who split it: "assistant" or "rules" when the Assistant was on for imports, else None
-    flag: str | None = None  # "dropped": the Assistant left this line out, the rules would have kept it
+    flag: str | None = None  # "dropped": the Assistant left this line out, the rules would have kept it;
+    # "sensitive": read from a chat, it looks like health, money or a secret (unticked)
+    evidence: str | None = None  # from a chat: the person's quoted message and its date
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -288,8 +297,8 @@ def import_topic(vault: Vault, source: str) -> tuple[str, str]:
 def commit(vault: Vault, items: list[ImportItem], source: str) -> list[str]:
     """Save the included items in the order given: into the topic an item names if it exists, otherwise into
     ``from-<source>`` (created on the first import from that source). Returns the new memory ids."""
-    if source not in SOURCES:
-        raise ValueError(f"source must be one of {', '.join(SOURCES)}")
+    if source not in SOURCES and source not in CHAT_SOURCES:
+        raise ValueError(f"source must be one of {', '.join(SOURCES + CHAT_SOURCES)}")
     ids: list[str] = []
     with vault.lock():
         slugs = {t["slug"] for t in vault.topics()}
@@ -302,7 +311,8 @@ def commit(vault: Vault, items: list[ImportItem], source: str) -> list[str]:
                 if topic is None:
                     topic = inbox = inbox or vault.ensure_import_topic(source)
                 m = vault.add(topic, it.content, kind=it.kind if it.kind in KINDS else None,
-                              source=f"import:{source}", actor=f"import:{source}", created_at=_created_at(it.created_at))
+                              source=f"import:{source}", actor=f"import:{source}", created_at=_created_at(it.created_at),
+                              evidence=it.evidence if isinstance(it.evidence, str) and it.evidence else None)
                 ids.append(m.id)
         finally:
             vault.log_activity("user", "import", source=source, memory_ids=ids)

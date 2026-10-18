@@ -7,6 +7,7 @@ import DigestRow from "../components/DigestRow.vue";
 import HistoryDialog from "../components/HistoryDialog.vue";
 import PageHeader from "../components/PageHeader.vue";
 import ProposalCard from "../components/ProposalCard.vue";
+import SessionConsent from "../components/SessionConsent.vue";
 import TidyDialog from "../components/TidyDialog.vue";
 import { dayKey, dayLabel, t, tn } from "../i18n";
 import { act, pending, store, toast } from "../store";
@@ -101,6 +102,7 @@ watch([tab, () => store.version], () => tab.value === "history" && loadHistory()
   <div class="mx-auto max-w-[820px] space-y-5">
     <PageHeader :title="t('nav.changes')" :subtitle="t('chg.subtitle')" />
     <ApprovalSwitch />
+    <SessionConsent banner />
     <div v-if="tidyShown" class="flex justify-end">
       <button class="btn btn-sm" data-test="tidy-open" @click="tidyOpen = true"><AppIcon name="refresh" :size="14" />{{ t("tidy.button") }}</button>
     </div>
