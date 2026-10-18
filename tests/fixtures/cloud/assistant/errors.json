@@ -1,8 +1,8 @@
 {
   "note": "Errors from /openmymemo/assistant/v1/* in the OpenAI shape. 401 carries WWW-Authenticate; 429 and 503 carry Retry-After (seconds).",
-  "invalid_token": {"status": 401, "body": {"error": {"message": "invalid or expired token", "type": "invalid_request_error", "param": null, "code": "invalid_token"}}},
+  "invalid_token": {"status": 401, "body": {"error": {"message": "invalid or expired token", "type": "authentication_error", "param": null, "code": "invalid_token"}}},
   "plan_required": {"status": 402, "body": {"error": {"message": "This needs the OpenMyMemo Assistant plan.", "type": "insufficient_quota", "param": null, "code": "plan_required", "plan_url": "https://app.mymemo.ai/openmymemo/assistant", "resets_at": null}}},
   "quota_exceeded": {"status": 402, "body": {"error": {"message": "This month's allowance is used up.", "type": "insufficient_quota", "param": null, "code": "quota_exceeded", "plan_url": "https://app.mymemo.ai/openmymemo/assistant", "resets_at": "2026-11-01T00:00:00Z"}}},
   "rate_limit_exceeded": {"status": 429, "retry_after": "20", "body": {"error": {"message": "Too many requests.", "type": "rate_limit_error", "param": null, "code": "rate_limit_exceeded"}}},
-  "model_unavailable": {"status": 503, "retry_after": "30", "body": {"error": {"message": "The model is unavailable.", "type": "api_error", "param": null, "code": "model_unavailable"}}}
+  "model_unavailable": {"status": 503, "retry_after": "30", "body": {"error": {"message": "The model is unavailable.", "type": "server_error", "param": null, "code": "model_unavailable"}}}
 }
