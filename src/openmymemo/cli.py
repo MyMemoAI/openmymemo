@@ -973,7 +973,8 @@ def _assistant_status(vault: Vault) -> None:
         typer.echo("  Model:     MyMemo's hosted model (see `openmymemo assistant plan`)")
         typer.echo(f"  Endpoint:  {s['endpoint']}")
         if m["signed_in"]:
-            how = " with this computer's MyMemo Cloud link" if m["via"] == "cloud" else ""
+            how = {"cloud": " with this computer's MyMemo Cloud link",
+                   "env": " (the token in OPENMYMEMO_ASSISTANT_API_KEY)"}.get(m["via"] or "", "")
             who = cloud.account_label(m["account"]) if m["account"] else "a MyMemo account"
             typer.echo(f"  Signed in: {who}{how}")
         else:

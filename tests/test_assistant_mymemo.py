@@ -588,3 +588,81 @@ def test_environment_failures_never_touch_a_stored_sign_in_and_vice_versa(vault,
     assert Assistant.from_settings(vault).available("sort")
     assert Assistant.from_settings(vault).json_call("sort", "x", ["t"], SCHEMA) is not None
     assert raw()["mymemo"]["hold"]["code"] == "quota_exceeded" and raw().get("mymemo_env") == paused_env
+
+
+def use_env(monkeypatch, token: str) -> None:
+    monkeypatch.setenv("OPENMYMEMO_ASSISTANT_API_KEY", token)
+
+
+def env_hold_for(token: str, service: str, code: str = "rate_limited", seconds: int = 600) -> tuple[str, dict]:
+    until = mymemo._iso(mymemo._now() + timedelta(seconds=seconds))
+    return mymemo._env_identity(token, service), {"code": code, "resets_at": None, "plan_url": None, "until": until}
+
+
+def test_each_environment_token_keeps_its_own_pause(vault, fake, monkeypatch):
+    a = env_token(vault, fake, monkeypatch)
+    b = fake.tokens_for_keep()["access"]
+    fake.fail("rate_limit_exceeded")
+    assert Assistant.from_settings(vault).json_call("sort", "x", ["t"], SCHEMA) is None  # A paused
+    use_env(monkeypatch, b)
+    fake.fail("rate_limit_exceeded")
+    assert Assistant.from_settings(vault).json_call("sort", "x", ["t"], SCHEMA) is None  # B paused
+    use_env(monkeypatch, a)
+    fresh = Assistant.from_settings(vault)
+    assert not fresh.available("sort") and fresh.json_call("sort", "x", ["t"], SCHEMA) is None  # A still paused
+    assert len(fake.chats) == 2 and len(raw()["mymemo_env"]["holds"]) == 2
+
+
+def test_lifting_one_tokens_pause_leaves_the_others(vault, fake, monkeypatch):
+    a = env_token(vault, fake, monkeypatch)
+    b = fake.tokens_for_keep()["access"]
+    fake.fail("rate_limit_exceeded")
+    assert Assistant.from_settings(vault).json_call("sort", "x", ["t"], SCHEMA) is None
+    use_env(monkeypatch, b)
+    fake.fail("plan_required")
+    assert Assistant.from_settings(vault).json_call("sort", "x", ["t"], SCHEMA) is None
+    assert mymemo.account(load_settings())["ok"]  # B's plan is active: B's pause is lifted
+    assert Assistant.from_settings(vault).available("sort")
+    use_env(monkeypatch, a)
+    assert not Assistant.from_settings(vault).available("sort")
+    assert list(raw()["mymemo_env"]["holds"]) == [mymemo._env_identity(a, fake.base)]
+
+
+def test_expired_pauses_are_dropped_and_the_map_is_capped(vault, fake, monkeypatch):
+    a = env_token(vault, fake, monkeypatch)
+    stale = dict([env_hold_for("old-token", fake.base, seconds=-60)])
+    many = dict(env_hold_for(f"tok-{i}", fake.base, seconds=1000 + i) for i in range(mymemo.ENV_HOLDS_MAX))
+    stored = raw()
+    stored["mymemo_env"] = {"holds": {**stale, **many}}
+    settings_mod._write(stored)
+    fake.fail("rate_limit_exceeded")  # A's pause ends in 20 s: sooner than all the others, and still kept
+    assert Assistant.from_settings(vault).json_call("sort", "x", ["t"], SCHEMA) is None
+    holds = raw()["mymemo_env"]["holds"]
+    me = mymemo._env_identity(a, fake.base)
+    assert len(holds) == mymemo.ENV_HOLDS_MAX and me in holds and not set(stale) & set(holds)
+    assert mymemo._env_identity("tok-0", fake.base) not in holds  # the one ending soonest went
+    assert mymemo._env_identity(f"tok-{mymemo.ENV_HOLDS_MAX - 1}", fake.base) in holds
+
+
+def test_a_pause_in_the_single_slot_of_earlier_builds_is_still_honoured(vault, fake, monkeypatch):
+    a = env_token(vault, fake, monkeypatch)
+    identity, h = env_hold_for(a, fake.base)
+    stored = raw()
+    stored["mymemo_env"] = {"identity": identity, "hold": h}
+    settings_mod._write(stored)
+    assert not Assistant.from_settings(vault).available("sort")
+    use_env(monkeypatch, fake.tokens_for_keep()["access"])  # another token's pause: written beside it, as a map
+    fake.fail("model_unavailable")
+    assert Assistant.from_settings(vault).json_call("sort", "x", ["t"], SCHEMA) is None
+    assert raw()["mymemo_env"]["holds"][identity] == h and len(raw()["mymemo_env"]["holds"]) == 2
+    use_env(monkeypatch, a)
+    assert not Assistant.from_settings(vault).available("sort")
+
+
+def test_with_an_environment_token_the_stored_sign_ins_account_isnt_shown(vault, fake, api, monkeypatch):
+    signed_in(vault, fake)  # as Sam, through the MyMemo Cloud link
+    env_token(vault, fake, monkeypatch)
+    m = api.get("/api/assistant", headers=H).json()["mymemo"]
+    assert m["signed_in"] and m["via"] == "env" and m["account"] is None and m["signed_in_at"] is None
+    r = CliRunner().invoke(app, ["--vault", str(vault.root), "assistant", "status"])
+    assert "Sam" not in r.stdout and "OPENMYMEMO_ASSISTANT_API_KEY" in r.stdout

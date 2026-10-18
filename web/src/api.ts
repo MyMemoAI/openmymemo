@@ -387,8 +387,8 @@ export interface AssistantHold {
 export interface AssistantMyMemo {
   signed_in: boolean;
   service: string;
-  /** cloud: the token came from this computer's MyMemo Cloud link; browser: a sign-in in the browser. */
-  via: "cloud" | "browser" | null;
+  /** cloud: the token came from this computer's MyMemo Cloud link; browser: a sign-in in the browser; env: OPENMYMEMO_ASSISTANT_API_KEY. */
+  via: "cloud" | "browser" | "env" | null;
   /** The MyMemo account, when known (from the MyMemo Cloud link): its name and masked email. */
   account: { display_name?: string; email_masked?: string } | null;
   signed_in_at: string | null;

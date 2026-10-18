@@ -428,12 +428,49 @@ def _env_identity(token: str, service: str) -> str:
     return _hash(f"{token}|{norm_service(service)}")
 
 
+ENV_HOLDS_MAX = 32  # pauses kept for environment tokens at once
+
+
+def _env_holds(raw: Mapping[str, Any]) -> dict[str, dict]:
+    """The pauses kept for environment tokens, by identity (``raw["mymemo_env"]["holds"]``). Reads the single
+    ``{"identity", "hold"}`` slot of earlier builds as a map of one."""
+    slot = raw.get("mymemo_env")
+    if not isinstance(slot, dict):
+        return {}
+    if isinstance(slot.get("holds"), dict):
+        return {k: v for k, v in slot["holds"].items() if isinstance(k, str) and isinstance(v, dict)}
+    if isinstance(slot.get("identity"), str) and isinstance(slot.get("hold"), dict):
+        return {slot["identity"]: slot["hold"]}
+    return {}
+
+
 def _env_hold(s: Settings, raw: Mapping[str, Any] | None = None) -> dict | None:
-    """The pause kept for the environment's token (``raw["mymemo_env"]``), if it is for this token and service."""
-    slot = (st._read_raw() if raw is None else raw).get("mymemo_env")
-    if not isinstance(slot, dict) or slot.get("identity") != _env_identity(s.mymemo_token, service_of(s)):
-        return None
-    return slot.get("hold") if isinstance(slot.get("hold"), dict) else None
+    """The pause kept for the environment's token, if there is one for this token and service."""
+    holds = _env_holds(st._read_raw() if raw is None else raw)
+    return holds.get(_env_identity(s.mymemo_token, service_of(s)))
+
+
+def _until(h: Mapping[str, Any]) -> datetime:
+    return _parse(h.get("until")) or datetime.min.replace(tzinfo=UTC)
+
+
+def _put_env_hold(raw: dict[str, Any], identity: str, h: dict | None) -> bool:
+    """Set (or with None, lift) one identity's pause in the map; the others stay. Expired pauses are dropped, and
+    past ``ENV_HOLDS_MAX`` the ones that end soonest go, never the one being written. Returns whether to write."""
+    holds = _env_holds(raw)
+    if h is None and identity not in holds:
+        return False
+    now = _now()
+    holds = {k: v for k, v in holds.items() if k != identity and _until(v) > now}
+    if h is not None:
+        while len(holds) >= ENV_HOLDS_MAX:
+            holds.pop(min(holds, key=lambda k: _until(holds[k])))
+        holds[identity] = h
+    if holds:
+        raw["mymemo_env"] = {"holds": holds}
+    else:
+        raw.pop("mymemo_env", None)
+    return True
 
 
 def _stored_hold(s: Settings) -> dict | None:
@@ -528,14 +565,8 @@ def _set_hold(s: Settings, sess: Session, h: dict | None) -> None:
         identity = _env_identity(sess.token, sess.service)
         with st._lock():
             raw = st._read_raw()
-            slot = raw.get("mymemo_env")
-            if h is not None:
-                raw["mymemo_env"] = {"identity": identity, "hold": h}
-            elif isinstance(slot, dict) and slot.get("identity") == identity:
-                raw.pop("mymemo_env")
-            else:
-                return
-            st._write(raw)
+            if _put_env_hold(raw, identity, h):
+                st._write(raw)
         return
     with st._lock():
         raw = st._read_raw()
@@ -577,14 +608,16 @@ def _keep_member(s: Settings, sess: Session, member: Mapping[str, str]) -> None:
 
 
 def public_status(s: Settings) -> dict[str, Any]:
-    """MyMemo's part of ``Assistant.status()``: never a token."""
+    """MyMemo's part of ``Assistant.status()``: never a token. With a token from the environment, nothing of the
+    stored sign-in (its account, how or when it signed in) is shown: that isn't who the requests go as."""
     h = hold(s)
-    account = s.mymemo.get("account") if isinstance(s.mymemo.get("account"), dict) else {}
+    env = s.key_store == "env"
+    account = s.mymemo.get("account") if isinstance(s.mymemo.get("account"), dict) and not env else {}
     link = cloud.load_link()
     return {
         "signed_in": bool(s.mymemo_token), "service": service_of(s),
-        "via": s.mymemo.get("via") if s.mymemo_token else None,
-        "account": member_fields(account) or None, "signed_in_at": s.mymemo.get("signed_in_at"),
+        "via": "env" if env else s.mymemo.get("via") if s.mymemo_token else None,
+        "account": member_fields(account) or None, "signed_in_at": None if env else s.mymemo.get("signed_in_at"),
         "signed_out": s.mymemo.get("signed_out") if not s.mymemo_token else None,
         "cloud_linked": link is not None,
         "hold": ({"code": h.get("code"), "message": hold_message(h), "plan_url": h.get("plan_url"),
