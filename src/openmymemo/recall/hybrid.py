@@ -104,7 +104,7 @@ def _scope(vault: Vault, connector: Connector | None, topics: list[str] | None,
     else:
         topic_rows, mems = readable(vault, connector)
         titles = {t["slug"]: t["title"] for t in topic_rows}
-    return [m for m in mems if m.status == "active" and (not topics or m.topic in topics)], titles
+    return [m for m in mems if not topics or m.topic in topics], titles
 
 
 def _keyword_scores(mems: Sequence[Memory], titles: dict[str, str], query: str,

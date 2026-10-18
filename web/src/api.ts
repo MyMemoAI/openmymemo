@@ -54,7 +54,8 @@ export type ProposalStatus =
   | "pending" | "accepted" | "edited_accepted" | "rejected" | "expired" | "applied" | "undone";
 
 /** Why a pending proposal waits for the user. */
-export type Hold = "approval" | "protected" | "private";
+/** review: the proposer asked for a decision, e.g. a tidy-up's "possibly outdated" archive. */
+export type Hold = "approval" | "protected" | "private" | "review";
 
 export interface Proposal {
   id: string;
@@ -82,8 +83,55 @@ export interface Proposal {
   original_op: string | null;
   similarity: number | null;
   conflict: boolean;
+  /** A review date the change sets, and the one it replaced. */
+  until?: string | null;
+  before_until?: string | null;
+  /** Proposals one run filed together, e.g. "tidy-2026-10-25-1a2b" for a tidy-up. */
+  batch_id?: string | null;
   /** Computed by the server: the change is still the memory's latest version. */
   can_undo: boolean;
+}
+
+/** Tidy up (src/openmymemo/assistant/tidy.py): the schedule on this computer and whether it can run. */
+export interface TidyStatus {
+  enabled: boolean;
+  available: boolean;
+  reason: string | null;
+  max_calls: number;
+  schedule: "off" | "daily" | "weekly" | "monthly";
+  every_days: number | null;
+  last_run: string | null;
+  next_run: string | null;
+  due: boolean;
+}
+
+export interface TidyItem {
+  kind: "merge" | "contradiction" | "outdated" | "until" | "rewrite";
+  memory_ids: string[];
+  reason: string;
+  content: string | null;
+  until: string | null;
+  before: string[];
+  filed: { status?: string; proposal_id?: string }[];
+  error: string | null;
+}
+
+export interface TidyResult {
+  ok: boolean;
+  message: string;
+  dry_run: boolean;
+  batch_id: string | null;
+  memories: number;
+  left_out: number;
+  chunks: number;
+  calls: number;
+  estimate: { calls: number; tokens: number };
+  candidates: [string, string][];
+  items: TidyItem[];
+  applied: number;
+  waiting: number;
+  seen_before: number;
+  stopped: "unavailable" | "busy" | "limit" | "cap" | "error" | null;
 }
 
 export interface SortRow {
@@ -500,6 +548,12 @@ export const api = {
   reviewed: (id: string) => req<Proposal>("POST", `/api/proposals/${enc(id)}/reviewed`),
   /** "Looks good": every change in the digest is marked as seen. */
   reviewedAll: () => req<{ reviewed: number }>("POST", "/api/proposals/reviewed"),
+  /** Keep all / Undo all for a batch (a tidy-up) in the digest. */
+  keepBatch: (batch: string) => req<{ reviewed: number }>("POST", `/api/proposals/batches/${enc(batch)}/reviewed`),
+  undoBatch: (batch: string) => req<{ undone: number; kept: number }>("POST", `/api/proposals/batches/${enc(batch)}/undo`),
+  tidy: () => req<TidyStatus>("GET", "/api/tidy"),
+  tidySchedule: (schedule: TidyStatus["schedule"]) => req<TidyStatus>("PATCH", "/api/tidy", { schedule }),
+  tidyRun: (body: { dry_run?: boolean; topic?: string | null }) => req<TidyResult>("POST", "/api/tidy", body),
   /** Rewrite an applied change in the user's words; the memory becomes theirs. */
   editApplied: (id: string, content: string, topic?: string) =>
     req<Proposal>("POST", `/api/proposals/${enc(id)}/edit`, { content, topic }),

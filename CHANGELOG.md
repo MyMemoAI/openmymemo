@@ -9,6 +9,7 @@ What changed in each release, for people who use OpenMyMemo. Every release is al
   - **Sorting:** topic suggestions for imported memories come from the model.
   - Each feature has its own switch, and there are monthly limits on calls and tokens; at a limit, OpenMyMemo goes back to its rules.
   - Private topics are never sent to a remote model; a model on this computer reads only the private topics you pick. The key is kept on this computer only, in the Keychain on a Mac, never in your memory folder.
+  - **Tidy up** (off until you turn it on): `openmymemo tidy` or "Tidy up" on the Changes page files one batch of changes for near-duplicates, contradictions, possibly outdated memories, review dates and memories that are too long. Each change says why. Changes to memories you wrote, and archiving anything that may be outdated, wait for you; the rest apply. The batch is grouped as "Tidy-up, <date>: N changes" with Keep all / Undo all on the Changes page, in `openmymemo review` and in `log.md`, and a suggestion you rejected or undid isn't made again. `--dry-run` shows what would be sent and the estimated calls and tokens without calling the model; one run makes at most 20 calls and stops at your monthly limit. It can also run daily, weekly or monthly while the panel is running (`openmymemo tidy --schedule weekly`).
   - The Assistant is listed on the Connectors page as "OpenMyMemo Assistant", with its own read scope, writing mode and blocked topics, and every request it makes is in the activity log (feature, model, where, tokens), never the text.
   - **Search:** with the Assistant on, AI apps' searches (`memory_search`) and `openmymemo recall` let the model add related words and translations to the search and put the best matches first. "What do I like to drink?" now finds "Prefers tea over coffee". What AI apps read at the start of a conversation (`memory_context`) is unchanged.
   - An embeddings model at the same endpoint (Ollama's `nomic-embed-text`, OpenAI's `text-embedding-3-small`, …) can be set for search by meaning; private topics are never sent to one outside this computer.
@@ -16,6 +17,7 @@ What changed in each release, for people who use OpenMyMemo. Every release is al
   - Search uses it everywhere: AI apps' `memory_search`, `openmymemo search`, and the panel's search box. Exact names and ids still come first, and without it search works exactly as before.
   - The index is a cache in `.openmymemo/index/` that keeps itself out of git and is rebuilt from your memory files; it follows edits made in any editor.
 - **`openmymemo recall "<question>"`** prints the memories most relevant to a question, ranked and cut to `--max-chars`, ready to paste into a prompt or use in a hook; `--connector <id>` limits it to what that app may read.
+- An archived memory no longer stays in what AI apps read until OpenMyMemo restarts. After you archived a memory, the same running server kept serving it in the memory context and wrote it back into `MEMORY.md`; a restored or moved memory could also be missing or listed under its old topic.
 
 ## 0.2.6 — 2026-10-16
 

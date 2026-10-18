@@ -16,11 +16,14 @@ const busy = ref(false);
 const p = computed(() => props.proposal);
 const isPending = computed(() => p.value.status === "pending");
 const text = computed(() => p.value.final_content ?? p.value.content);
+/** An update that only sets a review date (a tidy-up's `until` suggestion): the text itself doesn't change. */
+const untilOnly = computed(() => p.value.op === "update" && !!p.value.until && text.value === p.value.before_content);
 
 const HOLD: Record<string, { cls: string; icon: IconName | null }> = {
   private: { cls: "chip-private", icon: "lock" },
   protected: { cls: "chip-wait", icon: "pencil" },
   approval: { cls: "", icon: null },
+  review: { cls: "chip-wait", icon: null },
 };
 const DONE = ["accepted", "edited_accepted", "applied"];
 
@@ -54,6 +57,7 @@ const undo = () => run(() => api.undo(p.value.id), t("chg.undone"));
       <span>{{ t(isPending ? `rev.wants.${p.op}` : `rev.proposed.${p.op}`) }}</span>
       <span class="chip">{{ topicTitle(p.final_topic ?? p.topic) }}</span>
       <span v-if="p.kind" class="chip">{{ t(`kind.${p.kind}`) }}</span>
+      <span v-if="p.batch_id" class="chip">{{ t("chg.tidyChip") }}</span>
       <span :title="p.created_at">{{ relTime(isPending ? p.created_at : p.decided_at ?? p.created_at) }}</span>
       <span v-if="isPending && p.hold" class="chip ml-auto" :class="HOLD[p.hold]?.cls">
         <AppIcon v-if="HOLD[p.hold]?.icon" :name="HOLD[p.hold].icon!" :size="11" />{{ t(`chg.hold.${p.hold}`) }}
@@ -64,11 +68,12 @@ const undo = () => run(() => api.undo(p.value.id), t("chg.undone"));
     </div>
 
     <div class="space-y-1 text-[15px] leading-relaxed">
-      <div v-if="p.before_content && p.op !== 'add'" class="flex gap-2.5 text-muted">
+      <div v-if="untilOnly && !editing" class="min-w-0 break-words">{{ text }}</div>
+      <div v-if="p.before_content && p.op !== 'add' && !untilOnly" class="flex gap-2.5 text-muted">
         <span class="minus" aria-hidden="true">−</span>
         <span class="min-w-0 break-words" :class="p.op === 'archive' ? 'line-through' : ''">{{ p.before_content }}</span>
       </div>
-      <div v-if="!editing && text && p.op !== 'archive'" class="flex gap-2.5">
+      <div v-if="!editing && text && p.op !== 'archive' && !untilOnly" class="flex gap-2.5">
         <span class="plus" aria-hidden="true">+</span>
         <span class="min-w-0 break-words" :class="p.status === 'rejected' || p.status === 'expired' || p.status === 'undone' ? 'text-muted' : ''">{{ text }}</span>
       </div>
@@ -78,6 +83,10 @@ const undo = () => run(() => api.undo(p.value.id), t("chg.undone"));
           <option v-for="tp in store.state?.topics" :key="tp.slug" :value="tp.slug">{{ tp.title }}</option>
         </select>
       </div>
+    </div>
+
+    <div v-if="p.until" class="text-[13px] text-muted">
+      {{ p.before_until ? t("chg.untilWas", { date: p.until, before: p.before_until }) : t("chg.until", { date: p.until }) }}
     </div>
 
     <div v-if="p.original_op === 'add' || p.conflict" class="space-y-1 text-[13px]">
