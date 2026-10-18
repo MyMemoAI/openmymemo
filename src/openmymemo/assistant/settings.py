@@ -70,6 +70,9 @@ class Settings:
     protocol: str = "openai"
     base_url: str = ""  # empty: the kind's default (DEFAULT_URLS, or MyMemo's service)
     model: str = ""
+    # An embeddings model at the same endpoint (OpenAI-compatible ``/embeddings``), for search by meaning (§17.4);
+    # empty: none. Not for Anthropic's API or MyMemo's hosted model, which have no embeddings.
+    embeddings_model: str = ""
     api_key: str = field(default="", repr=False)
     mymemo_token: str = field(default="", repr=False)
     features: dict[str, bool] = field(default_factory=lambda: dict(DEFAULT_FEATURES))
@@ -102,6 +105,12 @@ class Settings:
     def local(self) -> bool:
         """A model on this computer: kind ``local`` and a loopback address (checked again before every call)."""
         return self.kind == "local" and is_loopback(self.endpoint)
+
+    @property
+    def embeddings_available(self) -> bool:
+        """Whether this endpoint can embed: an OpenAI-compatible endpoint (on this computer or with a key) and an
+        embeddings model chosen. Anthropic's API and MyMemo's hosted model have none (§17.8)."""
+        return bool(self.embeddings_model) and self.kind in ("local", "key") and self.protocol == "openai"
 
     def month_usage(self, now: datetime | None = None) -> dict[str, Any]:
         month = (now or datetime.now(UTC)).strftime("%Y-%m")
@@ -261,7 +270,7 @@ def _from_raw(data: Mapping[str, Any]) -> Settings:
         s.kind = data["kind"]
     if data.get("protocol") in PROTOCOLS:
         s.protocol = data["protocol"]
-    for name in ("base_url", "model"):
+    for name in ("base_url", "model", "embeddings_model"):
         if isinstance(data.get(name), str):
             setattr(s, name, data[name].strip())
     features = data.get("features")
@@ -309,6 +318,9 @@ def _apply_env(s: Settings, env: Mapping[str, str]) -> None:
     if (v := get("MODEL")) is not None:
         s.model = v
         s.from_env.append("model")
+    if (v := get("EMBEDDINGS_MODEL")) is not None:
+        s.embeddings_model = v
+        s.from_env.append("embeddings_model")
     if (v := get("API_KEY")) is not None:
         if s.kind == "mymemo":
             s.mymemo_token = v
@@ -363,7 +375,8 @@ UNSET: Any = object()
 
 
 def save_settings(*, enabled: bool | None = None, kind: str | None = None, protocol: str | None = None,
-                  base_url: str | None = None, model: str | None = None, api_key: str | None = None,
+                  base_url: str | None = None, model: str | None = None, embeddings_model: str | None = None,
+                  api_key: str | None = None,
                   mymemo_token: str | None = None, features: Mapping[str, bool] | None = None,
                   private_topics: list[str] | None = None, caps: Mapping[str, Any] | None = None,
                   timeout: float | None = None) -> Settings:
@@ -398,6 +411,10 @@ def save_settings(*, enabled: bool | None = None, kind: str | None = None, proto
             if len(model) > 200 or any(c.isspace() for c in model.strip()):
                 raise SettingsError("That isn't a model name.")
             raw["model"] = model.strip()
+        if embeddings_model is not None:
+            if len(embeddings_model) > 200 or any(c.isspace() for c in embeddings_model.strip()):
+                raise SettingsError("That isn't a model name.")
+            raw["embeddings_model"] = embeddings_model.strip()
         if features is not None:
             unknown = set(features) - set(FEATURES)
             if unknown:

@@ -10,7 +10,7 @@ Rules the format is built on:
 
 - **Memory files are the source of truth.** If a file and the metadata disagree, the file wins and the metadata is corrected on the next read.
 - **Lines a tool doesn't understand are kept byte for byte.** Parsing and rewriting a file that wasn't changed is the identity.
-- **No database, no binary files.** Everything can be read with `cat`, diffed with `git` and edited by hand.
+- **No database, no binary files.** Everything can be read with `cat`, diffed with `git` and edited by hand. The one exception is the optional search index (§6.8): a cache, rebuilt from the memory files, that keeps itself out of git and may be deleted at any time.
 - **Follow the conventions people already use.** Markdown with YAML frontmatter (Obsidian, Hugo, Claude Code's memory files, Google Cloud's Open Knowledge Format), Obsidian block ids, one statement per list item (the shape of ChatGPT's, Claude's, Gemini's and Mem0's memory lists), and the Open Knowledge Format's reserved file names (§10.1).
 
 ## 2. Layout
@@ -33,6 +33,7 @@ Rules the format is built on:
     ├── history.jsonl
     ├── activity.jsonl
     ├── proposals/<id>.json
+    ├── index/                # optional cache for search by meaning; delete freely (§6.8)
     ├── .lock
     └── .gitignore
 ```
@@ -310,7 +311,7 @@ Append-only, one JSON object per line: what each connector did.
 {"at": "2026-10-08T09:15:00+00:00", "connector": "claude-code", "action": "context", "memory_ids": ["m7f3a", "k2p9d"], "chars": 1840, "via": "hook"}
 ```
 
-`action` is `context`, `search`, `get`, `propose`, `import`, `link` or `call`; other fields depend on it (`query`, `memory_ids`, `proposal_id`, `queue_id`, `result`, `op`, `chars`, `via`, `source`, `account`, `email_masked`, `feature`, `model`, `endpoint`, `kind`, `tokens_in`, `tokens_out`, `ms`, `error`). A queued MyMemo Cloud write turned down when it is filed is a `propose` with `result: "rejected"` and its `queue_id`. `link` is written when this computer is linked to MyMemo Cloud, with `connector` `mymemo-cloud` and the account it was linked to: its display name and MyMemo's masked email (`s***@example.com`). `call` is one request the OpenMyMemo Assistant made to its model, with `connector` `assistant`: the `feature` it was for (`import`, `sort`, `recall`, `check`, `session`, `tidy`, or `test`), the `model`, the endpoint's host name (`endpoint`), its `kind` (`local`, `key` or `mymemo`), the tokens the endpoint reported, the time in milliseconds, the ids of the memories it was sent, and its `result`: `ok`, or why it produced nothing (`invalid`, `timeout`, `unreachable`, `http`, `rate_limited`, `quota`, `plan`, `refused`, `redirect`, `cap`, `refused_private`, `error`). The text sent and received is never recorded.
+`action` is `context`, `search`, `get`, `propose`, `import`, `link` or `call`; other fields depend on it (`query`, `memory_ids`, `proposal_id`, `queue_id`, `result`, `op`, `chars`, `via`, `source`, `account`, `email_masked`, `feature`, `model`, `endpoint`, `kind`, `tokens_in`, `tokens_out`, `ms`, `error`, `embeddings`). A queued MyMemo Cloud write turned down when it is filed is a `propose` with `result: "rejected"` and its `queue_id`. `link` is written when this computer is linked to MyMemo Cloud, with `connector` `mymemo-cloud` and the account it was linked to: its display name and MyMemo's masked email (`s***@example.com`). `call` is one request the OpenMyMemo Assistant made to its model, with `connector` `assistant`: the `feature` it was for (`import`, `sort`, `recall`, `check`, `session`, `tidy`, or `test`), the `model`, the endpoint's host name (`endpoint`), its `kind` (`local`, `key` or `mymemo`), the tokens the endpoint reported, the time in milliseconds, the ids of the memories it was sent, and its `result`: `ok`, or why it produced nothing (`invalid`, `timeout`, `unreachable`, `http`, `rate_limited`, `quota`, `plan`, `refused`, `redirect`, `cap`, `refused_private`, `error`). The text sent and received is never recorded. A request to the endpoint's `/embeddings` (search by meaning, §6.8) is a `call` with `feature` `recall`, the embeddings `model`, and `embeddings`: how many texts it embedded.
 
 ```json
 {"at": "2026-10-18T09:15:00+00:00", "connector": "assistant", "action": "call", "feature": "import", "model": "llama3.2", "endpoint": "127.0.0.1", "kind": "local", "result": "ok", "tokens_in": 812, "tokens_out": 230, "ms": 2140}
@@ -347,6 +348,22 @@ Pending proposals expire after 30 days.
 ### 6.7 `.lock`
 
 An empty file used for advisory locking: `flock` on POSIX, `msvcrt.locking` on the first byte on Windows. OpenMyMemo holds it for the duration of any write and of a sync. Other tools that want to avoid racing a running OpenMyMemo take the same lock; tools that don't are still safe as long as they replace files atomically (§8).
+
+### 6.8 `index/` (optional search cache)
+
+Written only when search by meaning is in use: the local embedding model ("Search by meaning on this computer", `openmymemo semantic on`) or an embeddings model at the OpenMyMemo Assistant's endpoint. It is a **cache**, not data:
+
+- It is rebuilt from `memories/*.md`, so deleting the folder loses nothing; the next search starts rebuilding it.
+- It holds its own `.gitignore` (`*`), so it stays out of git, and a synced folder doesn't need to sync it: each computer builds its own.
+- Turning the local model off deletes it.
+
+| File | Contents |
+| --- | --- |
+| `manifest.json` | `format` (1), `model` (which embedder wrote it: `local/<model>@<file hash prefix>` or `endpoint/<host>/<model>`), `dims`, `vectors` (the vectors file's name), `count`, `updated_at`, and `items`: `{"id", "hash"}` per memory, in the order of the vectors. `hash` is the first 16 hex digits of the SHA-256 of the memory's content. |
+| `vectors-<token>.f32` | `count × dims` float32 values, little-endian, each row L2-normalized. |
+| `.lock` | Taken while the index is written. |
+
+Readers ignore an index whose `model` isn't the embedder they use: an index is never mixed across models, and a different model rebuilds it. A memory whose hash differs from its content (edited in any editor) is embedded again; a memory that is gone is dropped. Writers write a new vectors file, then replace `manifest.json` atomically, then delete older vectors files, so a reader sees one whole index or the other. With an embeddings endpoint that isn't on this computer, memories it may not be sent (private topics) have no vector and are found by keywords only.
 
 ## 7. Reconciling changes made outside OpenMyMemo
 

@@ -400,6 +400,10 @@ export interface AssistantStatus {
   endpoint: string;
   host: string;
   model: string;
+  /** An embeddings model at the same endpoint, for search by meaning; "" for none. */
+  embeddings_model: string;
+  /** Whether that endpoint's embeddings are used (OpenAI-compatible, on this computer or with a key). */
+  embeddings: boolean;
   has_key: boolean;
   key_store: "keychain" | "file" | "env" | null;
   features: Record<AssistantFeature, boolean>;
@@ -427,10 +431,59 @@ export interface AssistantPatch {
   protocol?: "openai" | "anthropic";
   base_url?: string;
   model?: string;
+  embeddings_model?: string;
   api_key?: string;
   features?: Partial<Record<AssistantFeature, boolean>>;
   private_topics?: string[];
   caps?: { calls?: number | null; tokens?: number | null };
+}
+
+/** One choice under "Search by meaning on this computer" (src/openmymemo/recall/local.py `models_info`). */
+export interface SemanticModel {
+  id: string;
+  name: string;
+  size_mb: number;
+  dims: number;
+  languages: string;
+  license: string;
+  license_url: string;
+  /** Terms the person must accept before the download (EmbeddingGemma's Gemma Terms of Use). */
+  terms_url: string | null;
+  recommended: boolean;
+  note: string;
+  /** False until its files are pinned (SHA-256) in this release: it can't be downloaded yet. */
+  available: boolean;
+  downloaded: boolean;
+}
+
+export interface SemanticJob {
+  phase: "idle" | "runtime" | "download" | "index" | "done" | "error";
+  model: string | null;
+  done: number;
+  total: number;
+  error: string | null;
+  code: string | null;
+}
+
+/** Settings → Assistant → "Search by meaning on this computer" (src/openmymemo/recall/semantic.py `status`). */
+export interface SemanticStatus {
+  enabled: boolean;
+  model: string;
+  accepted_terms: string[];
+  ready: boolean;
+  models: SemanticModel[];
+  runtime: { installed: boolean; command: string | null };
+  job: SemanticJob;
+  /** What search uses for vectors now: the local model, the Assistant's endpoint, or nothing (keywords). */
+  embedder: "local" | "endpoint" | null;
+  endpoint: boolean;
+  index: { model: string | null; count: number; memories: number; current?: boolean };
+}
+
+/** The panel's search box. `keyword`: no vectors, so the panel filters by itself as before. */
+export interface SearchResult {
+  mode: "keyword" | "hybrid" | "expanded";
+  results: { id: string; score: number; match: "exact" | "keyword" | "meaning" | "both" }[];
 }
 
 export interface AssistantTest {
@@ -529,6 +582,11 @@ export const api = {
   assistantSettings: (body: AssistantPatch) => req<AssistantStatus>("PATCH", "/api/assistant", body),
   /** One tiny request to the configured model: its name and how long it took. */
   assistantTest: () => req<AssistantTest>("POST", "/api/assistant/test"),
+  semantic: () => req<SemanticStatus>("GET", "/api/semantic"),
+  /** Turn search by meaning on (starts the download in the background; poll `semantic`) or off. */
+  semanticSet: (body: { enabled: boolean; model?: string; accept_terms?: boolean }) =>
+    req<SemanticStatus>("POST", "/api/semantic", body),
+  search: (q: string, limit = 200) => req<SearchResult>("GET", `/api/search?q=${enc(q)}&limit=${limit}`),
   context: (connector: string | null, maxChars: number) =>
     req<ContextResult>("GET", `/api/context?max_chars=${maxChars}${connector ? `&connector=${enc(connector)}` : ""}`),
   activity: (connector?: string) =>

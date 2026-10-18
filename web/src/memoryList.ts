@@ -20,12 +20,39 @@ export const banner = computed(() => {
   return tn("mem.banner.unreviewed", changed, { who }) + (waiting ? tn("mem.banner.andWaiting", waiting) : "");
 });
 
+/** How long the search box waits after typing before asking the server (search by meaning, §17.4). */
+export const SEARCH_DELAY = 250;
+
 export function useMemoryList(topic: Ref<string | null>) {
   const kind = ref<Kind | null>(null);
   const source = ref<string | null>(null);
   const status = ref<Status>("active");
   const query = ref("");
   const archived = ref<Memory[]>([]);
+  /** The server's ranking for the current query when it searches by meaning (memory id → rank); null when it
+   * doesn't (no embedding index), and the box filters by text as it always has. */
+  const ranked = ref<Map<string, number> | null>(null);
+  let searchTimer: ReturnType<typeof setTimeout> | null = null;
+  let searchSeq = 0;
+
+  watch(query, (q) => {
+    if (searchTimer) clearTimeout(searchTimer);
+    const text = q.trim();
+    const seq = ++searchSeq;
+    if (!text) {
+      ranked.value = null;
+      return;
+    }
+    searchTimer = setTimeout(async () => {
+      try {
+        const found = await api.search(text);
+        if (seq !== searchSeq) return; // a newer query was typed meanwhile
+        ranked.value = found.mode === "keyword" ? null : new Map(found.results.map((r, i) => [r.id, i]));
+      } catch {
+        if (seq === searchSeq) ranked.value = null;
+      }
+    }, SEARCH_DELAY);
+  });
 
   watch(status, async (v) => {
     if (v === "archived") archived.value = await api.memories("archived");
@@ -51,12 +78,17 @@ export function useMemoryList(topic: Ref<string | null>) {
     if (kind.value && m.kind !== kind.value) return false;
     if (source.value && sourceKey(m.source) !== source.value) return false;
     const q = query.value.trim().toLowerCase();
-    return !q || m.content.toLowerCase().includes(q);
+    return !q || m.content.toLowerCase().includes(q) || !!ranked.value?.has(m.id);
   }
 
   const visible = computed(() => {
     const base = status.value === "archived" ? archived.value : status.value === "review" ? reviewDue.value : store.memories;
-    return base.filter(matches);
+    const rows = base.filter(matches);
+    const rank = ranked.value;
+    if (!rank || !query.value.trim()) return rows;
+    // Best match first; what only the text filter found keeps its place after the ranked ones.
+    const at = (m: Memory) => rank.get(m.id) ?? rank.size + rows.indexOf(m);
+    return [...rows].sort((a, b) => at(a) - at(b));
   });
 
   /** Group rows by topic (all topics view) or by section (single topic view). */
@@ -80,6 +112,7 @@ export function useMemoryList(topic: Ref<string | null>) {
     kind.value = null;
     source.value = null;
     query.value = "";
+    ranked.value = null;
     status.value = "active";
   }
 
