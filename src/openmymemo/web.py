@@ -685,10 +685,13 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
             raise HTTPException(409, "This import has already started.")
         from .assistant import chats
 
-        if chats.live_assistant(runner.assistant, "import", runner.planned) is None:
+        current = chats.permitted(runner.assistant, "import", runner.planned)
+        if current is None:
             with chat_lock:
                 chat_jobs.pop(job_id, None)
             raise HTTPException(409, chats.SETTINGS_CHANGED)
+        if not current.available("import"):  # a monthly limit
+            raise HTTPException(400, current.unavailable_reason("import") or "The Assistant isn't available.")
         total = len(runner.chunks) if body.max_calls is None else min(len(runner.chunks), max(1, body.max_calls))
         job.update(state="running", total=total)
 

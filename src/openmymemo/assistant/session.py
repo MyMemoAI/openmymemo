@@ -221,7 +221,8 @@ def _work(vault: Vault, app: str, transcript: Path, session_id: str, event: str,
         # The lock may have waited for another worker: the settings and the consent are read again.
         assistant = Assistant.from_settings(vault)
         if not assistant.available("session"):
-            return {"result": "off"}
+            return {"result": "limit" if assistant.settings.enabled and assistant.settings.features.get("session")
+                    and not assistant.settings.problem() and assistant.connector() is not None else "off"}
         if assistant.settings.session_apps.get(app) != "allowed":
             return {"result": "no-consent"}
         conv = chats.read_transcript(SOURCE[app], path)
@@ -235,8 +236,10 @@ def _work(vault: Vault, app: str, transcript: Path, session_id: str, event: str,
             return {"result": "too-little", "new_user_messages": users}
         conv.messages = new
         filed = _extract_and_file(vault, assistant, app, conv)
-        if filed["result"] == "stopped" or (filed["calls"] and filed["failed"] == filed["calls"]):
-            return filed  # the model couldn't be reached: the next run tries these messages again
+        if filed["result"] in ("stopped", "limit") or (filed["calls"] and filed["failed"] == filed["calls"]):
+            # Stopped, limited part-way or unreachable: the cursor stays, so the next run reads these messages
+            # again (what was filed is recognised by its idempotency key and not filed twice).
+            return filed
         state[key] = {"messages": seen + len(new), "at": datetime.now(UTC).isoformat(timespec="seconds")}
         _save_state(state)
         return filed
@@ -279,11 +282,14 @@ def _extract_and_file(vault: Vault, assistant: Assistant, app: str, conv: chats.
     found: list[chats.Candidate] = []
     calls = failed = 0
     planned = chats.destination(assistant)
-    stopped = False
+    stopped = limited = False
     for ch in todo:
-        current = chats.live_assistant(assistant, "session", planned)  # re-read before every call
-        if current is None or current.settings.session_apps.get(app) != "allowed":
+        current = chats.permitted(assistant, "session", planned, app)  # re-read before every call
+        if current is None:
             stopped = True
+            break
+        if not current.available("session"):  # a monthly limit: what was read so far is still filed
+            limited = True
             break
         got = chats.extract(current, "session", ch, topic_list, extra=extra)
         calls += 1
@@ -292,8 +298,8 @@ def _extract_and_file(vault: Vault, assistant: Assistant, app: str, conv: chats.
             continue
         found.extend(c for c in got if not c.sensitive)  # the Assistant never writes into a private topic
     if not stopped:  # once more right before filing: a change during the last call counts too
-        current = chats.live_assistant(assistant, "session", planned)
-        stopped = current is None or current.settings.session_apps.get(app) != "allowed"
+        current = chats.permitted(assistant, "session", planned, app)
+        stopped = current is None
         assistant = current or assistant
     if stopped:  # turned off, consent withdrawn or the endpoint changed meanwhile: nothing is filed
         return {"result": "stopped", "calls": calls, "failed": failed}
@@ -310,7 +316,7 @@ def _extract_and_file(vault: Vault, assistant: Assistant, app: str, conv: chats.
             continue
         status = out.get("status")
         filed[status if status in filed else "pending"] += 1
-    return {"result": "ok", "calls": calls, "failed": failed, **filed}
+    return {"result": "limit" if limited else "ok", "calls": calls, "failed": failed, **filed}
 
 
 def _digest(text: str) -> str:

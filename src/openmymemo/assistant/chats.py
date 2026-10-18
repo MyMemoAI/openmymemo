@@ -602,13 +602,20 @@ SETTINGS_CHANGED = ("The Assistant was turned off or its settings changed since 
                     "was sent. Start again to see the cost with the new settings.")
 
 
-def live_assistant(assistant: Assistant, feature: str, planned: tuple) -> Assistant | None:
-    """The Assistant as its settings are now, when ``feature`` is still available and requests would still go where
-    they went when the work was planned (``destination``); None otherwise. Checked before every call."""
+def permitted(assistant: Assistant, feature: str, planned: tuple, app: str | None = None) -> Assistant | None:
+    """The Assistant as its settings are now, when the person still allows this work: on, ``feature`` on, configured,
+    its access not removed, requests still going where they went when the work was planned (``destination``), and,
+    for ``app``'s sessions, that app still allowed. None otherwise. Checked before every call and before using what
+    the calls returned. The monthly limits are not part of it: a call already made and paid for keeps its answer."""
     now = Assistant.from_settings(assistant.vault)
-    if destination(now) != planned or not now.available(feature):
+    s = now.settings
+    if (destination(now) != planned or not s.enabled or not s.features.get(feature) or s.problem()
+            or now.connector() is None):
+        return None
+    if app is not None and s.session_apps.get(app) != "allowed":
         return None
     return now
+
 
 
 # ---- chat-export import (§17.5) -----------------------------------------------------------------------------
@@ -633,6 +640,7 @@ class ChatImport:
         self.chunks = chunks(self.conversations, forbidden=forbidden_texts(self.assistant))
         self.done = 0  # chunks processed so far
         self.failed = 0
+        self.limited = False  # stopped at a monthly limit
         self.error: str | None = None
 
     def screened(self, todo: list[Chunk]) -> list[Chunk]:
@@ -651,7 +659,7 @@ class ChatImport:
 
         found: list[Candidate] = []
         todo: list[Chunk] = []
-        current = live_assistant(self.assistant, "import", self.planned)
+        current = permitted(self.assistant, "import", self.planned)
         if current is None:
             self.error = SETTINGS_CHANGED
         else:
@@ -660,9 +668,14 @@ class ChatImport:
         for chunk in todo:
             if cancelled and cancelled():
                 break
-            current = live_assistant(self.assistant, "import", self.planned)  # re-read before every call
+            current = permitted(self.assistant, "import", self.planned)  # re-read before every call
             if current is None:
                 self.error = SETTINGS_CHANGED
+                found = []
+                break
+            if not current.available("import"):  # a monthly limit: what was read so far is kept
+                self.error = current.unavailable_reason("import")
+                self.limited = True
                 break
             got = extract(current, "import", chunk, targets(self.vault, current))
             self.done += 1
@@ -673,7 +686,7 @@ class ChatImport:
                 found.extend(got)
             if progress:
                 progress(self.done, len(todo))
-        if found and live_assistant(self.assistant, "import", self.planned) is None:
+        if found and permitted(self.assistant, "import", self.planned) is None:
             self.error = SETTINGS_CHANGED  # changed during the last call: what it returned isn't used
             found = []
         items = [transfer.ImportItem(content=c.content, topic=c.topic, kind=c.kind,

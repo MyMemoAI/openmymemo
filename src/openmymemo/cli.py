@@ -257,7 +257,10 @@ def _import_chats(vault: Vault, source: str, file: Path | None, yes: bool, max_c
     if not yes and not typer.confirm("Start?", default=True):
         raise typer.Exit()
     items = job.run(calls, progress=lambda done, total: typer.echo(f"  {done}/{total}", err=True))
-    if job.error:
+    if job.limited:
+        typer.secho(f"Stopped after {job.done} of {calls} chunks: {job.error} What was read is below.",
+                    fg="yellow", err=True)
+    elif job.error:
         typer.secho(f"{job.failed} of {job.done} chunks failed: {job.error}", fg="yellow", err=True)
     if not items:
         typer.echo("Nothing worth remembering was found.")

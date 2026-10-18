@@ -296,3 +296,72 @@ def test_a_long_conversation_is_read_newest_first(vault, fake):
     job.run(max_calls=1)
     sent = bodies(fake)
     assert len(fake.requests) == 1 and "Message 39" in sent and "Message 00" not in sent
+
+
+# ---- re-review 2: the monthly limit is not a withdrawal ----------------------------------------------------------
+
+
+def one_fact_per_call(fake):
+    def answer(body):
+        text = body["messages"][1]["content"]
+        n = next(int(line.split(" ", 1)[0][1:]) for line in text.splitlines() if line.startswith("#") and " user" in line)
+        facts = ["Rows on Sundays", "Speaks fluent Portuguese", "Keeps bees in the garden"]
+        return json.dumps({"memories": [{"content": facts[len(fake.requests) - 1], "message": n,
+                                         "quote": "x"}]})
+    return answer
+
+
+def cap_at_this_call(kind: str) -> None:
+    """Leave exactly one call (or let the next call's tokens use up the allowance)."""
+    usage = load_settings().month_usage()
+    save_settings(caps={"calls": usage["calls"] + 1} if kind == "calls" else {"tokens": usage["tokens"] + 50})
+
+
+@pytest.mark.parametrize("kind", ["calls", "tokens"])
+def test_an_import_whose_only_call_uses_up_the_allowance_keeps_its_answer(vault, fake, kind):
+    turn_on(vault)
+    convs = chats.parse_export("claude-export", json.dumps([{
+        "uuid": "a", "name": "N", "updated_at": "2026-05-01T10:00:00Z",
+        "chat_messages": [{"sender": "human", "text": "I row on Sundays"}]}]))
+    cap_at_this_call(kind)
+    fake.answer = one_fact_per_call(fake)
+    job = chats.ChatImport(vault, "claude-export", convs)
+    items = job.run()
+    assert [i.content for i in items] == ["Rows on Sundays"] and job.error is None and not job.limited
+
+
+@pytest.mark.parametrize("kind", ["calls", "tokens"])
+def test_a_session_whose_only_call_uses_up_the_allowance_is_filed(vault, fake, kind):
+    turn_on(vault)
+    save_settings(features={"session": True}, session_apps={"codex": "allowed"})
+    path = write_codex_session(3, 30)
+    cap_at_this_call(kind)
+    fake.answer = one_fact_per_call(fake)
+    out = sessions.work(vault, "codex", path, "s")
+    assert out["result"] == "ok" and out["applied"] == 1, out
+    assert json.loads(sessions.state_path().read_text())["codex:s"]["messages"] == 3
+
+
+def test_an_import_stopping_at_the_limit_keeps_what_it_read(vault, fake):
+    turn_on(vault)
+    job = chats.ChatImport(vault, "chatgpt-export", [long_conversation()])
+    job.chunks = chats.chunks(job.conversations, chunk_chars=800)
+    assert len(job.chunks) >= 3
+    save_settings(caps={"calls": load_settings().month_usage()["calls"] + 2})
+    fake.answer = one_fact_per_call(fake)
+    items = job.run()
+    assert len(fake.requests) == 2 and job.limited and "limit" in job.error and job.error != chats.SETTINGS_CHANGED
+    assert sorted(i.content for i in items) == ["Rows on Sundays", "Speaks fluent Portuguese"]
+
+
+def test_a_session_stopping_at_the_limit_files_what_it_read_and_keeps_the_cursor(vault, fake):
+    turn_on(vault)
+    save_settings(features={"session": True}, session_apps={"codex": "allowed"})
+    path = write_codex_session(10, 300)  # two chunks
+    save_settings(caps={"calls": load_settings().month_usage()["calls"] + 1})
+    fake.answer = one_fact_per_call(fake)
+    out = sessions.work(vault, "codex", path, "s")
+    assert out["result"] == "limit" and out["calls"] == 1 and out["applied"] == 1, out
+    assert not sessions.state_path().exists()  # the unread part is read next time
+    [p] = Proposals(vault).list(connector_id="assistant")
+    assert p.content == "Rows on Sundays"
