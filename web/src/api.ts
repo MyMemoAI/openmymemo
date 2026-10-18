@@ -93,13 +93,16 @@ export interface SortRow {
   /** Suggested topic, or null when nothing matched. */
   topic: string | null;
   confidence: number;
+  /** Who suggested it: the OpenMyMemo Assistant or the rules (absent when the Assistant is off). */
+  by?: "assistant" | "rules" | null;
 }
 
 export interface Connector {
   id: string;
   name: string;
-  /** cloud: a web app reaching the folder through MyMemo Cloud (cloud-chatgpt, cloud-claude, …). */
-  kind: "stdio" | "http" | "cloud";
+  /** cloud: a web app reaching the folder through MyMemo Cloud (cloud-chatgpt, cloud-claude, …); assistant: the
+   * OpenMyMemo Assistant (id "assistant"). */
+  kind: "stdio" | "http" | "cloud" | "assistant";
   read_topics: string[] | "all";
   include_private: boolean;
   write: "none" | "propose" | "auto";
@@ -151,6 +154,8 @@ export interface AppCatalog {
   apps: AppStatus[];
   /** Connectors that aren't one of the catalog's apps (added by name). */
   custom: Connector[];
+  /** The OpenMyMemo Assistant's connector, once it has been turned on (absent from older servers). */
+  assistant?: Connector | null;
 }
 
 export interface InstallLink {
@@ -256,7 +261,13 @@ export interface Activity {
   at: string;
   connector: string;
   /** link: this computer was linked to MyMemo Cloud (connector "mymemo-cloud"), to `account` / `email_masked`. */
-  action: "context" | "search" | "get" | "propose" | "import" | "link";
+  /** call: the OpenMyMemo Assistant asked its model (connector "assistant"): feature, model, endpoint host, tokens. */
+  action: "context" | "search" | "get" | "propose" | "import" | "link" | "call";
+  feature?: string;
+  model?: string;
+  endpoint?: string;
+  tokens_in?: number;
+  tokens_out?: number;
   query?: string;
   memory_ids?: string[];
   proposal_id?: string;
@@ -298,6 +309,10 @@ export interface ImportItem {
   similar_to: string | null;
   similar_content: string | null;
   include: boolean;
+  /** Who split it: the OpenMyMemo Assistant, or the rules when it was on but couldn't be used (null: it was off). */
+  by?: "assistant" | "rules" | null;
+  /** "dropped": the Assistant left this line out where the rules would have kept it. */
+  flag?: "dropped" | null;
 }
 
 /** A memory or instructions file another AI app keeps on disk (memfiles.py). */
@@ -322,6 +337,59 @@ export interface FilePreview {
   source: string;
   name: string;
   items: ImportItem[];
+}
+
+export type AssistantFeature = "import" | "sort" | "recall" | "check" | "session" | "tidy";
+export type AssistantKind = "local" | "key" | "mymemo";
+
+/** Settings → Assistant (src/openmymemo/assistant/core.py `status`). The key itself is never sent back. */
+export interface AssistantStatus {
+  enabled: boolean;
+  kind: AssistantKind;
+  protocol: "openai" | "anthropic";
+  /** As set; empty means the kind's default, which `endpoint` shows. */
+  base_url: string;
+  endpoint: string;
+  host: string;
+  model: string;
+  has_key: boolean;
+  key_store: "keychain" | "file" | "env" | null;
+  features: Record<AssistantFeature, boolean>;
+  private_topics: string[];
+  caps: { calls: number | null; tokens: number | null };
+  usage: { month: string; calls: number; tokens: number };
+  timeout: number;
+  /** Fields an OPENMYMEMO_ASSISTANT_* variable sets on this computer: shown, not editable. */
+  from_env: string[];
+  local: boolean;
+  problem: string | null;
+  ready: boolean;
+  reason: string | null;
+  /** Where memory text goes with these settings, in one sentence. */
+  where: string;
+  connector_id: string | null;
+  revoked: boolean;
+  /** Which choices can be picked; MyMemo's hosted model is false until it ships. */
+  kinds: Record<AssistantKind, boolean>;
+}
+
+export interface AssistantPatch {
+  enabled?: boolean;
+  kind?: AssistantKind;
+  protocol?: "openai" | "anthropic";
+  base_url?: string;
+  model?: string;
+  api_key?: string;
+  features?: Partial<Record<AssistantFeature, boolean>>;
+  private_topics?: string[];
+  caps?: { calls?: number | null; tokens?: number | null };
+}
+
+export interface AssistantTest {
+  ok: boolean;
+  model: string | null;
+  ms: number | null;
+  error: string | null;
 }
 
 const HEADERS = { "X-OpenMyMemo": "1", "Content-Type": "application/json" };
@@ -403,6 +471,10 @@ export const api = {
   cloudAllow: (id: string) => req<CloudStatus>("POST", `/api/cloud/apps/${enc(id)}/allow`),
   /** Show or hide MyMemo Cloud, or choose its service ("" for MyMemo's own). */
   cloudSettings: (body: { show?: boolean; service?: string }) => req<CloudStatus>("PATCH", "/api/cloud/settings", body),
+  assistant: () => req<AssistantStatus>("GET", "/api/assistant"),
+  assistantSettings: (body: AssistantPatch) => req<AssistantStatus>("PATCH", "/api/assistant", body),
+  /** One tiny request to the configured model: its name and how long it took. */
+  assistantTest: () => req<AssistantTest>("POST", "/api/assistant/test"),
   context: (connector: string | null, maxChars: number) =>
     req<ContextResult>("GET", `/api/context?max_chars=${maxChars}${connector ? `&connector=${enc(connector)}` : ""}`),
   activity: (connector?: string) =>

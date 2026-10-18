@@ -30,6 +30,7 @@ dependencies = [
     "pyyaml>=6.0",
     "websockets>=15",
     "cryptography>=48",
+    "httpx2>=2.13",
 ]
 
 [project.scripts]

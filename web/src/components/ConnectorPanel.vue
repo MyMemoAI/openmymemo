@@ -23,7 +23,11 @@ const c = computed(() => props.connector);
 const ownSetup = computed(() => !!props.app && c.value.kind === "stdio");
 /** A web app through MyMemo Cloud: nothing to paste here, and no token. */
 const viaCloud = computed(() => c.value.kind === "cloud");
-const KIND_LABEL: Record<Connector["kind"], string> = { stdio: "stdio", http: "HTTP", cloud: t("cloud.name") };
+/** The OpenMyMemo Assistant: built in, set up in Settings → Assistant, with its private topics chosen there. */
+const builtIn = computed(() => c.value.kind === "assistant");
+const KIND_LABEL: Record<Connector["kind"], string> = {
+  stdio: "stdio", http: "HTTP", cloud: t("cloud.name"), assistant: t("apps.assistant"),
+};
 const setup = ref<AppSetup | null>(null);
 const snippets = ref<Record<string, string> | null>(null);
 const token = ref<string | null>(null);
@@ -34,7 +38,7 @@ watch(
   async ([id]) => {
     setup.value = null;
     snippets.value = null;
-    if (viaCloud.value) return;
+    if (viaCloud.value || builtIn.value) return;
     try {
       if (ownSetup.value) setup.value = await api.appSetup(id);
       else snippets.value = await api.snippets(id);
@@ -139,7 +143,11 @@ function confirmRemove() {
       </div>
     </div>
 
-    <div class="flex items-center justify-between gap-4 px-4.5 py-3.5">
+    <div v-if="builtIn" class="space-y-0.5 px-4.5 py-3.5">
+      <div class="font-semibold">{{ t("con.includePrivate") }}</div>
+      <p class="text-[13px] text-muted">{{ t("con.assistantPrivate") }}</p>
+    </div>
+    <div v-else class="flex items-center justify-between gap-4 px-4.5 py-3.5">
       <div class="min-w-0 space-y-0.5">
         <div class="font-semibold">{{ t("con.includePrivate") }}</div>
         <p class="text-[13px] text-muted">{{ c.include_private ? t("con.includePrivateOn") : t("con.includePrivateOff") }}</p>
@@ -161,7 +169,8 @@ function confirmRemove() {
       </div>
     </div>
 
-    <div v-if="!viaCloud">
+    <p v-if="builtIn" class="px-4.5 py-3.5 text-[13px] text-muted">{{ t("con.assistantSetup") }}</p>
+    <div v-else-if="!viaCloud">
       <div class="flex flex-wrap items-center justify-between gap-3 px-4.5 py-3.5">
         <div class="min-w-0 space-y-0.5">
           <div class="font-semibold">{{ t("con.config") }}</div>

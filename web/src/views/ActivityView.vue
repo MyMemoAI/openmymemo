@@ -29,12 +29,17 @@ function describe(a: Activity): string {
       const who = a.account && a.email_masked ? `${a.account} (${a.email_masked})` : a.account || a.email_masked;
       return t("act.link", { who: who || t("cloud.yourAccount") });
     }
+    case "call": {
+      const tokens = (a.tokens_in ?? 0) + (a.tokens_out ?? 0);
+      return t("act.call", { model: a.model ?? "", host: a.endpoint ?? "", feature: a.feature ?? "", result: a.result ?? "" })
+        + (tokens ? ` · ${t("act.callTokens", { n: tokens })}` : "");
+    }
     default: return a.action;
   }
 }
 
 const ICON: Record<string, IconName> = {
-  context: "eye", search: "search", get: "file", propose: "pencil", import: "download", link: "plug",
+  context: "eye", search: "search", get: "file", propose: "pencil", import: "download", link: "plug", call: "star",
 };
 </script>
 

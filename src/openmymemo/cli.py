@@ -11,6 +11,7 @@ from typing import Annotated, NoReturn
 import typer
 
 from . import __version__, memfiles, transfer
+from .assistant import features as assistant_features
 from .connectors import Connectors
 from .context import compile_context, search
 from .proposals import Proposals
@@ -26,6 +27,9 @@ app.add_typer(setup_app, name="setup")
 cloud_app = typer.Typer(help="MyMemo Cloud: use your memory in ChatGPT and claude.ai on the web (optional; needs a "
                              "MyMemo account).", no_args_is_help=True)
 app.add_typer(cloud_app, name="cloud")
+assistant_app = typer.Typer(help="OpenMyMemo Assistant: optional model help with imports, sorting and more "
+                                 "(off by default).", no_args_is_help=True)
+app.add_typer(assistant_app, name="assistant")
 
 DEFAULT_PORT = 8787
 
@@ -152,15 +156,26 @@ def import_(ctx: typer.Context,
         raise typer.Exit(2)
     else:
         text = _read_input(file, source)
-    items = transfer.plan(vault, transfer.parse(source, text))
+    try:
+        items = assistant_features.import_preview(vault, source, text)
+    except ValueError as e:
+        typer.secho(str(e), fg="red", err=True)
+        raise typer.Exit(1) from None
     if not items:
         typer.echo("Nothing to import.")
         return
     titles = {t["slug"]: t["title"] for t in vault.topics()}
+    if any(it.by == "assistant" for it in items):
+        typer.echo("Split by OpenMyMemo Assistant. Lines marked ! were left out by the Assistant but kept by the "
+                   "rules; they aren't imported unless you tick them in the panel.")
+    elif any(it.by == "rules" for it in items):
+        typer.echo("Split by rules: the Assistant couldn't be used this time.")
     slug, title = transfer.import_topic(vault, source)
     typer.echo(f"Into {title} ({slug}), in this order:")
     for i, it in enumerate(items, 1):
         flag = " = already have" if it.duplicate_of else (" ~ similar exists" if it.similar_to else "")
+        if it.flag == "dropped":
+            flag += " ! left out by the Assistant"
         where = f" → {titles[it.topic]} ({it.topic})" if it.topic else ""
         mark = "x" if it.include else " "
         typer.echo(f"[{mark}] {i:>3}. {it.kind:<11} {it.content}{where}{flag}")
@@ -191,7 +206,7 @@ def sort_(ctx: typer.Context,
     """File imported memories into topics: a suggestion for each, and only the ones you accept move."""
     vault = _vault(ctx)
     try:
-        rows = transfer.sort_plan(vault, topic)
+        rows = assistant_features.sort_plan(vault, topic)
     except VaultError as e:
         typer.secho(str(e), fg="red", err=True)
         raise typer.Exit(1) from None
@@ -199,6 +214,8 @@ def sort_(ctx: typer.Context,
         typer.echo("Nothing to sort.")
         return
     titles = {t["slug"]: t["title"] for t in vault.topics()}
+    if any(r.get("by") == "assistant" for r in rows):
+        typer.echo("Suggestions by OpenMyMemo Assistant (the rules where it gave none).")
 
     def where(slug: str | None) -> str:
         return f"{titles[slug]} ({slug})" if slug else "no suggestion"
@@ -939,6 +956,119 @@ def setup_codex(ctx: typer.Context,
         typer.echo(f"\nOne step left, once: {trust} New sessions then start with your memory.")
     else:
         typer.echo(f"\nIf new sessions still start without your memory, it isn't trusted yet: {trust}")
+
+
+# ---- OpenMyMemo Assistant (product-design.md §17) -----------------------------------------------------------
+
+
+def _assistant_status(vault: Vault) -> None:
+    from .assistant import Assistant
+
+    s = Assistant.from_settings(vault).status()
+    typer.echo(f"OpenMyMemo Assistant: {'on' if s['enabled'] else 'off'}")
+    kind = {"local": "a model on this computer", "key": "your own API key", "mymemo": "MyMemo (coming soon)"}[s["kind"]]
+    typer.echo(f"  Model:     {s['model'] or '(none)'} via {kind}, {s['protocol']} API")
+    typer.echo(f"  Endpoint:  {s['endpoint'] or '(none)'}")
+    if s["kind"] != "local":
+        where = {"keychain": " (in the Keychain)", "file": " (in assistant.json)", "env": " (from the environment)"}
+        typer.echo(f"  Key:       {'set' + where.get(s['key_store'] or '', '') if s['has_key'] else 'not set'}")
+    typer.echo("  Features:  " + ", ".join(f"{k} {'on' if v else 'off'}" for k, v in s["features"].items()))
+    if s["private_topics"]:
+        note = "" if s["local"] else " (only with a model on this computer)"
+        typer.echo(f"  Private topics it may read: {', '.join(s['private_topics'])}{note}")
+    caps, usage = s["caps"], s["usage"]
+    limit = lambda v: "no limit" if v is None else f"{v:,}"  # noqa: E731
+    typer.echo(f"  This month: {usage['calls']:,} calls (limit {limit(caps['calls'])}), "
+               f"{usage['tokens']:,} tokens (limit {limit(caps['tokens'])})")
+    if s["from_env"]:
+        typer.echo(f"  Set by OPENMYMEMO_ASSISTANT_* variables: {', '.join(s['from_env'])}")
+    typer.echo(f"\n{s['where']}")
+    if s["enabled"] and s["reason"]:
+        typer.secho(s["reason"], fg="yellow")
+
+
+@assistant_app.command("status")
+def assistant_status(ctx: typer.Context) -> None:
+    """Show the Assistant's settings, this month's usage, and where memory text goes."""
+    _assistant_status(_vault(ctx))
+
+
+@assistant_app.command("set")
+def assistant_set(
+    ctx: typer.Context,
+    kind: Annotated[str | None, typer.Option(help="local (a model on this computer) or key (your own API key).")] = None,
+    protocol: Annotated[str | None, typer.Option(help="openai (OpenAI-compatible) or anthropic.")] = None,
+    base_url: Annotated[str | None, typer.Option(help="The endpoint's base URL; empty for the default.")] = None,
+    model: Annotated[str | None, typer.Option(help="The model's name, e.g. llama3.2 or claude-haiku-5-5.")] = None,
+    key: Annotated[bool, typer.Option("--key", help="Ask for the API key (typed, not shown).")] = False,
+    key_stdin: Annotated[bool, typer.Option("--key-stdin", help="Read the API key from standard input.")] = False,
+    remove_key: Annotated[bool, typer.Option("--remove-key", help="Forget the stored API key.")] = False,
+    feature: Annotated[list[str] | None, typer.Option(help="name=on|off, e.g. --feature sort=off. Repeatable.")] = None,
+    cap_calls: Annotated[int | None, typer.Option(help="Monthly limit on calls; 0 for none.")] = None,
+    cap_tokens: Annotated[int | None, typer.Option(help="Monthly limit on tokens; 0 for none.")] = None,
+    private_topic: Annotated[list[str] | None, typer.Option(
+        help="A private topic a model on this computer may read (repeatable; replaces the list).")] = None,
+    no_private_topics: Annotated[bool, typer.Option("--no-private-topics", help="No private topics at all.")] = False,
+) -> None:
+    """Configure the Assistant and turn it on. Off by default; `openmymemo assistant off` turns it off again."""
+    from .assistant import KINDS, SettingsError, ensure_connector, save_settings
+
+    vault = _vault(ctx)
+    if kind == "mymemo":
+        typer.secho("MyMemo's hosted model isn't available yet.", fg="red", err=True)
+        raise typer.Exit(2)
+    if kind is not None and kind not in KINDS:
+        typer.secho("kind must be local or key", fg="red", err=True)
+        raise typer.Exit(2)
+    secret = None
+    if key_stdin:
+        secret = sys.stdin.readline().strip()
+    elif key:
+        secret = typer.prompt("API key", hide_input=True).strip()
+    elif remove_key:
+        secret = ""
+    features: dict[str, bool] = {}
+    for f in feature or []:
+        name, _, value = f.partition("=")
+        if value.lower() not in ("on", "off"):
+            typer.secho(f"--feature takes name=on or name=off, not {f}", fg="red", err=True)
+            raise typer.Exit(2)
+        features[name.strip()] = value.lower() == "on"
+    caps = {k: v for k, v in (("calls", cap_calls), ("tokens", cap_tokens)) if v is not None}
+    try:
+        settings = save_settings(
+            enabled=True, kind=kind, protocol=protocol, base_url=base_url, model=model, api_key=secret,
+            features=features or None, caps=caps or None,
+            private_topics=[] if no_private_topics else (private_topic or None))
+    except SettingsError as e:
+        typer.secho(str(e), fg="red", err=True)
+        raise typer.Exit(1) from None
+    ensure_connector(vault, regrant=True)
+    _assistant_status(vault)
+    if settings.problem():
+        raise typer.Exit(1)
+
+
+@assistant_app.command("test")
+def assistant_test(ctx: typer.Context) -> None:
+    """Send one tiny request to the configured model and show its name and how long it took."""
+    from .assistant import Assistant
+
+    result = Assistant.from_settings(_vault(ctx)).test()
+    if result["ok"]:
+        typer.secho(f"{result['model']} answered in {result['ms']} ms.", fg="green")
+    else:
+        typer.secho(result["error"], fg="red", err=True)
+        raise typer.Exit(1)
+
+
+@assistant_app.command("off")
+def assistant_off() -> None:
+    """Turn the Assistant off: everything works by rules again, and no memory text goes to a model."""
+    from .assistant import save_settings
+
+    save_settings(enabled=False)
+    typer.echo("OpenMyMemo Assistant is off.")
 
 
 # The Mac app's environments, venvs/<version>-<stamp>: each process run from one holds a shared lock on

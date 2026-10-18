@@ -70,7 +70,8 @@ def test_import_preview_commit_and_export(vault, api):
                      json={"source": "chatgpt", "text": "用户在 Acme 担任 CTO\n删除\n用户喜欢科幻小说"}).json()
     assert [i["topic"] for i in items] == [None, None]
     assert set(items[0]) == {"content", "topic", "kind", "created_at", "hint", "duplicate_of", "similar_to",
-                             "similar_content", "include"}
+                             "similar_content", "include", "by", "flag"}
+    assert items[0]["by"] is None  # the Assistant is off
     items[1]["topic"] = "values"
     ids = api.post("/api/import/commit", headers=H, json={"source": "chatgpt", "items": items}).json()["memory_ids"]
     assert len(ids) == 2 and vault.get(ids[0]).topic == "from-chatgpt" and vault.get(ids[1]).topic == "values"

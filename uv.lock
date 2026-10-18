@@ -445,6 +445,7 @@ source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
     { name = "fastapi" },
+    { name = "httpx2" },
     { name = "mcp" },
     { name = "pyyaml" },
     { name = "typer" },
@@ -463,6 +464,7 @@ dev = [
 requires-dist = [
     { name = "cryptography", specifier = ">=48" },
     { name = "fastapi", specifier = ">=0.140" },
+    { name = "httpx2", specifier = ">=2.13" },
     { name = "mcp", specifier = ">=2.3,<3" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "typer", specifier = ">=0.27" },

@@ -1,6 +1,6 @@
 # Privacy Policy
 
-Last updated: 2026-10-15
+Last updated: 2026-10-18
 
 OpenMyMemo is open-source software published by MyMemo. It keeps your AI memory in a folder on your own computer. This policy covers the OpenMyMemo command-line tool, its MCP server, its review panel, the Mac app and the plugins and extensions in this repository. MyMemo Cloud, an optional MyMemo service, is covered by the section of that name below and by MyMemo's own privacy policy.
 
@@ -8,7 +8,7 @@ OpenMyMemo is open-source software published by MyMemo. It keeps your AI memory 
 
 - Your memory stays on your computer. MyMemo does not receive it, and OpenMyMemo has no account, telemetry, analytics, crash reporting or update check.
 - AI apps you connect read your memory and send what they read to their own model provider, under that app's privacy policy. The `health` and `finance` topics are hidden from every app unless you allow them.
-- Nothing leaves your computer through OpenMyMemo unless you turn on MyMemo Cloud and link this computer to a MyMemo account.
+- Nothing leaves your computer through OpenMyMemo unless you turn on MyMemo Cloud and link this computer to a MyMemo account, or turn on the OpenMyMemo Assistant with a model that isn't on your computer.
 
 ## What OpenMyMemo stores on your computer
 
@@ -35,6 +35,8 @@ Everything below is stored only on your computer. OpenMyMemo never uploads it.
 
   The activity log also records which account the computer was linked to.
 
+- **The OpenMyMemo Assistant, if you turn it on:** `assistant.json`, next to `cloud.json`, readable by you only. It holds your choice of model and endpoint, its switches and limits, and this month's usage counts. Your API key is kept in the macOS Keychain when possible, otherwise in that file; it is never put in your memory folder. The activity log records each request the Assistant makes: what it was for, the model, the endpoint's host name, token counts, how long it took, which memories it was sent and whether it worked. It never records the text sent or received.
+
 ## What AI apps receive
 
 When you connect an AI app, it can read memories in the topics you allow and propose changes. By default, additions apply right away and show up for you to review and undo, and changes to memories you wrote yourself wait for you. If you let an app write directly (its write mode "auto"), its changes apply at once, including changes to memories you wrote and while approval is on. Anything in a private topic always waits for you, whatever an app's write mode.
@@ -52,6 +54,7 @@ OpenMyMemo's server listens only on `127.0.0.1`, so other devices cannot reach i
   These are ordinary download requests. Like any `uv` download, they carry `uv`'s usual client information, such as its version and your operating system. No memory is sent.
 - **Links you click.** The panel and the Mac app open documentation and download pages in your browser. Install links open the AI app they belong to directly (for example `cursor://` or `vscode:`), never a website, because they carry the command that starts OpenMyMemo and with it the path of your memory folder.
 - **MyMemo Cloud**, only after you turn it on and link this computer (see below).
+- **The OpenMyMemo Assistant**, only after you turn it on with a model that isn't on your computer (see below).
 
 ## MyMemo Cloud (optional)
 
@@ -73,11 +76,27 @@ When this computer is linked:
 
 What the MyMemo service stores and how long it keeps it is governed by [MyMemo's privacy policy](https://mymemo.ai/privacy-policy/). If you choose another service, its operator's policy applies.
 
+## OpenMyMemo Assistant (optional)
+
+The OpenMyMemo Assistant uses a model to help with imports and sorting. It is off until you turn it on in Settings → Assistant or with `openmymemo assistant set`. What it sends depends on the model you choose:
+
+| Your choice | Where memory text goes |
+| --- | --- |
+| Off (the default) | Nowhere |
+| On this computer (Ollama, LM Studio, llama.cpp, vLLM, …) | Only to the model server on your computer. OpenMyMemo checks that its address is local and never follows a redirect elsewhere. |
+| Your own API key (Anthropic, or any OpenAI-compatible service) | To that provider, under its terms and privacy policy. |
+| MyMemo's hosted model | Coming. This section will describe it before it is available. |
+
+- **What is sent:** for each request, the text a feature works on: what you paste or the file you import, or the imported memories being sorted, with the names of your topics. Nothing is sent in the background.
+- **Never sent to a model outside your computer:** private topics (`health` and `finance` by default) and memories marked private. OpenMyMemo refuses a request that contains them, whatever a feature asks. A model on your computer gets only the private topics you pick in its settings.
+- **Its access:** the Assistant appears on the Connectors page as "OpenMyMemo Assistant". You can limit which topics it reads, make it read-only or remove its access, as for any app. Anything it changes is a proposal you can review and undo, and it never writes into a private topic.
+- **Your key** stays on your computer (see above) and is sent only to the endpoint you chose.
+
 ## Your choices
 
 - Read, edit, export or delete your memories at any time. They are plain files in a folder you own.
 - Choose for each app which topics it may read and whether it may write. Remove an app's access, or turn approval on so that every change from an app that proposes (the default) waits for you; an app you let write directly still applies its changes at once, except in private topics.
-- Disconnect an app, which removes OpenMyMemo from its settings. Unlink MyMemo Cloud, or leave it hidden.
+- Disconnect an app, which removes OpenMyMemo from its settings. Unlink MyMemo Cloud, or leave it hidden. Turn the OpenMyMemo Assistant off, or limit what it is used for.
 - To remove everything:
   1. Delete the memory folder.
   2. Delete OpenMyMemo's application folders (`~/Library/Application Support/ai.mymemo.openmymemo`, `~/Library/Application Support/OpenMyMemo` and `~/Library/Caches/ai.mymemo.openmymemo` on a Mac).

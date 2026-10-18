@@ -13,7 +13,8 @@ Supported import sources:
   — a memory or instructions file another AI app keeps on disk (CLAUDE.md, AGENTS.md, GEMINI.md, Cursor rules,
   memory.md, …; ``memfiles`` finds them). Each list item or paragraph is one memory.
 
-Imports always go through a preview: parse → check duplicates → commit. Nothing is classified into a topic at
+Imports always go through a preview: parse → check duplicates → commit. With the OpenMyMemo Assistant on for imports,
+``assistant.features.import_preview`` splits the text with the model instead and cross-checks it against ``parse``. Nothing is classified into a topic at
 import time: memories land in a topic of their own, ``from-<source>`` in the "Imported" group, in the source's
 order and with its dates. Sorting them into the regular topics is a separate step: ``sort_plan`` suggests a
 topic for each memory with the rule-based classifier and ``sort_commit`` moves the ones the user picked.
@@ -59,6 +60,8 @@ class ImportItem:
     similar_to: str | None = None
     similar_content: str | None = None
     include: bool = True
+    by: str | None = None  # who split it: "assistant" or "rules" when the Assistant was on for imports, else None
+    flag: str | None = None  # "dropped": the Assistant left this line out, the rules would have kept it
 
     def to_dict(self) -> dict:
         return asdict(self)

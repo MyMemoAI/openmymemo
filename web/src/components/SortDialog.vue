@@ -19,6 +19,7 @@ const busy = ref(false);
 const targets = computed(() => (store.state?.topics ?? []).filter((tp) => tp.group !== "imported"));
 const ticked = computed(() => (rows.value ?? []).filter((r) => r.tick && r.pick));
 const suggested = computed(() => (rows.value ?? []).filter((r) => r.pick));
+const byAssistant = computed(() => (rows.value ?? []).some((r) => r.by === "assistant"));
 const allTicked = computed(() => suggested.value.length > 0 && suggested.value.every((r) => r.tick));
 
 async function load() {
@@ -63,7 +64,10 @@ async function move() {
     </div>
     <template v-else>
       <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <p class="text-[13px] text-muted">{{ t("sort.explain") }}</p>
+        <div class="space-y-1">
+          <p class="text-[13px] text-muted">{{ t("sort.explain") }}</p>
+          <p v-if="byAssistant" class="text-[13px]" data-test="sort-by">{{ t("sort.byAssistant") }}</p>
+        </div>
         <button v-if="suggested.length" class="btn btn-link btn-sm" @click="toggleAll">
           {{ allTicked ? t("sort.untickAll") : t("sort.tickAll") }}
         </button>

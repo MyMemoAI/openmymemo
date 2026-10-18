@@ -85,6 +85,11 @@ const elsewhere = computed(() => apps.value.filter((a) => !here(a)));
 const custom = computed(() => (props.compact ? [] : catalog.value?.custom ?? []).map(
   (c) => store.connectors.find((x) => x.id === c.id) ?? c,
 ));
+/** The OpenMyMemo Assistant's connector, listed once it has been turned on (Settings → Assistant). */
+const assistant = computed(() => {
+  const c = props.compact ? null : catalog.value?.assistant ?? null;
+  return c ? store.connectors.find((x) => x.id === c.id) ?? c : null;
+});
 
 interface Section {
   id: string;
@@ -292,6 +297,33 @@ defineExpose({ addOther, disconnect, reload: load });
               <div class="truncate text-[13px] text-muted">{{ t("apps.otherShort") }}</div>
             </div>
             <button class="btn btn-sm" @click="addOther">{{ t("apps.setup") }}</button>
+          </div>
+        </div>
+      </section>
+      <section v-if="i === 0 && assistant" class="space-y-2" data-test="assistant-row">
+        <h3 class="label px-1">{{ t("apps.assistant") }}</h3>
+        <div class="card divide-y divide-sep overflow-hidden">
+          <div class="flex items-center gap-3 px-4.5 py-3">
+            <span class="avatar avatar-on size-[34px] text-sm" aria-hidden="true"><AppIcon name="star" :size="16" /></span>
+            <div class="min-w-0 flex-1">
+              <div class="truncate font-semibold">{{ assistant.name }}<span class="font-normal text-muted"> · {{ t("apps.assistantNote") }}</span></div>
+              <div class="flex items-center gap-1.5 text-[13px] text-muted">
+                <span class="dot" :class="assistant.last_seen ? 'bg-fresh' : 'bg-faint'" aria-hidden="true" />
+                <span class="truncate">{{ assistant.last_seen ? t("apps.inUse", { time: relTime(assistant.last_seen) }) : t("apps.installed") }}</span>
+              </div>
+            </div>
+            <button
+              v-if="$slots.manage"
+              class="btn btn-quiet btn-sm"
+              :aria-expanded="open === assistant.id"
+              :aria-label="t('apps.manageNamed', { name: assistant.name })"
+              @click="toggleManage(assistant.id)"
+            >
+              <AppIcon name="sliders" :size="14" /><span class="max-sm:hidden">{{ t("apps.manage") }}</span>
+            </button>
+          </div>
+          <div v-if="$slots.manage && open === assistant.id" class="bg-sunken">
+            <slot name="manage" :app="null" :connector="assistant" />
           </div>
         </div>
       </section>
