@@ -9,6 +9,7 @@ has a rule-based fallback, and nothing here runs until the person turns it on.
   connector.
 * ``features``: model-powered import splitting and sorting suggestions (§17.5).
 * ``mymemo``: MyMemo's hosted model (§17.8): sign-in, its tokens, and pauses the service asks for.
+* ``tidy``: Tidy up (§17.6), a batch of proposals, and its schedule in the panel's process.
 
 The rest of OpenMyMemo imports from here.
 """
