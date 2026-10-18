@@ -10,7 +10,7 @@ Rules the format is built on:
 
 - **Memory files are the source of truth.** If a file and the metadata disagree, the file wins and the metadata is corrected on the next read.
 - **Lines a tool doesn't understand are kept byte for byte.** Parsing and rewriting a file that wasn't changed is the identity.
-- **No database, no binary files.** Everything can be read with `cat`, diffed with `git` and edited by hand.
+- **No database, no binary files.** Everything can be read with `cat`, diffed with `git` and edited by hand. The one exception is the optional search index (§6.8): a cache, rebuilt from the memory files, that keeps itself out of git and may be deleted at any time.
 - **Follow the conventions people already use.** Markdown with YAML frontmatter (Obsidian, Hugo, Claude Code's memory files, Google Cloud's Open Knowledge Format), Obsidian block ids, one statement per list item (the shape of ChatGPT's, Claude's, Gemini's and Mem0's memory lists), and the Open Knowledge Format's reserved file names (§10.1).
 
 ## 2. Layout
@@ -33,6 +33,7 @@ Rules the format is built on:
     ├── history.jsonl
     ├── activity.jsonl
     ├── proposals/<id>.json
+    ├── index/                # optional cache for search by meaning; delete freely (§6.8)
     ├── .lock
     └── .gitignore
 ```
@@ -286,7 +287,7 @@ Per-memory metadata, keyed by id.
 | `status` | `active`, `archived` | Archived memories have no line in any file |
 | `until`, `private` | as inline | Mirrors of the inline attributes |
 | `pinned` | boolean | Listed first in what AI sees |
-| `evidence` | string ≤ 2000 chars | The conversation snippet behind the proposal that created it |
+| `evidence` | string ≤ 2000 chars | The conversation snippet behind the proposal that created it, or, for a memory imported from a chat export or session, the person's quoted message with its source and date |
 
 `meta.json` is a cache with a memory of its own: if it is lost, every memory survives — ids, content, topic, section, `until` and `private` come back from the files; `kind` is guessed again, `source` becomes `user` and `last_actor` becomes `file`, and timestamps restart. Only `history.jsonl` keeps the real past.
 
@@ -310,7 +311,7 @@ Append-only, one JSON object per line: what each connector did.
 {"at": "2026-10-08T09:15:00+00:00", "connector": "claude-code", "action": "context", "memory_ids": ["m7f3a", "k2p9d"], "chars": 1840, "via": "hook"}
 ```
 
-`action` is `context`, `search`, `get`, `propose`, `import`, `link` or `call`; other fields depend on it (`query`, `memory_ids`, `proposal_id`, `queue_id`, `result`, `op`, `chars`, `via`, `source`, `account`, `email_masked`, `feature`, `model`, `endpoint`, `kind`, `tokens_in`, `tokens_out`, `ms`, `error`). A queued MyMemo Cloud write turned down when it is filed is a `propose` with `result: "rejected"` and its `queue_id`. `link` is written when this computer is linked to MyMemo Cloud, with `connector` `mymemo-cloud` and the account it was linked to: its display name and MyMemo's masked email (`s***@example.com`). `call` is one request the OpenMyMemo Assistant made to its model, with `connector` `assistant`: the `feature` it was for (`import`, `sort`, `recall`, `check`, `session`, `tidy`, or `test`), the `model`, the endpoint's host name (`endpoint`), its `kind` (`local`, `key` or `mymemo`), the tokens the endpoint reported, the time in milliseconds, the ids of the memories it was sent, and its `result`: `ok`, or why it produced nothing (`invalid`, `timeout`, `unreachable`, `http`, `rate_limited`, `quota`, `plan`, `refused`, `redirect`, `cap`, `refused_private`, `error`). The text sent and received is never recorded.
+`action` is `context`, `search`, `get`, `propose`, `import`, `link` or `call`; other fields depend on it (`query`, `memory_ids`, `proposal_id`, `queue_id`, `result`, `op`, `chars`, `via`, `source`, `account`, `email_masked`, `feature`, `model`, `endpoint`, `kind`, `tokens_in`, `tokens_out`, `ms`, `error`, `embeddings`). A queued MyMemo Cloud write turned down when it is filed is a `propose` with `result: "rejected"` and its `queue_id`. `link` is written when this computer is linked to MyMemo Cloud, with `connector` `mymemo-cloud` and the account it was linked to: its display name and MyMemo's masked email (`s***@example.com`). `call` is one request the OpenMyMemo Assistant made to its model, with `connector` `assistant`: the `feature` it was for (`import`, `sort`, `recall`, `check`, `session`, `tidy`, or `test`), the `model`, the endpoint's host name (`endpoint`), its `kind` (`local`, `key` or `mymemo`), the tokens the endpoint reported, the time in milliseconds, the ids of the memories it was sent, and its `result`: `ok`, or why it produced nothing (`invalid`, `timeout`, `unreachable`, `http`, `rate_limited`, `quota`, `plan`, `refused`, `redirect`, `cap`, `refused_private`, `error`). The text sent and received is never recorded. A request to the endpoint's `/embeddings` (search by meaning, §6.8) is a `call` with `feature` `recall`, the embeddings `model`, and `embeddings`: how many texts it embedded.
 
 ```json
 {"at": "2026-10-18T09:15:00+00:00", "connector": "assistant", "action": "call", "feature": "import", "model": "llama3.2", "endpoint": "127.0.0.1", "kind": "local", "result": "ok", "tokens_in": 812, "tokens_out": 230, "ms": 2140}
@@ -335,11 +336,12 @@ One file per proposal, named by its id (`p` plus hexadecimal; the id must be alp
 | `status` | `pending`, `accepted`, `edited_accepted`, `rejected`, `expired`, `applied`, `undone` |
 | `decided_at` | When the status left `pending` or `applied` was set |
 | `reviewed_at` | Version 2: when the person saw an applied change in the digest. Applied proposals without it are "unreviewed". |
-| `hold` | Version 2: why a pending proposal waits: `approval` (the person reviews every change first), `protected` (the target memory was last written by the person), `private` (a private topic or memory), or `review` (the proposer asked for the person's decision although the rules would have applied it, as the tidy-up does for archiving a possibly outdated memory). Absent on applied proposals. |
+| `hold` | Version 2: why a pending proposal waits: `approval` (the person reviews every change first), `protected` (the target memory was last written by the person), `private` (a private topic or memory) `sensitive` (the OpenMyMemo Assistant's check found it looks like health, money or credentials and there was no private topic to put it in), or `review` (the proposer asked for the person's decision although the rules would have applied it, as the tidy-up does for archiving a possibly outdated memory). Absent on applied proposals. |
 | `applied_version` | Version 2: the memory's version right after the change was applied or accepted. Undo is offered while this is still the memory's current version. |
 | `final_content`, `final_topic`, `applied_memory_id` | What was actually written |
 | `before_content`, `before_topic` | The memory before an update or archive, for undo and for the diff |
 | `original_op`, `similarity`, `conflict`, `topic_confidence` | How the proposal was adjusted: an `add` turned into an `update` of a similar memory, whether it looks contradictory, how sure the classifier was |
+| `checked_by`, `check_note` | Optional: `assistant` when the OpenMyMemo Assistant checked an app's proposal before it was filed (product-design.md §17.7), and a short note for the person on what it found or changed. Such a check can turn an `add` into an `update` of a memory it repeats or contradicts (then `original_op` is `add` and `similarity` is absent), pick the topic, or make the proposal wait; it never makes one apply that would otherwise wait. |
 | `undo_until` | Version 1 only. Version 2 allows undo for as long as the change is the memory's latest version, and ignores this field. |
 
 Pending proposals expire after 30 days.
@@ -347,6 +349,22 @@ Pending proposals expire after 30 days.
 ### 6.7 `.lock`
 
 An empty file used for advisory locking: `flock` on POSIX, `msvcrt.locking` on the first byte on Windows. OpenMyMemo holds it for the duration of any write and of a sync. Other tools that want to avoid racing a running OpenMyMemo take the same lock; tools that don't are still safe as long as they replace files atomically (§8).
+
+### 6.8 `index/` (optional search cache)
+
+Written only when search by meaning is in use: the local embedding model ("Search by meaning on this computer", `openmymemo semantic on`) or an embeddings model at the OpenMyMemo Assistant's endpoint. It is a **cache**, not data:
+
+- It is rebuilt from `memories/*.md`, so deleting the folder loses nothing; the next search starts rebuilding it.
+- It holds its own `.gitignore` (`*`), so it stays out of git, and a synced folder doesn't need to sync it: each computer builds its own.
+- Turning the local model off deletes it.
+
+| File | Contents |
+| --- | --- |
+| `manifest.json` | `format` (1), `model` (which embedder wrote it: `local/<model>@<file hash prefix>` or `endpoint/<host>/<model>`), `dims`, `vectors` (the vectors file's name), `count`, `updated_at`, and `items`: `{"id", "hash"}` per memory, in the order of the vectors. `hash` is the first 16 hex digits of the SHA-256 of the memory's content. |
+| `vectors-<token>.f32` | `count × dims` float32 values, little-endian, each row L2-normalized. |
+| `.lock` | Taken while the index is written. |
+
+Readers ignore an index whose `model` isn't the embedder they use: an index is never mixed across models, and a different model rebuilds it. A memory whose hash differs from its content (edited in any editor) is embedded again; a memory that is gone is dropped. Writers write a new vectors file, then replace `manifest.json` atomically, then delete older vectors files, so a reader sees one whole index or the other. With an embeddings endpoint that isn't on this computer, memories it may not be sent (private topics) have no vector and are found by keywords only.
 
 ## 7. Reconciling changes made outside OpenMyMemo
 
@@ -419,6 +437,7 @@ The folder can live inside an Obsidian vault. Block ids are Obsidian's own synta
 | Gemini, Grok, any assistant | One memory per line, bullets or numbers optional |
 | Markdown | List items; headings are shown in the preview as the source's own grouping |
 | JSON | A list of strings, or of objects with `content` / `memory` / `text` / `value` and optional `topic` (used when it names an existing topic, which is how OpenMyMemo's own export round-trips), `kind`, `created_at`, `categories` (Mem0) |
+| Chats (needs the OpenMyMemo Assistant) | ChatGPT's data export (`conversations.json`, or the export's `.zip`), Claude's data export (`conversations.json` or `.zip`), Claude Code sessions (`~/.claude/projects/<project>/<session>.jsonl`) and Codex sessions (`~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`). The model suggests memories from what the person wrote; each keeps the person's quoted words and the date as `evidence` in `meta.json`. Sources `chatgpt-export`, `claude-export`, `claude-code-sessions`, `codex-sessions` |
 
 Imports land in `memories/from-<source>.md` in the source's order; nothing is classified at import time.
 

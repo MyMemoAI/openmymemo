@@ -666,3 +666,51 @@ def test_with_an_environment_token_the_stored_sign_ins_account_isnt_shown(vault,
     assert m["signed_in"] and m["via"] == "env" and m["account"] is None and m["signed_in_at"] is None
     r = CliRunner().invoke(app, ["--vault", str(vault.root), "assistant", "status"])
     assert "Sam" not in r.stdout and "OPENMYMEMO_ASSISTANT_API_KEY" in r.stdout
+
+
+# ---- with the other Assistant features --------------------------------------------------------------------------------
+
+
+def test_mymemo_offers_no_embeddings_and_recall_never_asks_it_for_any(vault, fake, api):
+    signed_in(vault, fake)
+    save_settings(embeddings_model="text-embedding-3-small", features={"recall": True})
+    s = load_settings()
+    assert s.kind == "mymemo" and not s.embeddings_available
+    assert api.get("/api/assistant", headers=H).json()["embeddings"] is False
+    vault.add("interests", "Prefers tea over coffee")
+    from openmymemo.recall import search
+
+    found = search(vault, None, "what do I like to drink", limit=5, model=True)
+    assert found.mode != "hybrid"  # no vectors from MyMemo
+    assert not any(p.endswith("/embeddings") for p in fake.paths)  # query expansion may use chat; embeddings never
+    assert all(c["headers"]["x-openmymemo-feature"] == "recall" for c in fake.chats)
+
+
+@pytest.mark.parametrize("name", ["rate_limit_exceeded", "plan_required", "quota_exceeded", "model_unavailable"])
+def test_a_mymemo_pause_stops_checks_chat_import_session_reading_and_recall(name, vault, fake, monkeypatch):
+    from test_assistant_writes import FIXTURES, app_connector, place_transcript
+
+    from openmymemo.assistant import chats
+    from openmymemo.assistant import session as sessions
+    from openmymemo.assistant.checks import check_proposal
+    from openmymemo.recall import search
+
+    signed_in(vault, fake)
+    save_settings(features={"check": True, "session": True, "import": True, "recall": True},
+                  session_apps={"claude-code": "allowed"})
+    fake.fail(name)
+    assert Assistant.from_settings(vault).json_call("sort", "x", ["t"], SCHEMA) is None  # MyMemo says: pause
+    assert len(fake.chats) == 1 and mymemo.hold(load_settings())
+
+    con = app_connector(vault)
+    assert check_proposal(vault, con, "add", content="Prefers pnpm over npm", memory_id=None, topic=None) is None
+    convs = chats.parse_export("claude-export", (FIXTURES / "claude_conversations.json").read_text())
+    job = chats.ChatImport(vault, "claude-export", convs)
+    plan = job.plan()
+    assert not plan["ready"] and plan["reason"] == mymemo.hold_message(mymemo.hold(load_settings()))
+    assert job.run() == []
+    path = place_transcript()
+    assert sessions.work(vault, "claude-code", path, "s-1")["result"] in ("off", "limit")
+    vault.add("interests", "Prefers tea over coffee")
+    search(vault, None, "tea", limit=5, model=True)
+    assert len(fake.chats) == 1  # nothing more went to MyMemo while paused

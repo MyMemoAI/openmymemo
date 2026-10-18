@@ -8,6 +8,8 @@ import { desktop } from "../desktop";
 import { t } from "../i18n";
 import { store, toast } from "../store";
 import AppIcon from "./AppIcon.vue";
+import SessionConsent from "./SessionConsent.vue";
+import SemanticSettings from "./SemanticSettings.vue";
 
 /**
  * Settings → Assistant (product-design.md §17.2): off, a model on this computer, your own API key, or MyMemo's hosted
@@ -15,6 +17,8 @@ import AppIcon from "./AppIcon.vue";
  * this computer may read, monthly limits and this month's usage, and where memory text goes. For MyMemo (§17.8):
  * sign-in (no browser when this computer is linked to MyMemo Cloud), the account, and the model, plan and usage as
  * MyMemo reports them, with its plan page opened in the browser; nothing about the plan is known here.
+ * Its embeddings model (optional) and the local model for search by meaning (`SemanticSettings`, shown even with
+ * the Assistant off) are here too.
  */
 type Choice = "off" | AssistantKind;
 const CHOICES: Choice[] = ["off", "local", "key", "mymemo"];
@@ -22,14 +26,14 @@ const FEATURES: AssistantFeature[] = ["import", "sort", "recall", "check", "sess
 
 const status = ref<AssistantStatus | null>(null);
 const busy = ref(false);
-const draft = ref({ protocol: "openai" as "openai" | "anthropic", base_url: "", model: "", api_key: "" });
+const draft = ref({ protocol: "openai" as "openai" | "anthropic", base_url: "", model: "", api_key: "", embeddings_model: "" });
 const caps = ref({ calls: "", tokens: "" });
 const tested = ref<AssistantTest | null>(null);
 const testing = ref(false);
 
 function take(s: AssistantStatus) {
   status.value = s;
-  draft.value = { protocol: s.protocol, base_url: s.base_url, model: s.model, api_key: "" };
+  draft.value = { protocol: s.protocol, base_url: s.base_url, model: s.model, api_key: "", embeddings_model: s.embeddings_model ?? "" };
   caps.value = { calls: s.caps.calls == null ? "" : String(s.caps.calls), tokens: s.caps.tokens == null ? "" : String(s.caps.tokens) };
 }
 
@@ -178,7 +182,7 @@ const changed = computed(() => {
   if (!s) return false;
   const d = draft.value;
   return d.api_key.trim() !== "" || d.model.trim() !== s.model || d.base_url.trim().replace(/\/+$/, "") !== s.base_url
-    || (s.kind === "key" && d.protocol !== s.protocol);
+    || (s.kind === "key" && d.protocol !== s.protocol) || d.embeddings_model.trim() !== (s.embeddings_model ?? "");
 });
 
 async function change(body: AssistantPatch, done?: string) {
@@ -203,6 +207,7 @@ function pick(c: Choice) {
 function save() {
   const d = draft.value;
   const body: AssistantPatch = { model: d.model.trim(), base_url: d.base_url.trim() };
+  if (d.embeddings_model.trim() !== (status.value?.embeddings_model ?? "")) body.embeddings_model = d.embeddings_model.trim();
   if (status.value?.kind === "key") body.protocol = d.protocol;
   if (d.api_key.trim()) body.api_key = d.api_key.trim();
   void change(body, t("ast.saved"));
@@ -334,7 +339,7 @@ const fmt = (n: number) => n.toLocaleString("en-US");
           </p>
           <p v-if="mm.signin_error" class="text-[13px] text-wait-ink">{{ mm.signin_error }}</p>
         </template>
-        <p class="text-xs text-muted">{{ t("ast.mm.noEmbeddings") }}</p>
+        <p class="text-xs text-muted" data-test="mm-no-embeddings">{{ t("ast.mm.noEmbeddings") }}</p>
       </div>
 
       <form v-if="status.enabled && status.kind !== 'mymemo'" class="space-y-3 px-4.5 py-3.5" @submit.prevent="save">
@@ -378,6 +383,19 @@ const fmt = (n: number) => n.toLocaleString("en-US");
             autocomplete="off"
           />
         </label>
+        <label v-if="status.kind === 'local' || (status.kind === 'key' && draft.protocol === 'openai')" class="block space-y-1.5">
+          <span class="text-[13px] font-semibold">{{ t("ast.embeddings") }}</span>
+          <input
+            v-model="draft.embeddings_model"
+            class="input font-mono text-xs"
+            :placeholder="t('ast.embeddingsNone')"
+            :disabled="locked('embeddings_model') || busy"
+            spellcheck="false"
+            autocomplete="off"
+            data-test="embeddings"
+          />
+          <span class="block text-xs text-muted">{{ t("ast.embeddingsHelp") }}</span>
+        </label>
         <label v-if="status.kind === 'key'" class="block space-y-1.5">
           <span class="text-[13px] font-semibold">{{ t("ast.key") }}</span>
           <input
@@ -407,22 +425,25 @@ const fmt = (n: number) => n.toLocaleString("en-US");
       </form>
 
       <div v-if="status.enabled" class="divide-y divide-sep">
-        <div v-for="f in FEATURES" :key="f" class="flex items-center gap-4 px-4.5 py-3">
-          <div class="min-w-0 flex-1 space-y-0.5">
-            <div class="font-semibold">{{ t(`ast.feature.${f}`) }}</div>
-            <p class="text-[13px] text-muted">{{ t(`ast.featureHelp.${f}`) }}</p>
+        <div v-for="f in FEATURES" :key="f">
+          <div class="flex items-center gap-4 px-4.5 py-3">
+            <div class="min-w-0 flex-1 space-y-0.5">
+              <div class="font-semibold">{{ t(`ast.feature.${f}`) }}</div>
+              <p class="text-[13px] text-muted">{{ t(`ast.featureHelp.${f}`) }}</p>
+            </div>
+            <button
+              role="switch"
+              type="button"
+              class="switch disabled:opacity-50"
+              :aria-checked="status.features[f]"
+              :aria-label="t(`ast.feature.${f}`)"
+              :disabled="busy || locked('features')"
+              @click="toggleFeature(f)"
+            >
+              <span class="switch-knob" />
+            </button>
           </div>
-          <button
-            role="switch"
-            type="button"
-            class="switch disabled:opacity-50"
-            :aria-checked="status.features[f]"
-            :aria-label="t(`ast.feature.${f}`)"
-            :disabled="busy || locked('features')"
-            @click="toggleFeature(f)"
-          >
-            <span class="switch-knob" />
-          </button>
+          <SessionConsent v-if="f === 'session'" :status="status" @changed="take" />
         </div>
       </div>
 
@@ -466,6 +487,8 @@ const fmt = (n: number) => n.toLocaleString("en-US");
         </div>
         <p class="text-xs text-muted">{{ t("ast.limitsHelp") }}</p>
       </form>
+
+      <SemanticSettings />
     </div>
   </section>
 </template>

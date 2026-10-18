@@ -1,0 +1,59 @@
+{
+ "interests": [
+  ["tea01", "Prefers tea over coffee, usually oolong in the afternoon"],
+  ["book1", "Loves hard science fiction; favorite novel is The Three-Body Problem"],
+  ["bass1", "Plays bass in a covers band on Thursdays"],
+  ["hike1", "周末喜欢去爬山，最常去的是香山"],
+  ["film1", "最喜欢的电影是《千与千寻》"]
+ ],
+ "lifestyle": [
+  ["run01", "Goes running every morning at 6"],
+  ["veg01", "Has been vegetarian since 2020"],
+  ["home1", "住在上海徐汇区，养了一只叫年糕的猫"],
+  ["metro", "Takes the metro to the office and doesn't own a car"],
+  ["sleep", "晚上十一点前上床"]
+ ],
+ "work": [
+  ["job01", "Senior backend engineer at a fintech startup in Shanghai"],
+  ["stack", "The team writes the payments service in Go with PostgreSQL"],
+  ["meet1", "每周三下午和团队开站会"],
+  ["oncal", "Is on call for payments incidents one week a month"]
+ ],
+ "projects": [
+  ["agent", "Rewriting the agent service on the Claude Agent SDK since 2026-09"],
+  ["app01", "在做一个记账小程序，用 SwiftUI 写"]
+ ],
+ "learning": [
+  ["jp001", "Is learning Japanese and wants to watch dramas without subtitles next year"],
+  ["gtr01", "正在学吉他，每天练半小时"]
+ ],
+ "identity": [
+  ["name1", "Name is Lin Wei; goes by Wei"],
+  ["born1", "Was born in Chengdu in 1992"],
+  ["lang1", "母语是中文，英语流利"]
+ ],
+ "people": [
+  ["kid01", "Has a five-year-old daughter named Mia"],
+  ["wife1", "妻子是一名儿科医生"],
+  ["frnd1", "Best friend Tom lives in Berlin"]
+ ],
+ "how-to-work-with-me": [
+  ["style", "Prefers concise answers that lead with the conclusion"],
+  ["code1", "回答技术问题时请给出代码示例"]
+ ],
+ "tools": [
+  ["mac01", "Uses a MacBook Pro with VS Code as the main editor"],
+  ["obsd1", "用 Obsidian 记笔记"]
+ ],
+ "goals": [
+  ["marat", "Wants to finish a full marathon in 2027"],
+  ["trip1", "计划明年带全家去日本旅行"]
+ ],
+ "health": [
+  ["alrg1", "Allergic to peanuts"],
+  ["chk01", "每年十月体检"]
+ ],
+ "finance": [
+  ["save1", "Saving for a down payment on an apartment"]
+ ]
+}

@@ -138,7 +138,18 @@ openmymemo assistant test                                        # one tiny requ
 openmymemo assistant status | plan | signout | off
 ```
 
-With it on, imports are split into memories by the model (the preview flags any line it left out), and "Sort into topics" gets the model's suggestions.
+With it on, imports are split into memories by the model (the preview flags any line it left out), and "Sort into topics" gets the model's suggestions. AI apps' searches and `openmymemo recall` get related words and translations added and the best matches put first. It also:
+
+- **checks what AI apps propose** before it is filed: duplicates and contradictions that word overlap misses, a topic when the app gave none, and anything that looks like health, money or credentials goes to a private topic or waits for you. It gets 2 seconds (`openmymemo assistant set --check-budget 3` to change); if it takes longer or fails, the change is filed as without it, and the app is never held up.
+- **reads chat exports and agent sessions** on the Import page's Chats tab or from the terminal, newest first, with the cost shown before it starts. Each suggestion comes with the words it came from, in the usual preview:
+
+  ```bash
+  openmymemo import chatgpt-export ~/Downloads/chatgpt-export.zip   # or the conversations.json inside it
+  openmymemo import claude-export ~/Downloads/claude-export.zip
+  openmymemo import claude-code-sessions                             # ~/.claude/projects, or one project or session file
+  openmymemo import codex-sessions --max-calls 20                    # ~/.codex/sessions, the newest 20 parts
+  ```
+- **saves what a Claude Code or Codex session taught** that the app didn't, when the session ends (off until you turn on "Reading sessions", then asked per app: `openmymemo assistant sessions --allow claude-code`). The plugin's session-end hook and the Codex hook from `openmymemo setup codex` run it; the transcript is read on your computer and never stored, and what it saves are the Assistant's proposals, each with your quoted words.
 
 **Tidy up** (turn it on with `--feature tidy=on` or its switch in Settings → Assistant) looks through your memories and files one batch of changes: merging near-duplicates, replacing a memory a later one contradicts, adding review dates to time-bound memories, rewriting memories that are too long, and asking about memories that may be outdated (those only go if you say so). Changes to memories you wrote wait for you too; the rest apply and can be undone. The batch shows up as "Tidy-up, <date>: N changes" with Keep all / Undo all on the Changes page and in `openmymemo review`, and a suggestion you rejected or undid isn't made again. Private topics are never included.
 
@@ -149,6 +160,20 @@ openmymemo tidy --schedule weekly  # off (the default), daily, weekly or monthly
 ```
 
 One run makes at most 20 calls; on a large folder the next run continues where it stopped. A schedule runs on this computer while OpenMyMemo's panel is running (the Mac app, `openmymemo serve`, or an AI app's plugin); nothing runs when none of them is. Each feature has its own switch and a fallback to the rules, and there are monthly limits. A model on this computer keeps everything on the computer; with your own key, the memories a feature uses go to that provider, never private topics. MyMemo's hosted model is a Claude model on its own monthly plan, the OpenMyMemo Assistant plan: sign in with your MyMemo account (a computer linked to MyMemo Cloud needs no browser), and Settings → Assistant shows the plan and this month's usage as MyMemo reports them. When the plan is missing or the month's allowance is used up, OpenMyMemo quietly uses its rules. Every request is in the activity log, without its text.
+
+### Search by meaning
+
+Keyword search won't find "Prefers tea over coffee" for "What do I like to drink?". Turn on **Search by meaning on this computer** in Settings → Assistant, or:
+
+```bash
+openmymemo semantic status                      # the models: size, languages, license
+openmymemo semantic on                          # downloads multilingual-e5-small (recommended), builds the index
+openmymemo semantic on --model qwen3-embedding-0.6b   # best quality, larger download
+openmymemo semantic off                         # deletes the model and the index
+openmymemo recall "what do I like to drink?" --max-chars 1500   # ranked, ready for a prompt or a hook
+```
+
+It downloads an embedding model (and ONNX Runtime, the `openmymemo[semantic]` extra, if it isn't installed) into OpenMyMemo's settings folder on this computer, never into your memory folder, and checks each file's SHA-256. Memory text never leaves the computer. It works with or without the Assistant, and search uses it everywhere: AI apps' `memory_search`, `openmymemo search` and the panel. The index in `.openmymemo/index/` is a cache: it keeps itself out of git and can be deleted at any time. With the Assistant on a server on this computer or your own key, you can instead set an embeddings model at that endpoint (`openmymemo assistant set --embeddings-model nomic-embed-text`).
 
 ## What happens when an AI writes
 
@@ -184,7 +209,7 @@ Found a vulnerability? Please report it privately as described in [SECURITY.md](
 
 ## Privacy Policy
 
-Your memory stays on your computer: MyMemo doesn't receive it, and OpenMyMemo has no account, telemetry, analytics or update check. AI apps you connect read the topics you allow (never `health` or `finance` unless you say so) and send what they read to their own model provider under their own policies. OpenMyMemo goes online only to download Python and its libraries when it is installed or first started, and for MyMemo Cloud, which is off until you turn it on and link this computer; then the memories web apps read pass through the MyMemo service in transit. The optional OpenMyMemo Assistant sends memory text to the model you choose, and only when you turn it on: a model on your own computer keeps it there. The full policy, including what is stored where: [PRIVACY.md](https://github.com/MyMemoAI/openmymemo/blob/main/PRIVACY.md).
+Your memory stays on your computer: MyMemo doesn't receive it, and OpenMyMemo has no account, telemetry, analytics or update check. AI apps you connect read the topics you allow (never `health` or `finance` unless you say so) and send what they read to their own model provider under their own policies. OpenMyMemo goes online only to download Python and its libraries when it is installed or first started, and for MyMemo Cloud, which is off until you turn it on and link this computer; then the memories web apps read pass through the MyMemo service in transit. The optional OpenMyMemo Assistant sends memory text to the model you choose, and only when you turn it on: a model on your own computer keeps it there. Search by meaning on this computer downloads its model from Hugging Face when you turn it on, and sends nothing. The full policy, including what is stored where: [PRIVACY.md](https://github.com/MyMemoAI/openmymemo/blob/main/PRIVACY.md).
 
 ## Development
 

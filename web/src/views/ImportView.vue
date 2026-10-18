@@ -2,6 +2,7 @@
 import { ref } from "vue";
 import { api } from "../api";
 import AppIcon from "../components/AppIcon.vue";
+import ImportChats from "../components/ImportChats.vue";
 import ImportFiles from "../components/ImportFiles.vue";
 import ImportPaste from "../components/ImportPaste.vue";
 import PageHeader from "../components/PageHeader.vue";
@@ -9,7 +10,7 @@ import SortDialog from "../components/SortDialog.vue";
 import { t, tn } from "../i18n";
 import { copy, importTopicTitle, topicsBySlug, topicTitle } from "../store";
 
-const SOURCES = ["chatgpt", "claude", "gemini", "files", "markdown", "json"] as const;
+const SOURCES = ["chatgpt", "claude", "gemini", "files", "markdown", "json", "chats"] as const;
 const source = ref<(typeof SOURCES)[number]>("chatgpt");
 /** After an import: its source (a file names its own), how many landed in the from-<source> topic, and how many
  * in topics the source named. */
@@ -77,6 +78,7 @@ function download() {
       <template v-else>
         <p class="text-[13px] text-muted">{{ t(`imp.help.${source}`) }}</p>
         <ImportFiles v-if="source === 'files'" @imported="done = $event" />
+        <ImportChats v-else-if="source === 'chats'" @imported="done = $event" />
         <ImportPaste v-else :source="source" @imported="done = { source, ...$event }" />
       </template>
       <SortDialog v-if="sorting" :topic="sorting" @close="sorting = null" />

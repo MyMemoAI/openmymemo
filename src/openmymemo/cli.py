@@ -13,7 +13,7 @@ import typer
 from . import __version__, memfiles, transfer
 from .assistant import features as assistant_features
 from .connectors import Connectors
-from .context import compile_context, search
+from .context import compile_context
 from .proposals import Proposals, batch_label
 from .snippets import http_snippets, stdio_snippets
 from .vault import NotFound, Vault, VaultError, vault_path
@@ -30,6 +30,9 @@ app.add_typer(cloud_app, name="cloud")
 assistant_app = typer.Typer(help="OpenMyMemo Assistant: optional model help with imports, sorting and more "
                                  "(off by default).", no_args_is_help=True)
 app.add_typer(assistant_app, name="assistant")
+semantic_app = typer.Typer(help="Search by meaning on this computer: a local embedding model, downloaded when "
+                                "turned on (optional).", no_args_is_help=True)
+app.add_typer(semantic_app, name="semantic")
 
 DEFAULT_PORT = 8787
 
@@ -135,12 +138,22 @@ def _read_input(file: Path | None, source: str) -> str:
 @app.command("import")
 def import_(ctx: typer.Context,
             source: Annotated[str, typer.Argument(help=f"auto (from the file's name), or one of: "
-                                                       f"{', '.join(transfer.SOURCES)}")],
-            file: Annotated[Path | None, typer.Argument(help="File to read; omit to paste or use the clipboard.")] = None,
-            yes: Annotated[bool, typer.Option("--yes", "-y", help="Import without asking.")] = False) -> None:
+                                                       f"{', '.join(transfer.SOURCES + transfer.CHAT_SOURCES)}")],
+            file: Annotated[Path | None, typer.Argument(help="File to read; omit to paste or use the clipboard. "
+                                                             "For sessions, a .jsonl file or the app's folder.")] = None,
+            yes: Annotated[bool, typer.Option("--yes", "-y", help="Import without asking.")] = False,
+            max_calls: Annotated[int | None, typer.Option(
+                help="Chats only: read at most this many chunks (one model call each), newest first.")] = None,
+            ) -> None:
     """Import memories from ChatGPT, Claude, Gemini, Markdown, JSON or another AI app's memory file (CLAUDE.md,
-    AGENTS.md, GEMINI.md, Cursor rules, memory.md, …) into a from-<source> topic, in their order."""
+    AGENTS.md, GEMINI.md, Cursor rules, memory.md, …) into a from-<source> topic, in their order.
+
+    With the OpenMyMemo Assistant: chat exports (chatgpt-export, claude-export: the export's conversations.json or
+    .zip) and agent sessions (claude-code-sessions, codex-sessions: a transcript or the app's folder)."""
     vault = _vault(ctx)
+    if source in transfer.CHAT_SOURCES:
+        _import_chats(vault, source, file, yes, max_calls)
+        return
     if source == "auto":
         if file is None:
             typer.secho("auto needs a file: openmymemo import auto ~/.claude/CLAUDE.md", fg="red", err=True)
@@ -195,6 +208,118 @@ def import_(ctx: typer.Context,
                     "named. Run `openmymemo sort` to file them into topics.", fg="green")
     else:
         typer.secho(f"Imported {len(ids)} memories into the topics they named.", fg="green")
+
+
+def _import_chats(vault: Vault, source: str, file: Path | None, yes: bool, max_calls: int | None) -> None:
+    """``import chatgpt-export|claude-export|claude-code-sessions|codex-sessions``: the cost first, then the calls,
+    then the same preview as any import, each memory with the words it came from."""
+    import zipfile
+
+    from .assistant import chats
+    from .assistant.session import transcript_roots
+
+    if file is None:
+        if source in chats.EXPORT_SOURCES:
+            typer.secho(f"{source} needs the export's conversations.json (or its .zip): "
+                        f"openmymemo import {source} ~/Downloads/conversations.json", fg="red", err=True)
+            raise typer.Exit(2)
+        app_id = "claude-code" if source == "claude-code-sessions" else "codex"
+        file = transcript_roots(app_id)[0] / ("projects" if app_id == "claude-code" else "sessions")
+    file = file.expanduser()
+    try:
+        if source in chats.EXPORT_SOURCES:
+            convs = chats.read_export(source, file)
+        elif file.is_dir():
+            convs = chats.read_sessions(source, file)
+        else:
+            conv = chats.read_transcript(source, file)
+            convs = [conv] if conv else []
+    except (ValueError, OSError, zipfile.BadZipFile) as e:
+        typer.secho(str(e) if isinstance(e, ValueError) else f"Can't read {file}.", fg="red", err=True)
+        raise typer.Exit(1) from None
+    job = chats.ChatImport(vault, source, convs)
+    plan = job.plan()
+    if not plan["ready"]:
+        typer.secho(f"Reading chats needs the OpenMyMemo Assistant: {plan['reason']} "
+                    "Set it up with `openmymemo assistant set`.", fg="red", err=True)
+        raise typer.Exit(1)
+    est = plan["estimate"]
+    if not est["calls"]:
+        typer.echo("Nothing to read: no messages from you in there.")
+        return
+    calls = est["calls"] if max_calls is None else min(est["calls"], max(0, max_calls))
+    share = calls / est["calls"]
+    which = "all" if calls == est["calls"] else f"the newest {calls} of {est['calls']}"
+    where = est.get("host") or "the model"
+    typer.echo(f"{plan['conversations']:,} conversations ({plan['oldest']} to {plan['newest']}), "
+               f"{est['messages']:,} messages to read.")
+    typer.echo(f"Reading {which} chunks: {calls} calls, about {int(est['tokens'] * share):,} tokens, sent to {where}"
+               f"{'' if est.get('remote') else ' (on this computer)'}.")
+    if est.get("calls_left") is not None and calls > est["calls_left"]:
+        typer.secho(f"Only {est['calls_left']} calls are left this month; it stops there.", fg="yellow")
+    if not yes and not typer.confirm("Start?", default=True):
+        raise typer.Exit()
+    items = job.run(calls, progress=lambda done, total: typer.echo(f"  {done}/{total}", err=True))
+    if job.limited:
+        typer.secho(f"Stopped after {job.done} of {calls} chunks: {job.error} What was read is below.",
+                    fg="yellow", err=True)
+    elif job.error:
+        typer.secho(f"{job.failed} of {job.done} chunks failed: {job.error}", fg="yellow", err=True)
+    if not items:
+        typer.echo("Nothing worth remembering was found.")
+        return
+    titles = {t["slug"]: t["title"] for t in vault.topics()}
+    slug, title = transfer.import_topic(vault, source)
+    typer.echo(f"Into {title} ({slug}), unless a topic is named:")
+    for i, it in enumerate(items, 1):
+        flag = " = already have" if it.duplicate_of else (" ~ similar exists" if it.similar_to else "")
+        if it.flag == "sensitive":
+            flag += " ! looks sensitive"
+        named = f" → {titles[it.topic]} ({it.topic})" if it.topic in titles else ""
+        typer.echo(f"[{'x' if it.include else ' '}] {i:>3}. {it.kind:<11} {it.content}{named}{flag}")
+        if it.evidence:
+            typer.secho(f"          {it.evidence}", dim=True)
+    todo = [it for it in items if it.include]
+    if not todo:
+        typer.echo("Nothing new to import (unticked items can be ticked in the panel).")
+        return
+    if not yes and not typer.confirm(f"Import the {len(todo)} ticked memories?", default=True):
+        raise typer.Exit()
+    ids = transfer.commit(vault, items, source)
+    typer.secho(f"Imported {len(ids)} memories. Run `openmymemo sort` to file the ones in {title} into topics.",
+                fg="green")
+
+
+@app.command("session-end")
+def session_end(ctx: typer.Context,
+                connector: Annotated[str, typer.Option(help="The app: claude-code or codex.")] = "claude-code",
+                hook: Annotated[bool, typer.Option("--hook", help="For session-end hooks: read the hook's JSON on "
+                                                   "stdin, print nothing, never fail.")] = False,
+                worker: Annotated[bool, typer.Option("--worker", hidden=True)] = False,
+                transcript: Annotated[Path | None, typer.Option(hidden=True)] = None,
+                session: Annotated[str, typer.Option(hidden=True)] = "",
+                event: Annotated[str, typer.Option(hidden=True)] = "SessionEnd") -> None:
+    """After a Claude Code or Codex session: with the Assistant's session feature on and your consent for that app,
+    file what the session taught about you that the app didn't save (product-design.md §17.7)."""
+    from .assistant import session as sessions
+
+    if hook:
+        try:
+            text = "" if sys.stdin.isatty() else sys.stdin.read(sessions.MAX_STDIN + 1)
+        except Exception:  # noqa: BLE001 - a hook must never break the host app
+            text = ""
+        sessions.hook(ctx.obj["vault"], connector, text)
+        return
+    if worker and transcript is not None:
+        try:
+            vault = Vault(ctx.obj["vault"])
+            if vault.is_initialized():
+                sessions.work(vault, connector, transcript, session or transcript.stem, event)
+        except Exception:  # noqa: BLE001 - runs detached; nothing to report to
+            pass
+        return
+    typer.echo("This runs from the Claude Code plugin's and the Codex hook's session end. Allow it per app with "
+               "`openmymemo assistant sessions --allow claude-code`.")
 
 
 @app.command("sort")
@@ -411,9 +536,37 @@ def context(ctx: typer.Context, connector: Annotated[str | None, typer.Option(he
 
 @app.command("search")
 def search_(ctx: typer.Context, query: str) -> None:
-    """Search your memories."""
-    for _score, m in search(_vault(ctx), None, query, limit=20):
-        typer.echo(f"{m.id}  {_pad(m.topic, 20)} {m.content}")
+    """Search your memories: by keywords, and by meaning when that is on (`openmymemo semantic`)."""
+    from .recall import search
+
+    for h in search(_vault(ctx), None, query, limit=20).hits:
+        typer.echo(f"{h.memory.id}  {_pad(h.memory.topic, 20)} {h.memory.content}")
+
+
+@app.command("recall")
+def recall_(
+    ctx: typer.Context,
+    question: str,
+    max_chars: Annotated[int, typer.Option("--max-chars", help="Cut the output to this many characters.")] = 2000,
+    connector: Annotated[str | None, typer.Option(
+        "--connector", help="Only what this connected app may read (and log it as that app's read).")] = None,
+) -> None:
+    """Print the memories most relevant to a question, ranked and cut to a budget, for a prompt or a hook.
+
+    Uses search by meaning and the OpenMyMemo Assistant when they are on; keyword search otherwise. Prints
+    nothing when no memory matches."""
+    from .recall import recall
+
+    vault = _vault(ctx)
+    try:
+        c = Connectors(vault).get(connector) if connector else None
+    except VaultError as e:
+        _connector_failed(e)
+    result = recall(vault, question, connector=c, max_chars=max(200, min(max_chars, 50_000)))
+    if c is not None:
+        vault.log_activity(c.id, "search", query=question, memory_ids=result["memory_ids"])
+    if result["text"]:
+        typer.echo(result["text"], nl=False)
 
 
 @app.command()
@@ -1042,7 +1195,7 @@ def setup_codex(ctx: typer.Context,
             return
         plugin = codex.plugin_installed()
         cli = None if plugin else command_for(ctx.obj["vault"].expanduser().resolve())
-        changed = codex.install(codex.hook_command(cli), path)
+        changed = codex.install(codex.hook_command(cli), path, end_command=codex.end_command(cli))
     except VaultError as e:
         typer.secho(str(e), fg="red", err=True)
         raise typer.Exit(1) from None
@@ -1054,8 +1207,10 @@ def setup_codex(ctx: typer.Context,
     if codex.hooks_in_config_toml():
         typer.secho(f"{codex.codex_home() / 'config.toml'} also defines an OpenMyMemo hook; remove it there, "
                     "or memory loads twice.", fg="yellow")
-    trust = (f'trust "{codex.STATUS_MESSAGE}" in the ChatGPT desktop app (Settings → Coding → Hooks), or open Codex '
-             "in a terminal (`codex`), type /hooks and trust it under SessionStart. The app and the terminal share "
+    trust = (f'trust "{codex.STATUS_MESSAGE}" and "{codex.END_STATUS_MESSAGE}" in the ChatGPT desktop app (Settings '
+             "→ Coding → Hooks), or open Codex in a terminal (`codex`), type /hooks and trust them under SessionStart "
+             "and Stop (the second does nothing unless you turn on the Assistant's session feature). The app and the "
+             "terminal share "
              "these settings, so either place covers both.")
     if changed:
         typer.echo(f"\nOne step left, once: {trust} New sessions then start with your memory.")
@@ -1091,6 +1246,9 @@ def _assistant_status(vault: Vault) -> None:
     else:
         typer.echo(f"  Model:     {s['model'] or '(none)'} via {kind}, {s['protocol']} API")
         typer.echo(f"  Endpoint:  {s['endpoint'] or '(none)'}")
+        if s["embeddings_model"]:
+            note = "" if s["embeddings"] else " (not used: this endpoint has no OpenAI-compatible embeddings)"
+            typer.echo(f"  Embeddings: {s['embeddings_model']}{note}")
     if s["kind"] == "key":
         where = {"keychain": " (in the Keychain)", "file": " (in assistant.json)", "env": " (from the environment)"}
         typer.echo(f"  Key:       {'set' + where.get(s['key_store'] or '', '') if s['has_key'] else 'not set'}")
@@ -1124,6 +1282,8 @@ def assistant_set(
     protocol: Annotated[str | None, typer.Option(help="openai (OpenAI-compatible) or anthropic.")] = None,
     base_url: Annotated[str | None, typer.Option(help="The endpoint's base URL; empty for the default.")] = None,
     model: Annotated[str | None, typer.Option(help="The model's name, e.g. llama3.2 or claude-haiku-5-5.")] = None,
+    embeddings_model: Annotated[str | None, typer.Option(
+        help="An embeddings model at the same OpenAI-compatible endpoint, for search by meaning; empty for none.")] = None,
     key: Annotated[bool, typer.Option("--key", help="Ask for the API key (typed, not shown).")] = False,
     key_stdin: Annotated[bool, typer.Option("--key-stdin", help="Read the API key from standard input.")] = False,
     remove_key: Annotated[bool, typer.Option("--remove-key", help="Forget the stored API key.")] = False,
@@ -1133,6 +1293,8 @@ def assistant_set(
     private_topic: Annotated[list[str] | None, typer.Option(
         help="A private topic a model on this computer may read (repeatable; replaces the list).")] = None,
     no_private_topics: Annotated[bool, typer.Option("--no-private-topics", help="No private topics at all.")] = False,
+    check_budget: Annotated[float | None, typer.Option(
+        help="Seconds an app's proposal may wait for the Assistant's check (0.5 to 30; default 2).")] = None,
 ) -> None:
     """Configure the Assistant and turn it on. Off by default; `openmymemo assistant off` turns it off again."""
     from .assistant import KINDS, SettingsError, ensure_connector, save_settings
@@ -1159,8 +1321,9 @@ def assistant_set(
     try:
         settings = save_settings(
             enabled=True, kind=kind, protocol=protocol, base_url=base_url, model=model, api_key=secret,
+            embeddings_model=embeddings_model,
             features=features or None, caps=caps or None,
-            private_topics=[] if no_private_topics else (private_topic or None))
+            private_topics=[] if no_private_topics else (private_topic or None), check_budget=check_budget)
     except SettingsError as e:
         typer.secho(str(e), fg="red", err=True)
         raise typer.Exit(1) from None
@@ -1251,6 +1414,29 @@ def assistant_plan(ctx: typer.Context) -> None:
         typer.echo(f"{'Manage' if plan['active'] else 'Get'} the plan: {plan['plan_url']}")
 
 
+@assistant_app.command("sessions")
+def assistant_sessions(
+    allow: Annotated[list[str] | None, typer.Option(help="Let the Assistant read this app's sessions (repeatable).")]
+    = None,
+    decline: Annotated[list[str] | None, typer.Option(help="Don't read this app's sessions (repeatable).")] = None,
+) -> None:
+    """Which apps' sessions the Assistant may read when they end (claude-code, codex), and change it."""
+    from .assistant import SettingsError, load_settings, save_settings
+    from .assistant.session import consent_rows
+
+    changes = {a: "allowed" for a in allow or []} | {a: "declined" for a in decline or []}
+    try:
+        settings = save_settings(session_apps=changes) if changes else load_settings()
+    except SettingsError as e:
+        typer.secho(str(e), fg="red", err=True)
+        raise typer.Exit(2) from None
+    words = {"allowed": "allowed", "declined": "not allowed", "asked": "asked, not answered yet", None: "not asked yet"}
+    for row in consent_rows(settings.session_apps):
+        typer.echo(f"  {row['name']:<12} {words[row['answer']]}")
+    if not settings.features.get("session"):
+        typer.echo("The Assistant's session feature is off: `openmymemo assistant set --feature session=on`.")
+
+
 @assistant_app.command("test")
 def assistant_test(ctx: typer.Context) -> None:
     """Send one tiny request to the configured model and show its name and how long it took."""
@@ -1271,6 +1457,109 @@ def assistant_off() -> None:
 
     save_settings(enabled=False)
     typer.echo("OpenMyMemo Assistant is off.")
+
+
+# ---- search by meaning on this computer (product-design.md §17.4) ------------------------------------------
+
+
+def _semantic_status(vault: Vault) -> None:
+    from .recall import semantic
+
+    s = semantic.status(vault)
+    chosen = next((m for m in s["models"] if m["id"] == s["model"]), None)
+    state = "on" if s["enabled"] else "off"
+    if s["enabled"] and not s["ready"]:
+        state = "on, but not ready (run `openmymemo semantic on` again)"
+    typer.echo(f"Search by meaning on this computer: {state}")
+    typer.echo(f"  Model: {chosen['name'] if chosen else s['model']}")
+    idx = s["index"]
+    if s["embedder"]:
+        how = "the local model" if s["embedder"] == "local" else "the Assistant's embeddings endpoint"
+        count = idx["count"] if idx.get("current") else 0
+        typer.echo(f"  Index: {count:,} of {idx['memories']:,} memories, by {how}")
+    else:
+        typer.echo("  Search uses keywords only.")
+    if not s["runtime"]["installed"]:
+        typer.echo(f"  ONNX Runtime: not installed (installed when turned on, or: {s['runtime']['command']})")
+    typer.echo("\nModels (openmymemo semantic on --model ID):")
+    for m in s["models"]:
+        tags = [t for t, on in (("recommended", m["recommended"]), ("downloaded", m["downloaded"]),
+                                ("not available yet", not m["available"])) if on]
+        typer.echo(f"  {_pad(m['id'], 38)} about {m['size_mb']:,} MB, {m['license']}"
+                   + (f" ({', '.join(tags)})" if tags else ""))
+        typer.echo(f"  {'':38} {m['languages']}. {m['note']}")
+
+
+@semantic_app.command("status")
+def semantic_status(ctx: typer.Context) -> None:
+    """Show whether search by meaning is on, the model, the index and the models to choose from."""
+    _semantic_status(_vault(ctx))
+
+
+@semantic_app.command("on")
+def semantic_on(
+    ctx: typer.Context,
+    model: Annotated[str | None, typer.Option(help="The model's id (see `openmymemo semantic status`); default: "
+                                                   "the one chosen before, or the recommended one.")] = None,
+    accept_terms: Annotated[bool, typer.Option(
+        "--accept-terms", help="Accept the model's terms of use, for models that have them (EmbeddingGemma).")] = False,
+) -> None:
+    """Turn search by meaning on: install ONNX Runtime if needed, download and check the model, build the index.
+
+    The model is downloaded from Hugging Face into this computer's OpenMyMemo settings folder, never into the
+    memory folder; memory text never leaves the computer."""
+    from .recall import local, semantic
+
+    vault = _vault(ctx)
+    current = local.load_semantic()
+    chosen = local.BY_ID.get(model or current.model)
+    if chosen and chosen.terms_url and not accept_terms and chosen.id not in current.accepted_terms:
+        typer.secho(f"{chosen.name} is under the {chosen.license}: {chosen.terms_url}\n"
+                    "Read them, then run this again with --accept-terms.", fg="yellow", err=True)
+        raise typer.Exit(2)
+    shown = {"phase": ""}
+
+    def progress(phase: str, done: int, total: int) -> None:
+        if phase != shown["phase"]:
+            shown["phase"] = phase
+            typer.echo({"runtime": "Installing ONNX Runtime and tokenizers…", "download": "Downloading the model…",
+                        "index": "Building the index…"}.get(phase, phase), err=True)
+        if phase == "download" and total:
+            typer.echo(f"\r  {done / 2**20:,.0f} of {total / 2**20:,.0f} MB", nl=False, err=True)
+
+    try:
+        semantic.turn_on(vault, model, accept_terms=accept_terms, progress=progress)
+    except local.SemanticError as e:
+        typer.echo("", err=True)
+        typer.secho(str(e), fg="red", err=True)
+        raise typer.Exit(1) from None
+    typer.echo("", err=True)
+    _semantic_status(vault)
+
+
+@semantic_app.command("off")
+def semantic_off(ctx: typer.Context) -> None:
+    """Turn search by meaning off and delete the downloaded model and this folder's index."""
+    from .recall import semantic
+
+    semantic.turn_off(_vault(ctx))
+    typer.echo("Search by meaning on this computer is off; the model and the index were deleted.")
+
+
+@semantic_app.command("index")
+def semantic_index(ctx: typer.Context) -> None:
+    """Embed every memory that has no current vector, with the embedder in use (normally done as you search)."""
+    from .recall import build_index
+
+    done = build_index(_vault(ctx), lambda n, total: typer.echo(f"\r  {n:,} of {total:,}", nl=False, err=True))
+    if done is None:
+        typer.secho("No embedding model is in use: run `openmymemo semantic on`, or set an embeddings model for "
+                    "the Assistant.", fg="yellow", err=True)
+        raise typer.Exit(1)
+    typer.echo("", err=True)
+    typer.echo(f"Index: {done.indexed:,} of {done.total:,} memories." + (f" Stopped: {done.error}" if done.error else ""))
+    if done.error:
+        raise typer.Exit(1)
 
 
 # The Mac app's environments, venvs/<version>-<stamp>: each process run from one holds a shared lock on

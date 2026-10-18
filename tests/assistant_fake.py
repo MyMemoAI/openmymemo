@@ -43,6 +43,7 @@ class FakeAssistantService(FakeService):
         # Runs inside a chat request before it is answered (off the event loop, so it may call this service):
         # tests use it to change the sign-in while a request is in flight. Returns an errors.json name or None.
         self.on_chat = None
+        self.paths: list[str] = []  # every request's path, in order
         super().__init__()
 
     def fail(self, *names: str) -> None:
@@ -74,6 +75,11 @@ class FakeAssistantService(FakeService):
 
     def _build(self):
         app = super()._build()
+
+        @app.middleware("http")
+        async def record(request: Request, call_next):
+            self.paths.append(request.url.path)
+            return await call_next(request)
         bad = lambda error, status=400: JSONResponse({"error": error}, status_code=status)  # noqa: E731
 
         @app.post("/openmymemo/oauth/token")

@@ -35,4 +35,16 @@ describe("ImportPreview", () => {
     const fell = mount(ImportPreview, { props: { source: "chatgpt", items: [item("Likes tea", { by: "rules" })] } });
     expect(fell.get('[data-test="split-by"]').text()).toContain("Split by rules");
   });
+
+  it("shows the words a memory read from a chat came from, and leaves sensitive ones unticked", () => {
+    const quote = '“I\'m vegetarian” — ChatGPT, "Lisbon trip", 2025-09-16';
+    const items = [
+      item("Is vegetarian", { by: "assistant", evidence: quote }),
+      item("Takes insulin", { by: "assistant", flag: "sensitive", include: false }),
+    ];
+    const w = mount(ImportPreview, { props: { source: "chatgpt-export", items } });
+    expect(w.get('[data-test="evidence"]').text()).toBe(quote);
+    expect(w.text()).toContain("Looks sensitive");
+    expect((w.findAll('input[type="checkbox"]')[1].element as HTMLInputElement).checked).toBe(false);
+  });
 });

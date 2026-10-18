@@ -2,7 +2,7 @@
 import { computed, nextTick, ref } from "vue";
 import { api, type Memory, type Proposal } from "../api";
 import { relTime, t } from "../i18n";
-import { act, store, topicTitle } from "../store";
+import { act, quoted, store, topicTitle } from "../store";
 import AppIcon from "./AppIcon.vue";
 
 /** One change that applied without the user, in the digest: keep, edit or undo it. */
@@ -22,7 +22,7 @@ const topic = computed(() => p.value.final_topic ?? p.value.topic);
 /** An update that only moved the memory to another topic. */
 const movedOnly = computed(() => p.value.op === "update" && p.value.before_content === after.value);
 const moved = computed(() => p.value.op === "update" && !!p.value.before_topic && p.value.before_topic !== topic.value);
-const hasDetails = computed(() => !!(p.value.reason || p.value.evidence || p.value.original_op === "add"));
+const hasDetails = computed(() => !!(p.value.reason || p.value.evidence || p.value.check_note || p.value.original_op === "add"));
 const memory = computed(() => store.memories.find((m) => m.id === p.value.applied_memory_id) ?? null);
 
 const OP_STYLE: Record<string, string> = { add: "chip-fresh", update: "chip-accent", archive: "font-semibold" };
@@ -115,9 +115,10 @@ function onKey(e: KeyboardEvent) {
 
     <div v-if="open" class="space-y-1 text-[13px] text-ink-2">
       <div v-if="p.original_op === 'add'" class="flex items-center gap-1.5 text-muted"><AppIcon name="refresh" :size="13" />{{ t("rev.convertedFromAdd") }}</div>
-      <dl v-if="p.reason || p.evidence" class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1">
+      <dl v-if="p.reason || p.evidence || p.check_note" class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1">
         <template v-if="p.reason"><dt class="text-muted">{{ t("rev.why") }}</dt><dd>{{ p.reason }}</dd></template>
-        <template v-if="p.evidence"><dt class="text-muted">{{ t("rev.said") }}</dt><dd class="italic">“{{ p.evidence }}”</dd></template>
+        <template v-if="p.evidence"><dt class="text-muted">{{ t("rev.said") }}</dt><dd class="italic">{{ quoted(p.evidence) }}</dd></template>
+        <template v-if="p.check_note"><dt class="text-muted">{{ t("rev.checked") }}</dt><dd>{{ p.check_note }}</dd></template>
       </dl>
     </div>
 

@@ -86,6 +86,11 @@ export function importTopicTitle(source: string): string {
 }
 
 
+/** Evidence in quotation marks, unless it already starts with the quoted words (evidence read from a chat). */
+export function quoted(text: string): string {
+  return text.startsWith("“") ? text : `“${text}”`;
+}
+
 export function topicTitle(slug: string | null | undefined): string {
   if (!slug) return "";
   return topicsBySlug.value[slug]?.title ?? slug;

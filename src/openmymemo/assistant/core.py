@@ -40,7 +40,7 @@ from . import client as endpoint
 from . import mymemo
 from .guard import Guard
 from .schema import Invalid, clean, extract_json, wire_schema
-from .settings import FEATURES, Settings, load_settings, record_usage, reserve_call
+from .settings import FEATURES, SESSION_APPS, Settings, load_settings, record_usage, reserve_call
 
 log = logging.getLogger("openmymemo.assistant")
 
@@ -154,10 +154,12 @@ class Assistant:
         revoked = c is None and any(x.id == CONNECTOR_ID and x.revoked_at for x in Connectors(self.vault)._load())
         return {
             "enabled": s.enabled, "kind": s.kind, "protocol": s.protocol, "base_url": s.base_url,
-            "endpoint": s.endpoint, "host": s.host, "model": s.model, "has_key": bool(s.secret),
+            "endpoint": s.endpoint, "host": s.host, "model": s.model,
+            "embeddings_model": s.embeddings_model, "embeddings": s.embeddings_available, "has_key": bool(s.secret),
             "key_store": s.key_store if s.secret else None, "features": {k: s.features.get(k, False) for k in FEATURES},
             "private_topics": list(s.private_topics), "caps": dict(s.caps), "usage": s.month_usage(),
-            "timeout": s.timeout, "from_env": list(s.from_env), "local": s.local, "problem": s.problem(),
+            "timeout": s.timeout, "check_budget": s.check_budget,
+            "session_apps": {app: s.session_apps.get(app) for app in SESSION_APPS}, "from_env": list(s.from_env), "local": s.local, "problem": s.problem(),
             "ready": s.enabled and self.unavailable_reason() is None, "reason": self.unavailable_reason(),
             "where": where_text_goes(s), "connector_id": CONNECTOR_ID if c else None, "revoked": revoked,
             "kinds": {"local": True, "key": True, "mymemo": True},

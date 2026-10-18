@@ -7,10 +7,10 @@ import AssistantSettings from "./AssistantSettings.vue";
 function status(extra: Partial<AssistantStatus> = {}): AssistantStatus {
   return {
     enabled: false, kind: "local", protocol: "openai", base_url: "", endpoint: "http://127.0.0.1:11434/v1",
-    host: "127.0.0.1", model: "", has_key: false, key_store: null,
+    host: "127.0.0.1", model: "", embeddings_model: "", embeddings: false, has_key: false, key_store: null,
     features: { import: true, sort: true, recall: true, check: true, session: false, tidy: false },
     private_topics: [], caps: { calls: 1000, tokens: 2000000 }, usage: { month: "2026-10", calls: 3, tokens: 1234 },
-    timeout: 60, from_env: [], local: true, problem: "Choose a model.", ready: false, reason: "The Assistant is off.",
+    timeout: 60, check_budget: 2, session_apps: { "claude-code": null, codex: null }, from_env: [], local: true, problem: "Choose a model.", ready: false, reason: "The Assistant is off.",
     where: "The Assistant is off: memory text goes nowhere.", connector_id: null, revoked: false,
     kinds: { local: true, key: true, mymemo: true }, mymemo: null, ...extra,
   };
@@ -19,7 +19,7 @@ function status(extra: Partial<AssistantStatus> = {}): AssistantStatus {
 const { api } = vi.hoisted(() => ({
   api: {
     assistant: vi.fn(), assistantSettings: vi.fn(), assistantTest: vi.fn(), assistantSignIn: vi.fn(),
-    assistantAccount: vi.fn(), assistantSignOut: vi.fn(),
+    assistantAccount: vi.fn(), assistantSignOut: vi.fn(), assistantSessions: vi.fn(),
   },
 }));
 vi.mock("../api", () => ({ api }));
@@ -142,6 +142,8 @@ describe("AssistantSettings", () => {
       await flushPromises();
       expect(api.assistantSettings).toHaveBeenCalledWith({ enabled: true, kind: "mymemo" });
       expect(w.find("form input[type=password]").exists()).toBe(false); // no key or address for MyMemo
+      expect(w.find('[data-test="embeddings"]').exists()).toBe(false); // MyMemo has no embeddings model
+      expect(w.get('[data-test="mm-no-embeddings"]').text()).toContain("has no embeddings");
       expect(w.text()).toContain("no browser is needed");
       await button(w, "Sign in to MyMemo")!.trigger("click");
       await flushPromises();
@@ -200,5 +202,26 @@ describe("AssistantSettings", () => {
       expect(store.toast?.text).toBe("Signed out of MyMemo.");
       expect(button(w, "Sign in to MyMemo")).toBeDefined();
     });
+  });
+
+  it("asks per app before reading sessions", async () => {
+    const on = status({ enabled: true, model: "llama3.2", problem: null, features: { import: true, sort: true, recall: true, check: true, session: true, tidy: false }, session_apps: { "claude-code": "asked", codex: null } });
+    api.assistant.mockResolvedValue(on);
+    api.assistantSessions.mockResolvedValue({ ...on, session_apps: { "claude-code": "allowed", codex: null } });
+    const w = await mountIt();
+    const rows = w.get('[data-test="session-apps"]');
+    expect(rows.text()).toContain("Claude Code");
+    expect(rows.text()).toContain("Asking you");
+    expect(rows.text()).toContain("Not asked yet");
+    await rows.findAll("button").find((b) => b.text() === "Allow")!.trigger("click");
+    await flushPromises();
+    expect(api.assistantSessions).toHaveBeenCalledWith("claude-code", true);
+    expect(w.get('[data-test="session-apps"]').text()).toContain("Allowed");
+  });
+
+  it("doesn't list apps while reading sessions is off", async () => {
+    api.assistant.mockResolvedValue(status({ enabled: true, model: "m", problem: null }));
+    const w = await mountIt();
+    expect(w.find('[data-test="session-apps"]').exists()).toBe(false);
   });
 });

@@ -53,9 +53,9 @@ export interface Memory {
 export type ProposalStatus =
   | "pending" | "accepted" | "edited_accepted" | "rejected" | "expired" | "applied" | "undone";
 
-/** Why a pending proposal waits for the user. */
-/** review: the proposer asked for a decision, e.g. a tidy-up's "possibly outdated" archive. */
-export type Hold = "approval" | "protected" | "private" | "review";
+/** Why a pending proposal waits for the user. sensitive: the Assistant's check flagged it;
+ * review: the proposer asked for a decision, e.g. a tidy-up's "possibly outdated" archive. */
+export type Hold = "approval" | "protected" | "private" | "sensitive" | "review";
 
 export interface Proposal {
   id: string;
@@ -83,6 +83,9 @@ export interface Proposal {
   original_op: string | null;
   similarity: number | null;
   conflict: boolean;
+  /** "assistant" when the OpenMyMemo Assistant checked it before it was filed, with what it found. */
+  checked_by?: "assistant" | null;
+  check_note?: string | null;
   /** A review date the change sets, and the one it replaced. */
   until?: string | null;
   before_until?: string | null;
@@ -359,9 +362,48 @@ export interface ImportItem {
   include: boolean;
   /** Who split it: the OpenMyMemo Assistant, or the rules when it was on but couldn't be used (null: it was off). */
   by?: "assistant" | "rules" | null;
-  /** "dropped": the Assistant left this line out where the rules would have kept it. */
-  flag?: "dropped" | null;
+  /** "dropped": the Assistant left this line out where the rules would have kept it; "sensitive": read from a
+   * chat, it looks like health, money or a secret. */
+  flag?: "dropped" | "sensitive" | null;
+  /** From a chat: the person's quoted message and its date. */
+  evidence?: string | null;
 }
+
+/** Chat exports and agent sessions, read by the Assistant (src/openmymemo/assistant/chats.py). */
+export type ChatSource = "chatgpt-export" | "claude-export" | "claude-code-sessions" | "codex-sessions";
+
+/** A chat import: what was found, what reading it costs, then its progress and preview. */
+export interface ChatJob {
+  job: string;
+  state: "planned" | "running" | "done" | "cancelled" | "failed";
+  source: ChatSource;
+  conversations: number;
+  messages: number;
+  newest: string | null;
+  oldest: string | null;
+  estimate: {
+    calls: number;
+    tokens: number;
+    tokens_in: number;
+    tokens_out: number;
+    messages: number;
+    calls_left?: number | null;
+    tokens_left?: number | null;
+    remote?: boolean;
+    host?: string;
+  };
+  ready: boolean;
+  reason: string | null;
+  done: number;
+  total: number;
+  failed: number;
+  error: string | null;
+  items?: ImportItem[];
+}
+
+export type SessionApp = "claude-code" | "codex";
+/** What the person said about the Assistant reading an app's sessions; null: not asked yet. */
+export type SessionConsent = "allowed" | "declined" | "asked" | null;
 
 /** A memory or instructions file another AI app keeps on disk (memfiles.py). */
 export interface MemoryFile {
@@ -400,6 +442,10 @@ export interface AssistantStatus {
   endpoint: string;
   host: string;
   model: string;
+  /** An embeddings model at the same endpoint, for search by meaning; "" for none. */
+  embeddings_model: string;
+  /** Whether that endpoint's embeddings are used (OpenAI-compatible, on this computer or with a key). */
+  embeddings: boolean;
   has_key: boolean;
   key_store: "keychain" | "file" | "env" | null;
   features: Record<AssistantFeature, boolean>;
@@ -407,6 +453,9 @@ export interface AssistantStatus {
   caps: { calls: number | null; tokens: number | null };
   usage: { month: string; calls: number; tokens: number };
   timeout: number;
+  /** Seconds an app's proposal may wait for the Assistant's check. */
+  check_budget: number;
+  session_apps: Record<SessionApp, SessionConsent>;
   /** Fields an OPENMYMEMO_ASSISTANT_* variable sets on this computer: shown, not editable. */
   from_env: string[];
   local: boolean;
@@ -474,10 +523,60 @@ export interface AssistantPatch {
   protocol?: "openai" | "anthropic";
   base_url?: string;
   model?: string;
+  embeddings_model?: string;
   api_key?: string;
   features?: Partial<Record<AssistantFeature, boolean>>;
   private_topics?: string[];
   caps?: { calls?: number | null; tokens?: number | null };
+  check_budget?: number;
+}
+
+/** One choice under "Search by meaning on this computer" (src/openmymemo/recall/local.py `models_info`). */
+export interface SemanticModel {
+  id: string;
+  name: string;
+  size_mb: number;
+  dims: number;
+  languages: string;
+  license: string;
+  license_url: string;
+  /** Terms the person must accept before the download (EmbeddingGemma's Gemma Terms of Use). */
+  terms_url: string | null;
+  recommended: boolean;
+  note: string;
+  /** False until its files are pinned (SHA-256) in this release: it can't be downloaded yet. */
+  available: boolean;
+  downloaded: boolean;
+}
+
+export interface SemanticJob {
+  phase: "idle" | "runtime" | "download" | "index" | "done" | "error";
+  model: string | null;
+  done: number;
+  total: number;
+  error: string | null;
+  code: string | null;
+}
+
+/** Settings → Assistant → "Search by meaning on this computer" (src/openmymemo/recall/semantic.py `status`). */
+export interface SemanticStatus {
+  enabled: boolean;
+  model: string;
+  accepted_terms: string[];
+  ready: boolean;
+  models: SemanticModel[];
+  runtime: { installed: boolean; command: string | null };
+  job: SemanticJob;
+  /** What search uses for vectors now: the local model, the Assistant's endpoint, or nothing (keywords). */
+  embedder: "local" | "endpoint" | null;
+  endpoint: boolean;
+  index: { model: string | null; count: number; memories: number; current?: boolean };
+}
+
+/** The panel's search box. `keyword`: no vectors, so the panel filters by itself as before. */
+export interface SearchResult {
+  mode: "keyword" | "hybrid" | "expanded";
+  results: { id: string; score: number; match: "exact" | "keyword" | "meaning" | "both" }[];
 }
 
 export interface AssistantTest {
@@ -582,6 +681,14 @@ export const api = {
   assistantAccount: () =>
     req<{ account: AssistantAccount; assistant: AssistantStatus }>("GET", "/api/assistant/mymemo"),
   assistantSignOut: () => req<{ message: string; assistant: AssistantStatus }>("DELETE", "/api/assistant/mymemo"),
+  /** Allow or decline reading an app's sessions when they end. */
+  assistantSessions: (app: SessionApp, allow: boolean) =>
+    req<AssistantStatus>("POST", `/api/assistant/sessions/${enc(app)}`, { allow }),
+  semantic: () => req<SemanticStatus>("GET", "/api/semantic"),
+  /** Turn search by meaning on (starts the download in the background; poll `semantic`) or off. */
+  semanticSet: (body: { enabled: boolean; model?: string; accept_terms?: boolean }) =>
+    req<SemanticStatus>("POST", "/api/semantic", body),
+  search: (q: string, limit = 200) => req<SearchResult>("GET", `/api/search?q=${enc(q)}&limit=${limit}`),
   context: (connector: string | null, maxChars: number) =>
     req<ContextResult>("GET", `/api/context?max_chars=${maxChars}${connector ? `&connector=${enc(connector)}` : ""}`),
   activity: (connector?: string) =>
@@ -590,6 +697,13 @@ export const api = {
   importFiles: (path: string) => req<MemoryFiles>("GET", `/api/import/files?path=${encodeURIComponent(path)}`),
   /** A file OpenMyMemo reads by its path, or one the browser read. */
   importFile: (file: { path: string } | { name: string; text: string }) => req<FilePreview>("POST", "/api/import/file", file),
+  /** Read a chat export or sessions (a path in the home folder, or a file the browser read): the cost, no call yet. */
+  chatPlan: (body: { source: ChatSource; path?: string; name?: string; text?: string }) =>
+    req<ChatJob>("POST", "/api/import/chats", body),
+  chatStart: (job: string, maxCalls?: number) =>
+    req<ChatJob>("POST", `/api/import/chats/${enc(job)}/start`, maxCalls === undefined ? {} : { max_calls: maxCalls }),
+  chatStatus: (job: string) => req<ChatJob>("GET", `/api/import/chats/${enc(job)}`),
+  chatCancel: (job: string) => req<{ ok: boolean }>("DELETE", `/api/import/chats/${enc(job)}`),
   importCommit: (source: string, items: ImportItem[]) =>
     req<{ memory_ids: string[] }>("POST", "/api/import/commit", { source, items }),
   sortPlan: (topic?: string | null) => req<SortRow[]>("GET", `/api/sort${topic ? `?topic=${enc(topic)}` : ""}`),

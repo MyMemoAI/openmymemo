@@ -37,8 +37,10 @@ async function commit() {
       <input v-model="it.include" type="checkbox" class="check mt-0.5" />
       <div class="min-w-0 flex-1">
         <div class="text-[15px] break-words">{{ it.content }}</div>
+        <div v-if="it.evidence" class="mt-0.5 text-xs break-words text-ink-2 italic" data-test="evidence">{{ it.evidence }}</div>
         <div class="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted">
           <span v-if="it.flag === 'dropped'" class="chip font-semibold text-wait-ink">{{ t("imp.dropped") }}</span>
+          <span v-if="it.flag === 'sensitive'" class="chip chip-private font-semibold"><AppIcon name="lock" :size="11" />{{ t("imp.sensitive") }}</span>
           <button
             v-if="it.topic && topicsBySlug[it.topic] && it.by === 'assistant'"
             type="button"
