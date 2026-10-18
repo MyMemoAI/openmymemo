@@ -267,9 +267,9 @@ def _extract_and_file(vault: Vault, assistant: Assistant, app: str, conv: chats.
     if not assistant.screen("session", chats.original_text(conv)):
         return {"result": "refused", "calls": 0, "failed": 0}  # it holds something that may not be sent
     all_chunks = chats.chunks([conv], forbidden=chats.forbidden_texts(assistant))
-    # Newest first, within the cap: a long session's latest part matters most.
+    # chunks() puts the newest part first: within the cap, a long session's latest part is what is read.
     todo, size = [], 0
-    for ch in reversed(all_chunks):
+    for ch in all_chunks:
         if size + ch.chars > MAX_CHARS and todo:
             break
         todo.append(ch)
@@ -291,6 +291,10 @@ def _extract_and_file(vault: Vault, assistant: Assistant, app: str, conv: chats.
             failed += 1
             continue
         found.extend(c for c in got if not c.sensitive)  # the Assistant never writes into a private topic
+    if not stopped:  # once more right before filing: a change during the last call counts too
+        current = chats.live_assistant(assistant, "session", planned)
+        stopped = current is None or current.settings.session_apps.get(app) != "allowed"
+        assistant = current or assistant
     if stopped:  # turned off, consent withdrawn or the endpoint changed meanwhile: nothing is filed
         return {"result": "stopped", "calls": calls, "failed": failed}
     filed = {"applied": 0, "pending": 0, "duplicate": 0, "refused": 0}

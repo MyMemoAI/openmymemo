@@ -215,6 +215,69 @@ def test_session_worker_rereads_consent_after_waiting_for_the_lock(vault, fake, 
     assert fake.requests == [] and load_settings().session_apps["claude-code"] == "declined"
 
 
+# ---- re-review: a change during the last call, and the session cap ----------------------------------------------
+
+
+def write_codex_session(n: int, words: int) -> Path:
+    path = Path.home() / ".codex/sessions/2026/10/17/rollout-x-s.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows = [{"timestamp": "2026-10-17T09:00:00Z", "type": "response_item", "payload": {
+        "type": "message", "role": "user",
+        "content": [{"type": "input_text", "text": f"Fact {i:03d}: " + "words " * words}]}} for i in range(n)]
+    path.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    return path
+
+
+@pytest.mark.parametrize("calls", [1, 2])
+@pytest.mark.parametrize("change", ["consent", "off", "endpoint"])
+def test_a_change_during_the_last_session_call_files_nothing(vault, fake, calls, change):
+    turn_on(vault)
+    save_settings(features={"session": True}, session_apps={"codex": "allowed"})
+    path = write_codex_session(3 if calls == 1 else 10, 30 if calls == 1 else 300)  # one chunk, or exactly two
+
+    def answer(body):
+        if len(fake.requests) == calls:  # the last call
+            if change == "consent":
+                save_settings(session_apps={"codex": "declined"})
+            elif change == "off":
+                save_settings(enabled=False)
+            else:
+                save_settings(base_url="http://127.0.0.1:1234/v1")
+        return json.dumps({"memories": [{"content": "Writes tests first", "message": 1, "quote": "Fact"}]})
+
+    fake.answer = answer
+    out = sessions.work(vault, "codex", path, "s")
+    assert len(fake.requests) == calls and out["result"] == "stopped", out
+    assert Proposals(vault).list(connector_id="assistant") == []
+    assert not sessions.state_path().exists()  # the cursor didn't move
+
+
+def test_a_change_during_the_last_import_call_drops_its_answer(vault, fake):
+    turn_on(vault)
+    convs = chats.parse_export("claude-export", json.dumps([{
+        "uuid": "a", "name": "N", "updated_at": "2026-05-01T10:00:00Z",
+        "chat_messages": [{"sender": "human", "text": "I row"}]}]))
+
+    def answer(body):
+        save_settings(enabled=False)
+        return json.dumps({"memories": [{"content": "Rows", "message": 1, "quote": "I row"}]})
+
+    fake.answer = answer
+    job = chats.ChatImport(vault, "claude-export", convs)
+    assert job.run() == [] and job.error == chats.SETTINGS_CHANGED and len(fake.requests) == 1
+
+
+def test_a_session_over_the_cap_sends_its_newest_part(vault, fake):
+    turn_on(vault)
+    save_settings(features={"session": True}, session_apps={"codex": "allowed"})
+    path = write_codex_session(60, 300)  # about 108,000 characters: over the 48,000 cap
+    fake.answer = lambda body: json.dumps({"memories": []})
+    out = sessions.work(vault, "codex", path, "s")
+    sent = bodies(fake)
+    assert out["result"] == "ok" and ": Fact 059" in sent and ": Fact 000" not in sent  # the title quotes the start
+    assert sum(len(b["messages"][1]["content"]) for b in fake.bodies()) <= sessions.MAX_CHARS + 5_000
+
+
 # ---- 4. a long conversation is read from its end -----------------------------------------------------------------
 
 

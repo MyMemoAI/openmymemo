@@ -673,6 +673,9 @@ class ChatImport:
                 found.extend(got)
             if progress:
                 progress(self.done, len(todo))
+        if found and live_assistant(self.assistant, "import", self.planned) is None:
+            self.error = SETTINGS_CHANGED  # changed during the last call: what it returned isn't used
+            found = []
         items = [transfer.ImportItem(content=c.content, topic=c.topic, kind=c.kind,
                                      created_at=(c.at or "")[:10] or None,
                                      hint=clean_meta(c.conversation, 80) or None,
