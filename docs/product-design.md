@@ -604,7 +604,7 @@ Decided by the product owner on 2026-10-18:
 1. The name is **OpenMyMemo Assistant**.
 2. It is optional and off by default, and every feature that uses it has a rule-based or keyword fallback.
 3. It can use a model the person configures: their own API key, or a model on their own computer.
-4. Or it can use **MyMemo's hosted model**. That is a separately billed MyMemo service, built in the closed-source MyMemo service the way MyMemo Cloud is (§16.8).
+4. Or it can use **MyMemo's hosted model**. That is a MyMemo service with its own monthly plan, using Claude models only, built in the closed-source MyMemo service the way MyMemo Cloud is (§16.8).
 5. Everything below is in scope, delivered in the steps in §17.9. Pricing, the hosted model and limits are the service's decisions and will be filled in there.
 
 ### 17.1 What changes in the principles
@@ -624,9 +624,9 @@ Decided by the product owner on 2026-10-18:
 | Off (default) | Everything as in §5 | Nowhere |
 | On this computer | Any OpenAI-compatible server on loopback: Ollama, LM Studio, llama.cpp, vLLM | Stays on the computer |
 | Your own API key | Anthropic (Messages API) or any OpenAI-compatible endpoint (OpenAI, DeepSeek, Qwen, OpenRouter, …): base URL, model, key | That provider, under its terms |
-| MyMemo | MyMemo's hosted model, through the MyMemo account (§17.8) | MyMemo's service and the model provider it uses, under MyMemo's privacy policy |
+| MyMemo | MyMemo's hosted Claude model, through the MyMemo account (§17.8) | MyMemo's service and Anthropic, under MyMemo's privacy policy |
 
-- **Two protocols cover every choice.** These are the OpenAI-compatible chat API and the Anthropic Messages API, both called with `httpx`, which is already a dependency. No vendor SDK is needed. Embeddings (§17.4) use the OpenAI-compatible `/embeddings` shape, and MyMemo's service.
+- **Two protocols cover every choice.** These are the OpenAI-compatible chat API and the Anthropic Messages API, both called with `httpx`, which is already a dependency. No vendor SDK is needed. Embeddings (§17.4) use the OpenAI-compatible `/embeddings` shape, or the optional local model; MyMemo's hosted model offers none (§17.8).
 - **Where the key is kept.** Like the MyMemo Cloud link, the key is stored per computer, never in the folder, since the folder may be synced or kept in git. It goes in the macOS Keychain where available, and otherwise in a 0600 `assistant.json` next to `cloud.json` (§16.4). `OPENMYMEMO_ASSISTANT_*` environment variables override the file for scripts.
 - **Test.** A "Test" button sends one tiny request and shows the model's name and how long it took.
 - **Per feature.** Each feature in §17.4–§17.6 has its own switch under the Assistant, so someone can use it for imports but not for recall, for example.
@@ -649,7 +649,7 @@ Today `memory_search` and `openmymemo search` score keywords: Chinese character 
 
 - **Embedding index.** With the Assistant on, each memory gets an embedding. Vectors live in `.openmymemo/index/` as a plain-file cache: a JSON manifest of memory id, content hash and model, plus a float32 file. Removing the folder loses nothing, because it is rebuilt from `memories/*.md` (principle 1). It updates incrementally when a memory's hash changes, including after edits in another editor, and it is rebuilt when the embedding model changes. It is rebuilt on whichever computer runs OpenMyMemo, so a synced folder doesn't need to sync it.
 - **Hybrid search.** The keyword score and the vector similarity are combined with reciprocal rank fusion, so exact names and ids still win, and with no index the keyword path is unchanged.
-- **Optional rerank.** When there are more candidates than the limit, the chat model reranks the top 30 for the query. This is used by `memory_search` and `recall` only, never by `memory_context`, which stays fast and deterministic.
+- **Optional rerank and query expansion.** When there are more candidates than the limit, the chat model reranks the top 30 for the query. Without an embedding index (for example on MyMemo's hosted model, §17.8), the chat model first expands the query into keywords and synonyms in the vault's languages. This is used by `memory_search` and `recall` only, never by `memory_context`, which stays fast and deterministic.
 - **`openmymemo recall "<question>" [--max-chars N] [--connector id]`.** Prints the memories most relevant to a question, ranked and cut to a budget, ready to paste into a prompt or a hook. Without the Assistant it uses keyword search. A matching MCP tool isn't needed: `memory_search` gets the same ranking.
 - **A local embedding model.** For people without an endpoint, a small multilingual ONNX model is offered as an optional extra (`openmymemo[semantic]`). It is not part of the default install, and torch is never required.
 - **Measured, not assumed.** `tests/recall/` holds a fixed English and Chinese question set over a demo vault. CI reports hit rate for keyword, keyword + vectors, and keyword + vectors + rerank (the last with a recorded model response), so a change that makes recall worse is visible.
@@ -685,8 +685,9 @@ The connected AI apps are models themselves, so the Assistant doesn't sit in fro
 For people who want the Assistant without managing keys or running a model:
 
 - **How to turn it on.** Choose "MyMemo" in Settings → Assistant and sign in with a MyMemo account: the same PKCE loopback sign-in as §16.4, or the existing link if this computer is already linked to MyMemo Cloud. The Assistant gets a token scoped to the model endpoint only.
-- **One endpoint.** The service exposes one chat endpoint and one embeddings endpoint, in the shapes of §17.2. OpenMyMemo treats them like any other endpoint, so the choice of model is the service's. It starts with a small, fast Claude model, and it can change without an OpenMyMemo release.
-- **Billing.** The hosted model is billed by MyMemo separately from MyMemo Cloud. Plans, included usage and limits are decided in the service's design and shown in the panel from the service's answer, never hard-coded here.
+- **One endpoint, Claude only.** The service exposes one chat endpoint, in the OpenAI-compatible shape of §17.2. OpenMyMemo treats it like any other endpoint. Behind it, the service calls only Anthropic's Claude models, starting with a small, fast one. The model can change without an OpenMyMemo release.
+- **No embeddings.** Claude has no embeddings model, so the hosted plan offers none. With it, recall uses keyword search plus Claude for query expansion (synonyms and both languages) and rerank (§17.4). People who also want vectors add the local embedding model (`openmymemo[semantic]`), which keeps that work on the computer.
+- **Billing.** The hosted model is its own monthly plan, the OpenMyMemo Assistant plan, separate from MyMemo Cloud and from MyMemo memberships. Its price, included usage and limits are the service's decisions. The panel shows them from the service's answer and never hard-codes them; when the month's allowance is used up, the Assistant falls back to the rule and keyword path until it resets.
 - **Privacy.** The service processes the text of each call to answer it. It does not keep memory text or results after answering, and it logs only metadata (member, feature, model, token counts, time, outcome), as MyMemo Cloud does (§16.7). PRIVACY.md gets a section like the MyMemo Cloud one before this ships.
 - **Code location.** The service side is closed source, in the MyMemo service. This repository has only the generic endpoint client and the sign-in.
 
