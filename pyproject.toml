@@ -43,6 +43,12 @@ Documentation = "https://github.com/MyMemoAI/openmymemo/blob/main/docs/MEMORY_FO
 Issues = "https://github.com/MyMemoAI/openmymemo/issues"
 Changelog = "https://github.com/MyMemoAI/openmymemo/releases"
 
+[project.optional-dependencies]
+semantic = [
+    "onnxruntime>=1.20",
+    "tokenizers>=0.20",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8",

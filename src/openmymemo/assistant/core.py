@@ -147,7 +147,8 @@ class Assistant:
         revoked = c is None and any(x.id == CONNECTOR_ID and x.revoked_at for x in Connectors(self.vault)._load())
         return {
             "enabled": s.enabled, "kind": s.kind, "protocol": s.protocol, "base_url": s.base_url,
-            "endpoint": s.endpoint, "host": s.host, "model": s.model, "has_key": bool(s.secret),
+            "endpoint": s.endpoint, "host": s.host, "model": s.model,
+            "embeddings_model": s.embeddings_model, "embeddings": s.embeddings_available, "has_key": bool(s.secret),
             "key_store": s.key_store if s.secret else None, "features": {k: s.features.get(k, False) for k in FEATURES},
             "private_topics": list(s.private_topics), "caps": dict(s.caps), "usage": s.month_usage(),
             "timeout": s.timeout, "from_env": list(s.from_env), "local": s.local, "problem": s.problem(),

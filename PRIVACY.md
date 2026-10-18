@@ -35,6 +35,7 @@ Everything below is stored only on your computer. OpenMyMemo never uploads it.
 
   The activity log also records which account the computer was linked to.
 
+- **Search by meaning on this computer, if you turn it on:** `semantic.json` (on or off, the model you chose, and which models' terms you accepted), the downloaded model under `models/`, and, if OpenMyMemo had to install it, ONNX Runtime under `semantic-runtime/`, all next to `cloud.json`. In your memory folder, `.openmymemo/index/` holds a number vector for each memory: a cache that keeps itself out of git and is deleted when you turn the switch off.
 - **The OpenMyMemo Assistant, if you turn it on:** `assistant.json`, next to `cloud.json`, readable by you only. It holds your choice of model and endpoint, its switches and limits, and this month's usage counts. Your API key is kept in the macOS Keychain when possible, otherwise in that file; it is never put in your memory folder. The activity log records each request the Assistant makes: what it was for, the model, the endpoint's host name, token counts, how long it took, which memories it was sent and whether it worked. It never records the text sent or received.
 
 ## What AI apps receive
@@ -55,6 +56,7 @@ OpenMyMemo's server listens only on `127.0.0.1`, so other devices cannot reach i
 - **Links you click.** The panel and the Mac app open documentation and download pages in your browser. Install links open the AI app they belong to directly (for example `cursor://` or `vscode:`), never a website, because they carry the command that starts OpenMyMemo and with it the path of your memory folder.
 - **MyMemo Cloud**, only after you turn it on and link this computer (see below).
 - **The OpenMyMemo Assistant**, only after you turn it on with a model that isn't on your computer (see below).
+- **Search by meaning on this computer**, only when you turn it on or switch models: it downloads the model you chose from Hugging Face (huggingface.co and the storage it redirects to), at a fixed address, and checks each file against a SHA-256 checksum in OpenMyMemo's code, deleting a file that doesn't match. If ONNX Runtime isn't installed, it is downloaded from PyPI the same way OpenMyMemo's other libraries are. These are ordinary downloads: no memory and nothing about you is sent, beyond what any download carries (your IP address, and the client's name). Searching with it happens entirely on your computer.
 
 ## MyMemo Cloud (optional)
 
@@ -78,7 +80,7 @@ What the MyMemo service stores and how long it keeps it is governed by [MyMemo's
 
 ## OpenMyMemo Assistant (optional)
 
-The OpenMyMemo Assistant uses a model to help with imports and sorting. It is off until you turn it on in Settings → Assistant or with `openmymemo assistant set`. What it sends depends on the model you choose:
+The OpenMyMemo Assistant uses a model to help with imports, sorting and search. It is off until you turn it on in Settings → Assistant or with `openmymemo assistant set`. What it sends depends on the model you choose:
 
 | Your choice | Where memory text goes |
 | --- | --- |
@@ -87,7 +89,7 @@ The OpenMyMemo Assistant uses a model to help with imports and sorting. It is of
 | Your own API key (Anthropic, or any OpenAI-compatible service) | To that provider, under its terms and privacy policy. |
 | MyMemo's hosted model | Coming. This section will describe it before it is available. |
 
-- **What is sent:** for each request, the text a feature works on: what you paste or the file you import, or the imported memories being sorted, with the names of your topics. Nothing is sent in the background.
+- **What is sent:** for each request, the text a feature works on: what you paste or the file you import, or the imported memories being sorted, with the names of your topics. For search: the search itself (to add related words), and the memories found for it (to put the best first). If you set an embeddings model at the endpoint, the text of each memory it may read is sent once to get its vector (and again when the memory changes), and each search to get the search's. Nothing else is sent in the background.
 - **Never sent to a model outside your computer:** private topics (`health` and `finance` by default) and memories marked private. OpenMyMemo refuses a request that contains them, whatever a feature asks. A model on your computer gets only the private topics you pick in its settings.
 - **Its access:** the Assistant appears on the Connectors page as "OpenMyMemo Assistant". You can limit which topics it reads, make it read-only or remove its access, as for any app. Anything it changes is a proposal you can review and undo, and it never writes into a private topic.
 - **Your key** stays on your computer (see above) and is sent only to the endpoint you chose.

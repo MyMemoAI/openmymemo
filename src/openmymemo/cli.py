@@ -13,7 +13,7 @@ import typer
 from . import __version__, memfiles, transfer
 from .assistant import features as assistant_features
 from .connectors import Connectors
-from .context import compile_context, search
+from .context import compile_context
 from .proposals import Proposals
 from .snippets import http_snippets, stdio_snippets
 from .vault import NotFound, Vault, VaultError, vault_path
@@ -30,6 +30,9 @@ app.add_typer(cloud_app, name="cloud")
 assistant_app = typer.Typer(help="OpenMyMemo Assistant: optional model help with imports, sorting and more "
                                  "(off by default).", no_args_is_help=True)
 app.add_typer(assistant_app, name="assistant")
+semantic_app = typer.Typer(help="Search by meaning on this computer: a local embedding model, downloaded when "
+                                "turned on (optional).", no_args_is_help=True)
+app.add_typer(semantic_app, name="semantic")
 
 DEFAULT_PORT = 8787
 
@@ -343,9 +346,37 @@ def context(ctx: typer.Context, connector: Annotated[str | None, typer.Option(he
 
 @app.command("search")
 def search_(ctx: typer.Context, query: str) -> None:
-    """Search your memories."""
-    for _score, m in search(_vault(ctx), None, query, limit=20):
-        typer.echo(f"{m.id}  {_pad(m.topic, 20)} {m.content}")
+    """Search your memories: by keywords, and by meaning when that is on (`openmymemo semantic`)."""
+    from .recall import search
+
+    for h in search(_vault(ctx), None, query, limit=20).hits:
+        typer.echo(f"{h.memory.id}  {_pad(h.memory.topic, 20)} {h.memory.content}")
+
+
+@app.command("recall")
+def recall_(
+    ctx: typer.Context,
+    question: str,
+    max_chars: Annotated[int, typer.Option("--max-chars", help="Cut the output to this many characters.")] = 2000,
+    connector: Annotated[str | None, typer.Option(
+        "--connector", help="Only what this connected app may read (and log it as that app's read).")] = None,
+) -> None:
+    """Print the memories most relevant to a question, ranked and cut to a budget, for a prompt or a hook.
+
+    Uses search by meaning and the OpenMyMemo Assistant when they are on; keyword search otherwise. Prints
+    nothing when no memory matches."""
+    from .recall import recall
+
+    vault = _vault(ctx)
+    try:
+        c = Connectors(vault).get(connector) if connector else None
+    except VaultError as e:
+        _connector_failed(e)
+    result = recall(vault, question, connector=c, max_chars=max(200, min(max_chars, 50_000)))
+    if c is not None:
+        vault.log_activity(c.id, "search", query=question, memory_ids=result["memory_ids"])
+    if result["text"]:
+        typer.echo(result["text"], nl=False)
 
 
 @app.command()
@@ -969,6 +1000,9 @@ def _assistant_status(vault: Vault) -> None:
     kind = {"local": "a model on this computer", "key": "your own API key", "mymemo": "MyMemo (coming soon)"}[s["kind"]]
     typer.echo(f"  Model:     {s['model'] or '(none)'} via {kind}, {s['protocol']} API")
     typer.echo(f"  Endpoint:  {s['endpoint'] or '(none)'}")
+    if s["embeddings_model"]:
+        note = "" if s["embeddings"] else " (not used: this endpoint has no OpenAI-compatible embeddings)"
+        typer.echo(f"  Embeddings: {s['embeddings_model']}{note}")
     if s["kind"] != "local":
         where = {"keychain": " (in the Keychain)", "file": " (in assistant.json)", "env": " (from the environment)"}
         typer.echo(f"  Key:       {'set' + where.get(s['key_store'] or '', '') if s['has_key'] else 'not set'}")
@@ -1000,6 +1034,8 @@ def assistant_set(
     protocol: Annotated[str | None, typer.Option(help="openai (OpenAI-compatible) or anthropic.")] = None,
     base_url: Annotated[str | None, typer.Option(help="The endpoint's base URL; empty for the default.")] = None,
     model: Annotated[str | None, typer.Option(help="The model's name, e.g. llama3.2 or claude-haiku-5-5.")] = None,
+    embeddings_model: Annotated[str | None, typer.Option(
+        help="An embeddings model at the same OpenAI-compatible endpoint, for search by meaning; empty for none.")] = None,
     key: Annotated[bool, typer.Option("--key", help="Ask for the API key (typed, not shown).")] = False,
     key_stdin: Annotated[bool, typer.Option("--key-stdin", help="Read the API key from standard input.")] = False,
     remove_key: Annotated[bool, typer.Option("--remove-key", help="Forget the stored API key.")] = False,
@@ -1038,6 +1074,7 @@ def assistant_set(
     try:
         settings = save_settings(
             enabled=True, kind=kind, protocol=protocol, base_url=base_url, model=model, api_key=secret,
+            embeddings_model=embeddings_model,
             features=features or None, caps=caps or None,
             private_topics=[] if no_private_topics else (private_topic or None))
     except SettingsError as e:
@@ -1069,6 +1106,109 @@ def assistant_off() -> None:
 
     save_settings(enabled=False)
     typer.echo("OpenMyMemo Assistant is off.")
+
+
+# ---- search by meaning on this computer (product-design.md §17.4) ------------------------------------------
+
+
+def _semantic_status(vault: Vault) -> None:
+    from .recall import semantic
+
+    s = semantic.status(vault)
+    chosen = next((m for m in s["models"] if m["id"] == s["model"]), None)
+    state = "on" if s["enabled"] else "off"
+    if s["enabled"] and not s["ready"]:
+        state = "on, but not ready (run `openmymemo semantic on` again)"
+    typer.echo(f"Search by meaning on this computer: {state}")
+    typer.echo(f"  Model: {chosen['name'] if chosen else s['model']}")
+    idx = s["index"]
+    if s["embedder"]:
+        how = "the local model" if s["embedder"] == "local" else "the Assistant's embeddings endpoint"
+        count = idx["count"] if idx.get("current") else 0
+        typer.echo(f"  Index: {count:,} of {idx['memories']:,} memories, by {how}")
+    else:
+        typer.echo("  Search uses keywords only.")
+    if not s["runtime"]["installed"]:
+        typer.echo(f"  ONNX Runtime: not installed (installed when turned on, or: {s['runtime']['command']})")
+    typer.echo("\nModels (openmymemo semantic on --model ID):")
+    for m in s["models"]:
+        tags = [t for t, on in (("recommended", m["recommended"]), ("downloaded", m["downloaded"]),
+                                ("not available yet", not m["available"])) if on]
+        typer.echo(f"  {_pad(m['id'], 38)} about {m['size_mb']:,} MB, {m['license']}"
+                   + (f" ({', '.join(tags)})" if tags else ""))
+        typer.echo(f"  {'':38} {m['languages']}. {m['note']}")
+
+
+@semantic_app.command("status")
+def semantic_status(ctx: typer.Context) -> None:
+    """Show whether search by meaning is on, the model, the index and the models to choose from."""
+    _semantic_status(_vault(ctx))
+
+
+@semantic_app.command("on")
+def semantic_on(
+    ctx: typer.Context,
+    model: Annotated[str | None, typer.Option(help="The model's id (see `openmymemo semantic status`); default: "
+                                                   "the one chosen before, or the recommended one.")] = None,
+    accept_terms: Annotated[bool, typer.Option(
+        "--accept-terms", help="Accept the model's terms of use, for models that have them (EmbeddingGemma).")] = False,
+) -> None:
+    """Turn search by meaning on: install ONNX Runtime if needed, download and check the model, build the index.
+
+    The model is downloaded from Hugging Face into this computer's OpenMyMemo settings folder, never into the
+    memory folder; memory text never leaves the computer."""
+    from .recall import local, semantic
+
+    vault = _vault(ctx)
+    current = local.load_semantic()
+    chosen = local.BY_ID.get(model or current.model)
+    if chosen and chosen.terms_url and not accept_terms and chosen.id not in current.accepted_terms:
+        typer.secho(f"{chosen.name} is under the {chosen.license}: {chosen.terms_url}\n"
+                    "Read them, then run this again with --accept-terms.", fg="yellow", err=True)
+        raise typer.Exit(2)
+    shown = {"phase": ""}
+
+    def progress(phase: str, done: int, total: int) -> None:
+        if phase != shown["phase"]:
+            shown["phase"] = phase
+            typer.echo({"runtime": "Installing ONNX Runtime and tokenizers…", "download": "Downloading the model…",
+                        "index": "Building the index…"}.get(phase, phase), err=True)
+        if phase == "download" and total:
+            typer.echo(f"\r  {done / 2**20:,.0f} of {total / 2**20:,.0f} MB", nl=False, err=True)
+
+    try:
+        semantic.turn_on(vault, model, accept_terms=accept_terms, progress=progress)
+    except local.SemanticError as e:
+        typer.echo("", err=True)
+        typer.secho(str(e), fg="red", err=True)
+        raise typer.Exit(1) from None
+    typer.echo("", err=True)
+    _semantic_status(vault)
+
+
+@semantic_app.command("off")
+def semantic_off(ctx: typer.Context) -> None:
+    """Turn search by meaning off and delete the downloaded model and this folder's index."""
+    from .recall import semantic
+
+    semantic.turn_off(_vault(ctx))
+    typer.echo("Search by meaning on this computer is off; the model and the index were deleted.")
+
+
+@semantic_app.command("index")
+def semantic_index(ctx: typer.Context) -> None:
+    """Embed every memory that has no current vector, with the embedder in use (normally done as you search)."""
+    from .recall import build_index
+
+    done = build_index(_vault(ctx), lambda n, total: typer.echo(f"\r  {n:,} of {total:,}", nl=False, err=True))
+    if done is None:
+        typer.secho("No embedding model is in use: run `openmymemo semantic on`, or set an embeddings model for "
+                    "the Assistant.", fg="yellow", err=True)
+        raise typer.Exit(1)
+    typer.echo("", err=True)
+    typer.echo(f"Index: {done.indexed:,} of {done.total:,} memories." + (f" Stopped: {done.error}" if done.error else ""))
+    if done.error:
+        raise typer.Exit(1)
 
 
 # The Mac app's environments, venvs/<version>-<stamp>: each process run from one holds a shared lock on

@@ -10,6 +10,12 @@ What changed in each release, for people who use OpenMyMemo. Every release is al
   - Each feature has its own switch, and there are monthly limits on calls and tokens; at a limit, OpenMyMemo goes back to its rules.
   - Private topics are never sent to a remote model; a model on this computer reads only the private topics you pick. The key is kept on this computer only, in the Keychain on a Mac, never in your memory folder.
   - The Assistant is listed on the Connectors page as "OpenMyMemo Assistant", with its own read scope, writing mode and blocked topics, and every request it makes is in the activity log (feature, model, where, tokens), never the text.
+  - **Search:** with the Assistant on, AI apps' searches (`memory_search`) and `openmymemo recall` let the model add related words and translations to the search and put the best matches first. "What do I like to drink?" now finds "Prefers tea over coffee". What AI apps read at the start of a conversation (`memory_context`) is unchanged.
+  - An embeddings model at the same endpoint (Ollama's `nomic-embed-text`, OpenAI's `text-embedding-3-small`, …) can be set for search by meaning; private topics are never sent to one outside this computer.
+- **Search by meaning on this computer (optional, off by default).** Settings → Assistant → "Search by meaning on this computer", or `openmymemo semantic on`, downloads a small embedding model so search finds memories by what they mean, in English, Chinese and about 100 other languages, with nothing leaving the computer. Pick a model from the list (download size, languages and license shown): `multilingual-e5-small` is recommended; `Qwen3-Embedding-0.6B` is the best quality and a larger download; EmbeddingGemma asks you to accept Google's Gemma Terms of Use first. It works with or without the Assistant. Turning it off deletes the model and the index. Models become available in a release once their downloads are pinned by checksum.
+  - Search uses it everywhere: AI apps' `memory_search`, `openmymemo search`, and the panel's search box. Exact names and ids still come first, and without it search works exactly as before.
+  - The index is a cache in `.openmymemo/index/` that keeps itself out of git and is rebuilt from your memory files; it follows edits made in any editor.
+- **`openmymemo recall "<question>"`** prints the memories most relevant to a question, ranked and cut to `--max-chars`, ready to paste into a prompt or use in a hook; `--connector <id>` limits it to what that app may read.
 
 ## 0.2.6 — 2026-10-16
 

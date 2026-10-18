@@ -4,11 +4,14 @@ import { api, type AssistantFeature, type AssistantKind, type AssistantPatch, ty
 import { t } from "../i18n";
 import { store, toast } from "../store";
 import AppIcon from "./AppIcon.vue";
+import SemanticSettings from "./SemanticSettings.vue";
 
 /**
  * Settings → Assistant (product-design.md §17.2): off, a model on this computer, your own API key, or MyMemo's hosted
  * model (coming soon); its endpoint, model and key (write-only), a Test button, a switch per feature, the private
  * topics a model on this computer may read, monthly limits and this month's usage, and where memory text goes.
+ * Its embeddings model (optional) and the local model for search by meaning (`SemanticSettings`, shown even with
+ * the Assistant off) are here too.
  */
 type Choice = "off" | AssistantKind;
 const CHOICES: Choice[] = ["off", "local", "key", "mymemo"];
@@ -16,14 +19,14 @@ const FEATURES: AssistantFeature[] = ["import", "sort", "recall", "check", "sess
 
 const status = ref<AssistantStatus | null>(null);
 const busy = ref(false);
-const draft = ref({ protocol: "openai" as "openai" | "anthropic", base_url: "", model: "", api_key: "" });
+const draft = ref({ protocol: "openai" as "openai" | "anthropic", base_url: "", model: "", api_key: "", embeddings_model: "" });
 const caps = ref({ calls: "", tokens: "" });
 const tested = ref<AssistantTest | null>(null);
 const testing = ref(false);
 
 function take(s: AssistantStatus) {
   status.value = s;
-  draft.value = { protocol: s.protocol, base_url: s.base_url, model: s.model, api_key: "" };
+  draft.value = { protocol: s.protocol, base_url: s.base_url, model: s.model, api_key: "", embeddings_model: s.embeddings_model ?? "" };
   caps.value = { calls: s.caps.calls == null ? "" : String(s.caps.calls), tokens: s.caps.tokens == null ? "" : String(s.caps.tokens) };
 }
 
@@ -43,7 +46,7 @@ const changed = computed(() => {
   if (!s) return false;
   const d = draft.value;
   return d.api_key.trim() !== "" || d.model.trim() !== s.model || d.base_url.trim().replace(/\/+$/, "") !== s.base_url
-    || (s.kind === "key" && d.protocol !== s.protocol);
+    || (s.kind === "key" && d.protocol !== s.protocol) || d.embeddings_model.trim() !== (s.embeddings_model ?? "");
 });
 
 async function change(body: AssistantPatch, done?: string) {
@@ -68,6 +71,7 @@ function pick(c: Choice) {
 function save() {
   const d = draft.value;
   const body: AssistantPatch = { model: d.model.trim(), base_url: d.base_url.trim() };
+  if (d.embeddings_model.trim() !== (status.value?.embeddings_model ?? "")) body.embeddings_model = d.embeddings_model.trim();
   if (status.value?.kind === "key") body.protocol = d.protocol;
   if (d.api_key.trim()) body.api_key = d.api_key.trim();
   void change(body, t("ast.saved"));
@@ -177,6 +181,19 @@ const fmt = (n: number) => n.toLocaleString("en-US");
             autocomplete="off"
           />
         </label>
+        <label v-if="status.kind === 'local' || (status.kind === 'key' && draft.protocol === 'openai')" class="block space-y-1.5">
+          <span class="text-[13px] font-semibold">{{ t("ast.embeddings") }}</span>
+          <input
+            v-model="draft.embeddings_model"
+            class="input font-mono text-xs"
+            :placeholder="t('ast.embeddingsNone')"
+            :disabled="locked('embeddings_model') || busy"
+            spellcheck="false"
+            autocomplete="off"
+            data-test="embeddings"
+          />
+          <span class="block text-xs text-muted">{{ t("ast.embeddingsHelp") }}</span>
+        </label>
         <label v-if="status.kind === 'key'" class="block space-y-1.5">
           <span class="text-[13px] font-semibold">{{ t("ast.key") }}</span>
           <input
@@ -265,6 +282,8 @@ const fmt = (n: number) => n.toLocaleString("en-US");
         </div>
         <p class="text-xs text-muted">{{ t("ast.limitsHelp") }}</p>
       </form>
+
+      <SemanticSettings />
     </div>
   </section>
 </template>

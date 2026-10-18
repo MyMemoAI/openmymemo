@@ -137,7 +137,21 @@ openmymemo assistant test                                        # one tiny requ
 openmymemo assistant status | off
 ```
 
-With it on, imports are split into memories by the model (the preview flags any line it left out), and "Sort into topics" gets the model's suggestions. Each feature has its own switch and a fallback to the rules, and there are monthly limits. A model on this computer keeps everything on the computer; with your own key, the memories a feature uses go to that provider, never private topics. Every request is in the activity log, without its text.
+With it on, imports are split into memories by the model (the preview flags any line it left out), and "Sort into topics" gets the model's suggestions. AI apps' searches and `openmymemo recall` get related words and translations added and the best matches put first. Each feature has its own switch and a fallback to the rules, and there are monthly limits. A model on this computer keeps everything on the computer; with your own key, the memories a feature uses go to that provider, never private topics. Every request is in the activity log, without its text.
+
+### Search by meaning
+
+Keyword search won't find "Prefers tea over coffee" for "What do I like to drink?". Turn on **Search by meaning on this computer** in Settings → Assistant, or:
+
+```bash
+openmymemo semantic status                      # the models: size, languages, license
+openmymemo semantic on                          # downloads multilingual-e5-small (recommended), builds the index
+openmymemo semantic on --model qwen3-embedding-0.6b   # best quality, larger download
+openmymemo semantic off                         # deletes the model and the index
+openmymemo recall "what do I like to drink?" --max-chars 1500   # ranked, ready for a prompt or a hook
+```
+
+It downloads an embedding model (and ONNX Runtime, the `openmymemo[semantic]` extra, if it isn't installed) into OpenMyMemo's settings folder on this computer, never into your memory folder, and checks each file's SHA-256. Memory text never leaves the computer. It works with or without the Assistant, and search uses it everywhere: AI apps' `memory_search`, `openmymemo search` and the panel. The index in `.openmymemo/index/` is a cache: it keeps itself out of git and can be deleted at any time. With the Assistant on a server on this computer or your own key, you can instead set an embeddings model at that endpoint (`openmymemo assistant set --embeddings-model nomic-embed-text`).
 
 ## What happens when an AI writes
 
@@ -173,7 +187,7 @@ Found a vulnerability? Please report it privately as described in [SECURITY.md](
 
 ## Privacy Policy
 
-Your memory stays on your computer: MyMemo doesn't receive it, and OpenMyMemo has no account, telemetry, analytics or update check. AI apps you connect read the topics you allow (never `health` or `finance` unless you say so) and send what they read to their own model provider under their own policies. OpenMyMemo goes online only to download Python and its libraries when it is installed or first started, and for MyMemo Cloud, which is off until you turn it on and link this computer; then the memories web apps read pass through the MyMemo service in transit. The optional OpenMyMemo Assistant sends memory text to the model you choose, and only when you turn it on: a model on your own computer keeps it there. The full policy, including what is stored where: [PRIVACY.md](https://github.com/MyMemoAI/openmymemo/blob/main/PRIVACY.md).
+Your memory stays on your computer: MyMemo doesn't receive it, and OpenMyMemo has no account, telemetry, analytics or update check. AI apps you connect read the topics you allow (never `health` or `finance` unless you say so) and send what they read to their own model provider under their own policies. OpenMyMemo goes online only to download Python and its libraries when it is installed or first started, and for MyMemo Cloud, which is off until you turn it on and link this computer; then the memories web apps read pass through the MyMemo service in transit. The optional OpenMyMemo Assistant sends memory text to the model you choose, and only when you turn it on: a model on your own computer keeps it there. Search by meaning on this computer downloads its model from Hugging Face when you turn it on, and sends nothing. The full policy, including what is stored where: [PRIVACY.md](https://github.com/MyMemoAI/openmymemo/blob/main/PRIVACY.md).
 
 ## Development
 
