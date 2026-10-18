@@ -21,6 +21,7 @@ A false alarm costs nothing but the rule-based fallback, so the check errs on th
 
 from __future__ import annotations
 
+import re
 import unicodedata
 from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING
@@ -134,9 +135,13 @@ class Guard:
         return [m for m in memories if m.status == "active" and self.memory_ok(m)]
 
 
+# The "L12: " prefixes features put on numbered lines, so they don't break a withheld text into pieces.
+_LINE_NUMBER = re.compile(r"^[ \t]*L[0-9]{1,7}:", re.MULTILINE)
+
+
 def contains_any(text: str, withheld: Iterable[str]) -> bool:
     """Whether ``text`` contains a run of any withheld text (see the module docstring)."""
-    hay = normalize(text)
+    hay = normalize(_LINE_NUMBER.sub("", text))
     if not hay:
         return False
     grams: dict[int, set[str]] = {}
