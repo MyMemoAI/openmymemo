@@ -647,7 +647,8 @@ class Vault:
         if status == "active":
             out = []
             for t in self.topics():
-                out.extend(self._memory(mid, entries[mid]) for mid in self._order.get(t["slug"], []) if mid in entries)
+                out.extend(self._memory(mid, entries[mid]) for mid in self._order.get(t["slug"], [])
+                           if mid in entries and entries[mid].get("status", "active") == "active")
             return out
         rows = [self._memory(mid, e) for mid, e in entries.items() if e.get("status", "active") == status]
         return sorted(rows, key=lambda m: m.archived_at or m.updated_at, reverse=True)
@@ -670,7 +671,10 @@ class Vault:
             raise NotFound(f"Unknown topic: {slug}")
         mf = MemoryFile(path.read_text(encoding="utf-8"))
         fn(mf)
-        _atomic_write(path, mf.render())
+        text = mf.render()
+        _atomic_write(path, text)
+        # Writes refresh the signature without re-reading the files, so keep the file order in step here.
+        self._order[slug] = [item.id for item in MemoryFile(text).items]
 
     def add(self, topic: str, content: str, *, kind: str | None = None, section: str | None = None,
             source: str = "user", actor: str = "user", private: bool = False, until: str | None = None,
@@ -707,7 +711,6 @@ class Vault:
             if pinned:
                 entry["pinned"] = True
             self._meta["memories"][mid] = entry
-            self._order.setdefault(topic, []).append(mid)
             self._history(mid, 1, "create", content, topic, actor, proposal_id)
             self._after_write()
             return self._memory(mid, entry)

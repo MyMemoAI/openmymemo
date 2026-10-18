@@ -11,6 +11,7 @@ What changed in each release, for people who use OpenMyMemo. Every release is al
   - Private topics are never sent to a remote model; a model on this computer reads only the private topics you pick. The key is kept on this computer only, in the Keychain on a Mac, never in your memory folder.
   - **MyMemo's hosted model:** choose "MyMemo" and sign in with your MyMemo account (`openmymemo assistant signin`). A computer linked to MyMemo Cloud needs no browser. Settings → Assistant shows the account, the model, your OpenMyMemo Assistant plan and this period's usage as MyMemo reports them, with "Get the plan" or "Manage" opening the plan page; `openmymemo assistant plan` prints them. Without the plan, or once the month's allowance is used up, the Assistant quietly uses the rules until it can be used again; when MyMemo asks it to slow down, it waits as long as asked. Sign out in the panel or with `openmymemo assistant signout`. See PRIVACY.md for what MyMemo receives.
   - The Assistant is listed on the Connectors page as "OpenMyMemo Assistant", with its own read scope, writing mode and blocked topics, and every request it makes is in the activity log (feature, model, where, tokens), never the text.
+- An archived memory no longer stays in what AI apps read until OpenMyMemo restarts. After you archived a memory, the same running server kept serving it in the memory context and wrote it back into `MEMORY.md`; a restored or moved memory could also be missing or listed under its old topic.
 
 ## 0.2.6 — 2026-10-16
 
