@@ -88,7 +88,7 @@ The OpenMyMemo Assistant uses a model to help with imports and sorting. It is of
 | MyMemo's hosted model | Coming. This section will describe it before it is available. |
 
 - **What is sent:** for each request, the text a feature works on: what you paste or the file you import, or the imported memories being sorted, with the names of your topics. Nothing is sent in the background.
-- **Never sent to a model outside your computer:** private topics (`health` and `finance` by default) and memories marked private. OpenMyMemo refuses a request that contains them, whatever a feature asks. A model on your computer gets only the private topics you pick in its settings.
+- **Never sent to a model outside your computer:** private topics (`health` and `finance` by default) and memories marked private. OpenMyMemo refuses a request that contains any part of them, however it is worded or formatted, and that includes archived memories, earlier versions and proposed changes, whatever a feature asks. Memories in topics you have kept the Assistant from reading are treated the same way, and topics it can't read aren't even named to the model. A model on your computer gets only the private topics you pick in its settings.
 - **Its access:** the Assistant appears on the Connectors page as "OpenMyMemo Assistant". You can limit which topics it reads, make it read-only or remove its access, as for any app. Anything it changes is a proposal you can review and undo, and it never writes into a private topic.
 - **Your key** stays on your computer (see above) and is sent only to the endpoint you chose.
 

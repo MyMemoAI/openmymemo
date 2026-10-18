@@ -20,7 +20,7 @@ from typing import Any
 import httpx2
 
 from .. import __version__
-from .settings import Settings, is_loopback
+from .settings import Settings, is_loopback, url_problem
 
 ANTHROPIC_VERSION = "2023-06-01"
 TRANSPORT: httpx2.BaseTransport | None = None  # tests put a fake endpoint here
@@ -111,6 +111,9 @@ def _format_refused(status: int) -> bool:
 def chat(settings: Settings, system: str, user: str, *, max_tokens: int, schema: dict | None = None,
          feature: str | None = None, timeout: float | None = None) -> Reply | Failure:
     """One request: the reply, or a Failure. ``schema`` (already the wire form) asks for structured output."""
+    bad = url_problem(settings.endpoint, settings.kind)  # environment overrides aren't checked when saved
+    if bad:
+        return Failure(bad, "bad_address")
     if settings.kind == "local" and not is_loopback(settings.endpoint):
         return Failure("A model on this computer must have a local address.", "not_local")
     base = settings.endpoint
