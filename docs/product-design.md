@@ -265,6 +265,7 @@ Proposal
   status(pending|accepted|edited_accepted|rejected|expired|applied|undone)
   decided_at, reviewed_at?, final_content?, final_topic?, applied_memory_id?
   before_content?, before_topic?, original_op?, similarity?, conflict
+  until?, before_until?, batch_id?   (§17.6: a review date to set, and the run it came from)
   undo_until?   (v0.1 only; v0.2 ignores it)
 
 Connector
@@ -691,6 +692,18 @@ Today `memory_search` and `openmymemo search` score keywords: Chinese character 
 - **Same rules as any app.** The batch follows the Assistant's writing mode. Changes to memories the person wrote always wait. The digest groups the batch as "Tidy-up, 2026-10-25: 6 changes" with Keep all / Undo all, as well as per item.
 - **Not twice.** A rejected or undone suggestion is not suggested again: the Assistant reads its own `memory_proposals` like any app (§5.4).
 
+**As built (2026-10-18)** (`src/openmymemo/assistant/tidy.py`; the `tidy` feature switch, off by default):
+
+- **One call per chunk.** Memories go to the model in chunks of up to 60 (about 10,000 characters), in folder order, with today's date, each memory's topic, save date, `until` and whether the person or an AI wrote it. The model answers all five kinds at once for its chunk. Near-duplicate candidates come from `textutil.similarity` (≥ 0.5, the most similar 300 pairs); both memories of a pair go in the same chunk, and the model may only merge pairs from that list. There is no separate embedding-based dedupe yet: it arrives with the embedding index of §17.4.
+- **What is filed.** A merge updates the memory saved first with the merged text and archives the other one; a contradiction updates the memory saved first with the later one's text (so the earlier one is the "before") and archives the later one as its copy. When the first step waits, so does the archive (`hold: review`). Possibly outdated is an archive with `hold: review`, a new hold reason for "only if the person agrees", which no writing mode applies. A review date is an update that sets the proposal's new `until` field and leaves the text alone (undo restores the old date from `before_until`). The proposals of a run share a `batch_id` (`tidy-YYYY-MM-DD-xxxx`); MEMORY_FORMAT.md §6.6 has the fields.
+- **Changes to what the person wrote always wait.** §5.5 already holds them in the default writing mode; the tidy-up also holds them (`hold: protected`) when the Assistant's mode is `auto`, so "always" holds.
+- **Private topics** and private memories are left out entirely, also with a model on this computer that may read them: the Assistant can't write there anyway.
+- **Not twice** is a fingerprint (a hash of the kind of suggestion and the ids and text of the memories it is about, not the model's wording) in the proposal's `idempotency_key` (`tidy:<fingerprint>`). Anything suggested before — rejected, undone, waiting or expired — is skipped while those memories read the same.
+- **Cost.** One run makes at most 20 calls (`--max-calls`), and stops at the monthly limits with a message saying how much of the folder wasn't looked at. `--dry-run` (and "Estimate first" in the panel) makes **no** model calls: it reports how many memories would be sent, the near-duplicate candidates and the estimated calls and tokens. It doesn't show the model's suggestions, since getting them is the cost being estimated. If a call fails or its answer doesn't validate, the run stops there; what earlier chunks found is still filed, and with nothing found it says why and that nothing was changed.
+- **Advisory only.** With the Assistant's writing mode `none`, a run lists its suggestions and files nothing.
+- **The digest.** The Changes page groups a batch as "Tidy-up, 2026-10-25: 6 changes" with Keep all / Undo all (`POST /api/proposals/batches/<id>/reviewed|undo`; Undo all leaves a change something else has changed since and marks it seen); `openmymemo review` offers keep all / undo all / one by one per batch; `log.md` lists a batch's changes of a day indented under one line. What waits is decided one by one, as always.
+- **The schedule (§17.10, question 1).** Off until turned on (`openmymemo tidy --schedule weekly`, or "Run by itself" in the Tidy up dialog: daily, weekly or monthly). It is per computer, in `assistant.json` (`tidy_schedule`, and `tidy_last_run` per memory folder), and it runs inside whichever long-running process serves the panel: the Mac app's server, `openmymemo serve`, or the panel an AI app's plugin starts. That process checks two minutes after it starts and then hourly. Nothing runs while no panel runs, and there is no OS scheduled task. A first scheduled run comes at the first check after the schedule is turned on; a manual run also counts as the last run.
+
 ### 17.7 Helping the AI apps you connect
 
 The connected AI apps are models themselves, so the Assistant doesn't sit in front of every read. It helps where a second look pays:
@@ -733,7 +746,7 @@ Each step is its own release-sized piece and its own PRs. Each step is useful al
 
 ### 17.10 Open questions
 
-1. Where tidy-up runs on a schedule: in the Mac app and any running panel, or also as an OS scheduled task when nothing is running?
+1. ~~Where tidy-up runs on a schedule: in the Mac app and any running panel, or also as an OS scheduled task when nothing is running?~~ Decided 2026-10-18 for now: in whichever process serves the panel (the Mac app, `openmymemo serve`, a plugin's panel), never as an OS scheduled task; nothing runs when no panel does (§17.6, as built).
 2. ~~The default local embedding model and its download size~~ Decided 2026-10-18: opt-in from Settings, downloaded when turned on, never bundled; about 120 MB for the default (§17.4). The person chooses from a short list; `multilingual-e5-small` is the recommended default, and `Qwen3-Embedding-0.6B` the larger, better-quality choice.
 3. Should session-end extraction be on by default for an app once the Assistant is on, or always asked per app? Leaning: asked per app on first use.
 4. Should a proposal's evidence from transcripts expire (§11, question 2), given it is now gathered automatically?

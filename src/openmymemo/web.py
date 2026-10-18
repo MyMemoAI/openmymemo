@@ -29,7 +29,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel
 
 from . import __version__, clients, memfiles, transfer
-from .assistant import Assistant, SettingsError, ensure_connector, save_settings
+from .assistant import Assistant, SettingsError, ensure_connector, save_settings, tidy
 from .assistant import features as assistant_features
 from .cloud import CALLBACK_HEADERS, Cloud, CloudError, SettingLocked, callback_page
 from .connectors import Connector, Connectors
@@ -185,6 +185,16 @@ class AssistantPatch(BaseModel):
     timeout: float | None = None
 
 
+class TidyIn(BaseModel):
+    dry_run: bool = False
+    topic: str | None = None
+    max_calls: int | None = None
+
+
+class TidySchedulePatch(BaseModel):
+    schedule: str
+
+
 class TopicPatch(BaseModel):
     title: str | None = None
     description: str | None = None
@@ -328,6 +338,16 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
     def mark_all_reviewed() -> dict:
         # "Looks good": every applied change in the digest is marked as seen.
         return {"reviewed": proposals.mark_all_reviewed()}
+
+    # A batch: the proposals one run filed together (a tidy-up), with Keep all / Undo all in the digest.
+
+    @api.post("/api/proposals/batches/{batch_id}/reviewed")
+    def keep_batch(batch_id: str) -> dict:
+        return {"reviewed": proposals.keep_batch(batch_id)}
+
+    @api.post("/api/proposals/batches/{batch_id}/undo")
+    def undo_batch(batch_id: str) -> dict:
+        return proposals.undo_batch(batch_id)
 
     @api.post("/api/proposals/{pid}/accept")
     def accept(pid: str, body: AcceptIn) -> dict:
@@ -501,6 +521,30 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
     @api.post("/api/assistant/test")
     def test_assistant() -> dict:
         return Assistant.from_settings(vault).test()
+
+    # Tidy up (§17.6): on demand here; on its schedule from the panel's process (``tidy.Scheduler``).
+
+    def tidy_status() -> dict:
+        a = Assistant.from_settings(vault)
+        return {"enabled": a.settings.enabled, "available": a.available("tidy"),
+                "reason": a.unavailable_reason("tidy"), "max_calls": tidy.MAX_CALLS, **tidy.schedule(vault)}
+
+    @api.get("/api/tidy")
+    def get_tidy() -> dict:
+        return tidy_status()
+
+    @api.patch("/api/tidy")
+    def patch_tidy(body: TidySchedulePatch) -> dict:
+        try:
+            tidy.set_schedule(body.schedule)
+        except SettingsError as e:
+            raise HTTPException(400, str(e)) from None
+        return tidy_status()
+
+    @api.post("/api/tidy")
+    def run_tidy(body: TidyIn) -> dict:
+        max_calls = tidy.MAX_CALLS if body.max_calls is None else max(1, min(body.max_calls, 200))
+        return tidy.run(vault, topic=body.topic or None, dry_run=body.dry_run, max_calls=max_calls).to_dict()
 
     # ---- what AI sees, activity ----------------------------------------------------------------
 
@@ -689,18 +733,21 @@ def _panel_server_class():
         once, and only the one that gets the port may connect, or the other would be told it was replaced.
         """
 
-        def __init__(self, config: uvicorn.Config, cloud: Cloud):
+        def __init__(self, config: uvicorn.Config, cloud: Cloud, vault: Vault):
             super().__init__(config)
             self.cloud = cloud
+            self.tidy = tidy.Scheduler(vault)  # scheduled tidy-ups run where the panel runs (§17.6)
 
         async def startup(self, sockets=None) -> None:
             await super().startup(sockets=sockets)
             if self.started:
                 self.cloud.start()
+                self.tidy.start()
 
         async def shutdown(self, sockets=None) -> None:
             import asyncio
 
+            await asyncio.to_thread(self.tidy.stop)
             await asyncio.to_thread(self.cloud.stop)
             await super().shutdown(sockets=sockets)
 
@@ -714,7 +761,7 @@ def panel_server(vault: Vault, port: int, log_level: str = "warning"):
     cloud = Cloud(vault, port)
     config = uvicorn.Config(create_app(vault, port=port, cloud=cloud), host="127.0.0.1", port=port,
                             log_level=log_level, access_log=False, log_config=None, lifespan="on", ws="none")
-    return _panel_server_class()(config, cloud)
+    return _panel_server_class()(config, cloud, vault)
 
 
 def serve_panel(vault: Vault, port: int) -> None:
