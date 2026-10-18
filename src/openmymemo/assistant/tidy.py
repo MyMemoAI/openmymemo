@@ -23,6 +23,13 @@ Rules on top of the Assistant's own (``core.py``):
   message. ``dry_run`` makes no calls and files nothing: it reports what would be sent, the near-duplicate
   candidates and the estimated calls and tokens.
 * When the model fails, the run stops and says why; nothing is filed for the parts it didn't answer.
+* What the model saw is what is changed: each proposal carries the version and review date of every memory the
+  suggestion is about, as sent, and ``proposals.py`` checks them under the lock it writes under. A memory another
+  app or the person changed or archived during the call is left alone (``changed`` in the result).
+* A pass over the folder can take several runs: the memories a run has looked at are kept per folder in
+  ``assistant.json`` (``tidy_done``: a short hash of each memory's id and text), and the next run starts with
+  the parts not looked at yet. A memory whose text changed counts as not looked at. Once every part has been
+  looked at, the next run starts a new pass.
 
 The schedule (§17.10 question 1) is per computer, in ``assistant.json``: ``tidy_schedule`` (off, daily, weekly,
 monthly) and ``tidy_last_run`` per folder. ``Scheduler`` runs inside whichever long-running process serves the panel
@@ -43,7 +50,7 @@ from typing import Any
 
 from ..proposals import PermissionDenied, Proposals, batch_label, is_protected
 from ..textutil import grams, normalize, similarity
-from ..vault import Memory, Vault, VaultError, parse_until
+from ..vault import Conflict, Memory, Vault, VaultError, parse_until
 from . import settings as settings_mod
 from .core import CONNECTOR_ID, Assistant, Data
 
@@ -120,6 +127,7 @@ class Item:
     before: list[str] = field(default_factory=list)  # the memories' text, for showing it
     filed: list[dict] = field(default_factory=list)
     error: str | None = None
+    changed: bool = False  # a memory it is about changed while the model looked: nothing (more) was filed
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -143,6 +151,8 @@ class Result:
     applied: int = 0
     waiting: int = 0
     seen_before: int = 0  # suggestions skipped because the Assistant made them before
+    changed: int = 0  # suggestions not filed because a memory changed while the model looked at it
+    remaining: int = 0  # parts of this pass still to look at after this run
     stopped: str | None = None  # unavailable | busy | limit | cap | error
 
     def to_dict(self) -> dict:
@@ -227,18 +237,20 @@ def _line(m: Memory) -> str:
     return f"[{m.id}] ({m.topic}; saved {(m.created_at or '')[:10] or 'unknown'}{until}; {who}) {m.content}"
 
 
-def _blocks(chunk: Sequence[Memory], pairs: Sequence[tuple[str, str]]) -> list[Data]:
-    ids = {m.id for m in chunk}
+def _blocks(assistant: Assistant, chunk: Sequence[Memory], pairs: Sequence[tuple[str, str]]) -> list[Data]:
+    """Today's date, the memories (through ``memory_data``, which leaves out anything that may not be sent, one
+    declared block each) and the candidate pairs among the memories that are sent (ids only)."""
+    memories = assistant.memory_data(chunk, label="memory", render=_line)
+    ids = {mid for b in memories for mid in b.memory_ids}
     inside = [f"{a} ~ {b}" for a, b in pairs if a in ids and b in ids]
-    return [Data(date.today().isoformat(), label="today"),
-            Data("\n".join(_line(m) for m in chunk), label="memories", memory_ids=tuple(m.id for m in chunk)),
+    return [Data(date.today().isoformat(), label="today"), *memories,
             Data("\n".join(inside) or "(none)", label="possible duplicates")]
 
 
 def _estimate(chunks: Sequence[Sequence[Memory]], pairs: Sequence[tuple[str, str]]) -> int:
     total = 0
     for chunk in chunks:
-        chars = len(INSTRUCTIONS) + 1500 + sum(len(b.text) + 40 for b in _blocks(chunk, pairs))
+        chars = len(INSTRUCTIONS) + 1500 + sum(len(_line(m)) + 60 for m in chunk) + 30 * len(pairs) // max(len(chunks), 1)
         total += chars // CHARS_PER_TOKEN + OUTPUT_ESTIMATE
     return total
 
@@ -246,6 +258,34 @@ def _estimate(chunks: Sequence[Sequence[Memory]], pairs: Sequence[tuple[str, str
 def _later(a: Memory, b: Memory) -> tuple[Memory, Memory]:
     """(earlier, later) by when they were saved; the model's order when that ties."""
     return (b, a) if (b.created_at or "") < (a.created_at or "") else (a, b)
+
+
+def memory_hash(m: Memory) -> str:
+    """A memory as the model saw it, for the pass checkpoint: its id and text."""
+    return hashlib.sha256(f"{m.id}:{normalize(m.content)}".encode()).hexdigest()[:12]
+
+
+def _done(vault: Vault) -> set[str]:
+    raw = settings_mod._read_raw()
+    done = raw.get("tidy_done") if isinstance(raw.get("tidy_done"), dict) else {}
+    rows = done.get(str(vault.root))
+    return {x for x in rows if isinstance(x, str)} if isinstance(rows, list) else set()
+
+
+def _save_done(vault: Vault, add: set[str] = frozenset(), drop: set[str] = frozenset(),
+               keep: set[str] | None = None) -> None:
+    """Change this folder's checkpoint: add and drop hashes; ``keep`` limits it to hashes of current memories."""
+    with settings_mod._lock():
+        raw = settings_mod._read_raw()
+        done = raw.get("tidy_done") if isinstance(raw.get("tidy_done"), dict) else {}
+        rows = done.get(str(vault.root))
+        current = {x for x in rows if isinstance(x, str)} if isinstance(rows, list) else set()
+        current = (current - drop) | add
+        if keep is not None:
+            current &= keep
+        done[str(vault.root)] = sorted(current)
+        raw["tidy_done"] = done
+        settings_mod._write(raw)
 
 
 def batch_id_for(day: date | None = None) -> str:
@@ -326,29 +366,36 @@ def _parse(answer: dict, chunk: Sequence[Memory], pairs: set[frozenset[str]], cl
 
 
 def _file(assistant: Assistant, item: Item, batch_id: str, mems: dict[str, Memory]) -> None:
-    """File one suggestion as the Assistant's proposals (§17.6 holds on top of §5.5)."""
+    """File one suggestion as the Assistant's proposals (§17.6 holds on top of §5.5). ``mems`` is the snapshot the
+    model was sent: every proposal expects the memories it depends on to be as they were then."""
     key = f"tidy:{item.fingerprint}"
 
+    def seen(*ids: str) -> dict[str, tuple[int, str | None]]:
+        return {i: (mems[i].version, mems[i].until) for i in ids}
+
     def propose(op: str, memory_id: str, *, step: int = 1, hold: str | None = None, reason: str | None = None,
-                **kw: Any) -> dict:
+                expect: Sequence[str] = (), **kw: Any) -> dict:
         target = mems[memory_id]
         hold = hold or ("protected" if is_protected(target) else None)
         res = assistant.propose(op, memory_id=memory_id, reason=reason or item.reason, hold=hold, batch_id=batch_id,
-                                idempotency_key=key if step == 1 else f"{key}:{step}", **kw)
+                                idempotency_key=key if step == 1 else f"{key}:{step}",
+                                expected=seen(*(expect or (memory_id,))), **kw)
         item.filed.append(res)
         return res
 
     try:
         if item.kind in ("merge", "contradiction"):
             keep, drop = item.memory_ids
-            if similarity(item.content or "", mems[keep].content) >= 0.999:
+            skip_update = similarity(item.content or "", mems[keep].content) >= 0.999
+            if skip_update:
                 first = {"status": "duplicate"}  # the earlier memory already says it all: only archive the copy
-            else:
-                first = propose("update", keep, content=item.content)
+            else:  # both memories as the model saw them: the new text is made from the two
+                first = propose("update", keep, content=item.content, expect=(keep, drop))
             if first.get("status") in ("applied", "pending", "duplicate"):
                 waits = first["status"] == "pending"
                 note = "merged into" if item.kind == "merge" else "now said by"
                 propose("archive", drop, step=2, hold="review" if waits else None,
+                        expect=(keep, drop) if skip_update else (drop,),
                         reason=f"{item.reason} (This copy is {note} memory {keep}"
                                + (", once you accept that change.)" if waits else ".)"))
         elif item.kind == "outdated":
@@ -358,6 +405,9 @@ def _file(assistant: Assistant, item: Item, batch_id: str, mems: dict[str, Memor
             propose("update", m.id, content=m.content, until=item.until)
         elif item.kind == "rewrite":
             propose("update", item.memory_ids[0], content=item.content)
+    except Conflict:
+        item.changed = True
+        item.error = "A memory it is about changed while the Assistant looked at it, so this wasn't suggested."
     except (PermissionDenied, VaultError) as e:
         item.error = str(e)
 
@@ -377,7 +427,13 @@ def run(vault: Vault, *, topic: str | None = None, dry_run: bool = False, max_ca
             and (connector is None or (assistant.may_send(m, private, connector)
                                        and m.topic not in connector.blocked_topics))]
     pairs = candidate_pairs(mems)
-    chunks = _chunks(mems, pairs)
+    all_chunks = _chunks(mems, pairs)
+    # Continue the current pass: the parts with a memory not looked at yet (or changed since); a new pass when none.
+    done = _done(vault)
+    chunks = [c for c in all_chunks if not all(memory_hash(m) in done for m in c)]
+    new_pass = not chunks
+    if new_pass:
+        chunks = all_chunks
     result = Result(True, "", dry_run=dry_run, memories=len(mems), left_out=len(everything) - len(mems),
                     chunks=len(chunks), candidates=[list(p) for p in pairs],
                     estimate={"calls": min(len(chunks), max_calls), "tokens": _estimate(chunks[:max_calls], pairs)})
@@ -386,7 +442,9 @@ def run(vault: Vault, *, topic: str | None = None, dry_run: bool = False, max_ca
         return result
     if dry_run:
         more = (f" One run makes at most {max_calls} calls, so it would look at {max_calls} of the {len(chunks)} "
-                "parts; run it again for the rest." if len(chunks) > max_calls else "")
+                "parts; the next run continues with the rest." if len(chunks) > max_calls else "")
+        if len(chunks) < len(all_chunks):
+            more += f" {len(all_chunks) - len(chunks)} parts were looked at already in this pass."
         off = f" {reason} Turn it on in Settings → Assistant to run it." if reason else ""
         result.message = (f"A tidy-up would send {len(mems)} memories in {result.estimate['calls']} calls, about "
                           f"{result.estimate['tokens']:,} tokens, and nothing is filed until it runs.{more}{off}")
@@ -402,6 +460,10 @@ def run(vault: Vault, *, topic: str | None = None, dry_run: bool = False, max_ca
             result.message = "A tidy-up of this folder is already running."
             return result
         _mark_run(vault)
+        scope = {memory_hash(m) for m in mems}
+        current = {memory_hash(m) for m in vault.memories()}
+        # Prune hashes of memories that changed or went; a new pass forgets what this scope looked at before.
+        _save_done(vault, drop=scope if new_pass else set(), keep=current)
         _work(vault, assistant, result, chunks, pairs, max_calls)
     return result
 
@@ -416,24 +478,32 @@ def _work(vault: Vault, assistant: Assistant, result: Result, chunks: list[list[
     for i, chunk in enumerate(chunks):
         if result.calls >= max_calls:
             result.stopped = "limit"
+            result.remaining = len(chunks) - i
             stop_note = (f"Stopped after {max_calls} calls, the limit for one tidy-up; {len(chunks) - i} of "
-                         f"{len(chunks)} parts weren't looked at. Run it again for the rest.")
+                         f"{len(chunks)} parts weren't looked at. The next run continues with them.")
             break
-        answer = assistant.json_call("tidy", INSTRUCTIONS, _blocks(chunk, pairs), SCHEMA, max_tokens=MAX_TOKENS)
+        blocks = _blocks(assistant, chunk, pairs)
+        sent_ids = {mid for b in blocks for mid in b.memory_ids}
+        shown = [m for m in chunk if m.id in sent_ids]  # suggestions only about what the model was shown
+        if not shown:
+            _save_done(vault, add={memory_hash(m) for m in chunk})
+            continue
+        answer = assistant.json_call("tidy", INSTRUCTIONS, blocks, SCHEMA, max_tokens=MAX_TOKENS)
         result.calls += 1
         if answer is None:
             why = assistant.last_error or "The model didn't answer."
             result.stopped = "cap" if "month's limit" in why else "error"
-            left = len(chunks) - i
+            left = result.remaining = len(chunks) - i
             stop_note = (f"Stopped: {why} {left} of {len(chunks)} parts weren't looked at"
                          + ("; it continues once the limit resets or is raised in Settings → Assistant."
                             if result.stopped == "cap" else "."))
             break
-        for item in _parse(answer, chunk, pair_set, claimed):
+        for item in _parse(answer, shown, pair_set, claimed):
             if item.fingerprint in seen:
                 result.seen_before += 1
             else:
                 found.append(item)
+        _save_done(vault, add={memory_hash(m) for m in chunk})  # looked at, whatever it found
     result.items = found
     if found and assistant.connector() is not None and assistant.connector().write == "none":
         result.message = (f"{len(found)} suggestions; nothing was filed because the Assistant may only read "
@@ -444,9 +514,10 @@ def _work(vault: Vault, assistant: Assistant, result: Result, chunks: list[list[
         return
     if found:
         result.batch_id = batch_id_for()
-        mems = {m.id: m for m in vault.memories()}
+        sent = {m.id: m for chunk in chunks for m in chunk}  # the memories as the model saw them
         for item in found:
-            _file(assistant, item, result.batch_id, mems)
+            _file(assistant, item, result.batch_id, sent)
+        result.changed = sum(1 for item in found if item.changed)
     filed = [r for item in found for r in item.filed]
     result.applied = sum(1 for r in filed if r.get("status") == "applied")
     result.waiting = sum(1 for r in filed if r.get("status") == "pending")
@@ -460,6 +531,9 @@ def _work(vault: Vault, assistant: Assistant, result: Result, chunks: list[list[
         result.message = "No changes."
     if result.seen_before:
         result.message += f" Skipped {result.seen_before} suggested before."
+    if result.changed:
+        result.message += (f" Left out {result.changed} about memories that changed while the Assistant looked at "
+                           "them.")
     if stop_note:
         result.message += " " + stop_note
     if result.stopped and not n:

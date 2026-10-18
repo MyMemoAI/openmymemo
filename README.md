@@ -147,7 +147,7 @@ openmymemo tidy [--topic work]     # run it ("Tidy up" on the Changes page does 
 openmymemo tidy --schedule weekly  # off (the default), daily, weekly or monthly
 ```
 
-A schedule runs on this computer while OpenMyMemo's panel is running (the Mac app, `openmymemo serve`, or an AI app's plugin); nothing runs when none of them is. Each feature has its own switch and a fallback to the rules, and there are monthly limits. A model on this computer keeps everything on the computer; with your own key, the memories a feature uses go to that provider, never private topics. Every request is in the activity log, without its text.
+One run makes at most 20 calls; on a large folder the next run continues where it stopped. A schedule runs on this computer while OpenMyMemo's panel is running (the Mac app, `openmymemo serve`, or an AI app's plugin); nothing runs when none of them is. Each feature has its own switch and a fallback to the rules, and there are monthly limits. A model on this computer keeps everything on the computer; with your own key, the memories a feature uses go to that provider, never private topics. Every request is in the activity log, without its text.
 
 ## What happens when an AI writes
 

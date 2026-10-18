@@ -41,13 +41,14 @@ from __future__ import annotations
 import json
 import secrets
 import time
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 
 from .connectors import Connector, Connectors
 from .textutil import KINDS, classify_topic, looks_contradictory, similarity
 from .topics import IMPORTED_GROUP
-from .vault import Memory, NotFound, Vault, VaultError, _atomic_write, now_iso, parse_until
+from .vault import Conflict, Memory, NotFound, Vault, VaultError, _atomic_write, now_iso, parse_until
 
 OPS = ("add", "update", "archive")
 HOLDS = ("approval", "protected", "private", "review")
@@ -251,11 +252,15 @@ class Proposals:
                 topic: str | None = None, kind: str | None = None, reason: str | None = None,
                 evidence: str | None = None, idempotency_key: str | None = None,
                 created_at: str | None = None, queue_id: str | None = None, until: str | None = None,
-                hold: str | None = None, batch_id: str | None = None) -> dict:
+                hold: str | None = None, batch_id: str | None = None,
+                expected: Mapping[str, tuple[int, str | None]] | None = None) -> dict:
         """`created_at`: when the AI proposed it, if that was earlier, and `queue_id`: the receipt it got then
         (both from MyMemo Cloud's offline queue). `until`: a review date to set (``YYYY-MM`` or ``YYYY-MM-DD``).
         `hold`: make it wait for the person with this reason even where the rules would apply it (a reason the
-        rules give, such as ``private``, still wins). `batch_id`: groups the proposals of one run."""
+        rules give, such as ``private``, still wins). `batch_id`: groups the proposals of one run.
+        `expected`: memory id → (version, until) as the proposer last saw them; checked under the lock this
+        proposal is filed and applied under, and Conflict is raised when any of them is no longer active at
+        that version and review date, so a suggestion made from older text never lands on newer text."""
         v = self.vault
         if connector.write == "none":
             raise PermissionDenied("This connector is read-only. The user can allow proposals in the OpenMyMemo panel.")
@@ -285,6 +290,13 @@ class Proposals:
             private = v.private_topics()
             topics = v.topics()
             slugs = {t["slug"] for t in topics}
+            for mid, (version, until_seen) in (expected or {}).items():
+                try:
+                    seen = v.get(mid)
+                except NotFound:
+                    raise Conflict(f"Memory {mid} is gone") from None
+                if seen.status != "active" or seen.version != version or seen.until != until_seen:
+                    raise Conflict(f"Memory {mid} has changed since this was suggested")
             target = None
             if op in ("update", "archive"):
                 if not memory_id:
@@ -460,17 +472,24 @@ class Proposals:
         return max(versions) if versions else None
 
     def can_undo(self, p: Proposal, *, versions: dict[str, int] | None = None,
-                 history: list[dict] | None = None) -> bool:
-        """True while this change is still the memory's latest version."""
+                 history: list[dict] | None = None, untils: dict[str, str | None] | None = None) -> bool:
+        """True while this change is still the memory's latest version. A change that set a review date
+        (``until``) also needs that date to be the memory's current one: changing a date makes no new version, so
+        undo would otherwise reset a date set since."""
         if p.status not in UNDOABLE or not p.applied_memory_id:
             return False
-        if versions is not None:
+        sets_until = p.op == "update" and p.until is not None
+        if versions is not None and (untils is not None or not sets_until):
             current = versions.get(p.applied_memory_id)
+            current_until = (untils or {}).get(p.applied_memory_id)
         else:
             try:
-                current = self.vault.get(p.applied_memory_id).version
+                m = self.vault.get(p.applied_memory_id)
+                current, current_until = m.version, m.until
             except NotFound:
-                current = None
+                current, current_until = None, None
+        if sets_until and current_until != p.until:
+            return False
         return current is not None and current == self._applied_version(p, history)
 
     def as_dict(self, p: Proposal) -> dict:
@@ -481,13 +500,15 @@ class Proposals:
         if not items:
             return []
         versions = None
+        untils = None
         history = None
         if any(p.status in UNDOABLE for p in items):
             mems = self.vault.memories("active") + self.vault.memories("archived")
             versions = {m.id: m.version for m in mems}
+            untils = {m.id: m.until for m in mems}
             if any(p.status in UNDOABLE and p.applied_version is None for p in items):
                 history = self.vault.history(limit=1_000_000)
-        return [{**p.to_dict(), "can_undo": self.can_undo(p, versions=versions, history=history)} for p in items]
+        return [{**p.to_dict(), "can_undo": self.can_undo(p, versions=versions, history=history, untils=untils)} for p in items]
 
     def undo(self, pid: str, *, block_topic: bool = False) -> Proposal:
         """Revert an applied or accepted change; with ``block_topic`` this app may no longer propose to the topic."""

@@ -332,7 +332,7 @@ class Assistant:
     def propose(self, op: str, *, content: str | None = None, memory_id: str | None = None,
                 topic: str | None = None, kind: str | None = None, reason: str, evidence: str | None = None,
                 idempotency_key: str | None = None, until: str | None = None, hold: str | None = None,
-                batch_id: str | None = None) -> dict:
+                batch_id: str | None = None, expected: dict[str, tuple[int, str | None]] | None = None) -> dict:
         """File a proposal as the ``assistant`` connector through ``proposals.py`` (its writing mode, blocked topics
         and the §5.5 rules apply; the result is ``Proposals.propose``'s). A ``reason`` is required. Never into a
         private topic: an add without a topic is classified among the non-private topics. Raises PermissionDenied
@@ -361,4 +361,4 @@ class Assistant:
             topic = classify_topic(content, choices)[0] or next((t["slug"] for t in choices), None)
         return Proposals(v).propose(c, op, content=content, memory_id=memory_id, topic=topic, kind=kind,
                                     reason=reason.strip(), evidence=evidence, idempotency_key=idempotency_key,
-                                    created_at=now_iso(), until=until, hold=hold, batch_id=batch_id)
+                                    created_at=now_iso(), until=until, hold=hold, batch_id=batch_id, expected=expected)

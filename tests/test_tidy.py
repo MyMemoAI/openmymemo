@@ -422,3 +422,110 @@ def test_proposals_set_until_and_undo_restores_it(vault):
         props.propose(c, "add", content="x y", topic="work", hold="because")
     held = props.propose(c, "add", content="Plays chess on Sundays", topic="lifestyle", hold="review")
     assert held["status"] == "pending" and held["hold"] == "review" and "only made when they agree" in held["message"]
+
+
+# ---- changes while the model looks, review dates changed since, passes over several runs ---------------------------
+
+
+def test_a_memory_edited_or_archived_during_the_call_is_left_alone(vault, fake):
+    long = vault.add("how-to-work-with-me", LONG, actor=AI)
+    job = vault.add("work", "Looking for a new job", actor=AI)
+    a = vault.add("lifestyle", "Prefers green tea over coffee in the morning", actor=AI,
+                  created_at="2026-01-01T09:00:00+00:00")
+    b = vault.add("lifestyle", "Prefers green tea over coffee in the mornings", actor=AI)
+    tidy_on(vault)
+
+    def answer(body):  # another app changes things while the model is thinking
+        vault.update(long.id, content="Newer words from another app.", actor=AI)
+        vault.archive(job.id, actor="user")
+        vault.update(b.id, content="Prefers green tea, and oolong at night", actor=AI)
+        return json.dumps({**EMPTY, "rewrites": [{"id": long.id, "content": "Short.", "reason": "Long."}],
+                           "outdated": [{"id": job.id, "reason": "Old."}],
+                           "merges": [{"ids": [a.id, b.id], "content": "Prefers green tea, mornings",
+                                       "reason": "Same."}]})
+
+    fake.answer = answer
+    r = tidy.run(vault)
+    assert r.changed == 3 and r.applied == 0 and r.waiting == 0 and Proposals(vault).list() == []
+    assert "changed while the Assistant looked" in r.message
+    assert vault.get(long.id).content == "Newer words from another app." and vault.get(job.id).status == "archived"
+    assert vault.get(a.id).content == "Prefers green tea over coffee in the morning"  # its pair changed: no merge
+    assert all(i.changed and i.filed == [] for i in r.items)
+
+
+def test_a_review_date_set_since_is_not_undone(vault, fake):
+    trip = vault.add("lifestyle", "Travelling in Japan in November 2026", actor=AI)
+    tidy_on(vault)
+    fake.answer = lambda body: json.dumps({**EMPTY, "until": [{"id": trip.id, "until": "2026-12", "reason": "Trip."}]})
+    batch = tidy.run(vault).batch_id
+    props = Proposals(vault)
+    p = props.batch(batch)[0]
+    assert props.can_undo(p) and props.as_dicts([p])[0]["can_undo"]
+    vault.update(trip.id, until="2027-02")  # the person sets another date: no new version
+    assert not props.can_undo(p) and not props.as_dicts([p])[0]["can_undo"]
+    with pytest.raises(VaultError):
+        props.undo(p.id)
+    assert props.undo_batch(batch) == {"undone": 0, "kept": 1}
+    assert vault.get(trip.id).until == "2027-02"
+
+
+def test_consecutive_capped_runs_reach_the_rest_of_the_folder(vault, fake, monkeypatch):
+    monkeypatch.setattr(tidy, "CHUNK_MEMORIES", 2)
+    seed(vault)
+    tidy_on(vault)
+    sent: list[set[str]] = []
+
+    def answer(body):
+        text = json.dumps(body, ensure_ascii=False)
+        sent.append({m.id for m in vault.memories() if f"[{m.id}]" in text})
+        return json.dumps(EMPTY)
+
+    fake.answer = answer
+    r1 = tidy.run(vault, max_calls=2)
+    assert r1.stopped == "limit" and r1.remaining > 0 and "next run continues" in r1.message
+    first = set().union(*sent)
+    assert tidy.run(vault, dry_run=True, max_calls=2).chunks == r1.remaining
+    sent.clear()
+    r2 = tidy.run(vault, max_calls=10)
+    second = set().union(*sent)
+    assert r2.ok and r2.calls == r1.remaining and not first & second
+    readable = {m.id for m in vault.memories() if m.topic != "health"}
+    assert first | second == readable
+    sent.clear()
+    r3 = tidy.run(vault, max_calls=10)  # the pass is complete: a new one starts from the beginning
+    assert r3.ok and set().union(*sent) == readable
+    # A memory whose text changed is looked at again within the pass.
+    m = next(iter(vault.memories()))
+    vault.update(m.id, content=m.content + " (edited)", actor=AI)
+    sent.clear()
+    r4 = tidy.run(vault, max_calls=10)
+    assert r4.calls == 1 and m.id in set().union(*sent)
+
+
+@pytest.mark.parametrize("kind", ["key", "local"])
+def test_end_to_end_the_endpoint_never_gets_private_or_out_of_scope_memories(vault, fake, kind):
+    vault.add("health", "Sees a cardiologist about an arrhythmia every spring", actor=AI)
+    vault.add("finance", "Keeps savings in an account at Banco Inventado", actor=AI)
+    vault.add("work", "Negotiating a confidential retention bonus with the CFO", actor=AI, private=True)
+    hidden = vault.add("people", "Sister Mireille lives in Grenoble with two cats", actor=AI)
+    near = vault.add("people", "Sister Mireille lives in Grenoble with her two cats", actor=AI)
+    shown = vault.add("work", "Works at Acme as an engineer on the payments team", actor=AI)
+    shown2 = vault.add("work", "Works at Acme as an engineer on the payment team", actor=AI)
+    if kind == "key":
+        tidy_on(vault, kind="key", protocol="openai", model="gpt-x", api_key="sk-test")
+    else:  # a model on this computer that may read health: tidy still leaves private topics out
+        tidy_on(vault, private_topics=["health"])
+    topics = [t["slug"] for t in vault.topics() if t["slug"] not in ("people",)]
+    Connectors(vault).update("assistant", read_topics=topics)  # people is out of the Assistant's read scope
+    fake.answer = lambda body: json.dumps({**EMPTY, "merges": [
+        {"ids": [hidden.id, near.id], "content": "x y z", "reason": "out of scope"},
+        {"ids": [shown.id, shown2.id], "content": "Works at Acme as an engineer on the payments team.",
+         "reason": "Same."}]})
+    r = tidy.run(vault)
+    sent = text_sent(fake)
+    assert len(fake.requests) == 1 and "Acme" in sent
+    for secret in ("cardiologist", "Banco Inventado", "retention bonus", "Mireille", hidden.id, near.id,
+                   "health", "finance"):
+        assert secret not in sent
+    assert [i.memory_ids for i in r.items] == [(shown.id, shown2.id)]  # nothing about what it wasn't shown
+    assert vault.get(hidden.id).status == "active" and vault.get(near.id).status == "active"

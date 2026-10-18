@@ -328,7 +328,7 @@ One file per proposal, named by its id (`p` plus hexadecimal; the id must be alp
 | `op` | `add`, `update`, `archive` |
 | `content`, `topic`, `memory_id`, `kind`, `reason`, `evidence`, `idempotency_key` | What was proposed. The OpenMyMemo Assistant's tidy-up sets `idempotency_key` to `tidy:<fingerprint>` (the second step of a merge: `tidy:<fingerprint>:2`), a hash of the kind of suggestion and the ids and text of the memories it is about, so it never makes the same suggestion twice |
 | `until` | Optional: a review date (`YYYY-MM` or `YYYY-MM-DD`, §3.5) the proposal sets on an `add` or `update`. An update may change only this; the text stays the same and, as for any change of an inline attribute, the memory gets no new version (§7) |
-| `before_until` | The memory's `until` before an update that set `until`; undo restores it (absent: there was none) |
+| `before_until` | The memory's `until` before an update that set `until`; undo restores it (absent: there was none). Since a changed `until` makes no new version, such a change can be undone only while the memory's `until` is still the one it set |
 | `batch_id` | Optional: proposals filed together by one run share it, and the digest, `openmymemo review` and `log.md` group them ("Tidy-up, 2026-10-25: 6 changes") with Keep all / Undo all. A tidy-up's id is `tidy-YYYY-MM-DD-` plus four hexadecimal digits |
 | `created_at` | |
 | `queue_id` | Optional: the MyMemo Cloud queue id of a proposal filed from the offline queue (product-design.md §16.3), so the AI can match its `queued` receipt to it |
