@@ -313,7 +313,7 @@ def test_remote_embeddings_never_include_private_topics(demo, monkeypatch):
     _assistant_on(demo, monkeypatch, fake, kind="key", protocol="openai", base_url="https://api.example.com/v1",
                   api_key="sk-1", embeddings_model="text-embedding-3-small")
     e = embed.active_embedder(demo)
-    assert isinstance(e, EndpointEmbedder) and e.remote and e.id == "endpoint/api.example.com/text-embedding-3-small"
+    assert isinstance(e, EndpointEmbedder) and e.remote and e.id == "endpoint/https://api.example.com/v1/text-embedding-3-small"
     r = search(demo, None, "What do I like to drink?")
     assert r.mode == "hybrid" and r.hits[0].memory.id == "tea01"
     assert set(fake.paths) == {"/v1/embeddings"}

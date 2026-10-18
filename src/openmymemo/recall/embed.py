@@ -43,9 +43,10 @@ class Embedder(Protocol):
 
     def may_embed(self, memory: Memory) -> bool: ...
 
-    def embed(self, texts: Sequence[str], kind: str, memory_ids: Sequence[str] = ()) -> list[list[float]]:
-        """Vectors for ``texts``; ``kind`` is ``query`` or ``passage`` (``memory_ids``: whose texts they are, for
-        the activity log of a remote embedder). Raises EmbedError."""
+    def embed(self, texts: Sequence[str], kind: str, memory_ids: Sequence[str] = ()) -> list[list[float] | None]:
+        """Vectors for ``texts``; ``kind`` is ``query`` or ``passage`` (``memory_ids``: whose texts they are,
+        required for passages sent to an endpoint). A None vector: that text may not be sent now, so it wasn't.
+        Raises EmbedError."""
         ...
 
 
@@ -201,18 +202,37 @@ def forget_local() -> None:
 # ---- an OpenAI-compatible /embeddings endpoint -----------------------------------------------------------------
 
 
+def endpoint_id(settings) -> str:
+    """The embedder id for an endpoint: the full normalized address (scheme, host, port, path; never credentials)
+    and the model, so two servers that use the same model name never share an index or cached query vectors."""
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(settings.endpoint)
+    host = (parts.hostname or "").lower()
+    if ":" in host:
+        host = f"[{host}]"
+    port = f":{parts.port}" if parts.port else ""
+    path = parts.path.rstrip("/")
+    return f"endpoint/{parts.scheme.lower()}://{host}{port}{path}/{settings.embeddings_model}"
+
+
 class EndpointEmbedder:
     """The Assistant's own endpoint (a server on this computer, or a provider with the person's key), when it has
     an OpenAI-compatible ``/embeddings`` and an embeddings model is set. Requests count against the Assistant's
-    monthly limits and are logged as its calls (feature ``recall``), with the memory ids sent, never the text."""
+    monthly limits and are logged as its calls (feature ``recall``), with the memory ids sent, never the text.
+
+    What may be sent is decided again for every request, from the settings, connector and memory files as they are
+    at that moment (``_live``): a long indexing run never sends a batch on an earlier decision. Memories that may
+    no longer be sent are left out of the request (their vector is None); a change of endpoint, model or locality
+    stops the embedder."""
 
     def __init__(self, assistant: Assistant):
         self.assistant = assistant
         s = assistant.settings
         self.remote = not s.local
-        self.id = f"endpoint/{s.host}/{s.embeddings_model}"
+        self.id = endpoint_id(s)
         self.min_similarity = ENDPOINT_MIN_SIMILARITY
-        self._guard = assistant.guard()  # the Assistant's send rules (assistant/guard.py), fixed for this embedder
+        self._guard = assistant.guard()  # the send rules when this embedder was made (may_embed only)
         self._withheld: list[str] | None = None
 
     def _withheld_texts(self) -> list[str]:
@@ -222,49 +242,89 @@ class EndpointEmbedder:
 
     def may_embed(self, memory: Memory) -> bool:
         """What the Assistant may send: active, in its read scope, not private (a model on this computer gets the
-        private topics the person opted in), and not containing text it may not send."""
+        private topics the person opted in), and not containing text it may not send. Checked again, live, before
+        each request."""
         from ..assistant.guard import contains_any
 
         g = self._guard
         return (g is not None and memory.status == "active" and g.memory_ok(memory)
                 and not contains_any(memory.content, self._withheld_texts()))
 
-    def _refused(self, texts: Sequence[str], memory_ids: Sequence[str]) -> bool:
-        """The Assistant's own check of everything going out (as ``json_call`` does), as a last line."""
-        from ..assistant import Data
+    def _live(self):
+        """The Assistant, its settings and its send guard as they are now; EmbedError when this embedder is no
+        longer the one configured (another endpoint, model or locality) or nothing may be sent."""
+        from ..assistant import Assistant
+        from ..assistant.settings import is_loopback, load_settings
 
-        if self._guard is None:
-            return True
-        blocks = [Data(t, memory_ids=(mid,)) for t, mid in zip(texts, memory_ids, strict=False)]
-        blocks += [Data(t) for t in texts[len(blocks):]]
-        return self._guard.refusal(blocks) is not None
-
-    def embed(self, texts: Sequence[str], kind: str, memory_ids: Sequence[str] = ()) -> list[list[float]]:
-        out: list[list[float]] = []
-        for i in range(0, len(texts), ENDPOINT_BATCH):
-            out.extend(self._request(texts[i:i + ENDPOINT_BATCH], memory_ids[i:i + ENDPOINT_BATCH]))
-        return out
-
-    def _request(self, texts: Sequence[str], memory_ids: Sequence[str]) -> list[list[float]]:
-        from .. import __version__
-        from ..assistant import client
-        from ..assistant.core import CONNECTOR_ID
-        from ..assistant.settings import is_loopback, record_usage, reserve_call
-
-        a, s = self.assistant, self.assistant.settings
-        if not texts:
-            return []
-        if not a.available("recall") or not s.embeddings_available:
+        s = load_settings()
+        a = Assistant(self.assistant.vault, s)
+        if not s.embeddings_available or not a.available("recall"):
             raise EmbedError(a.unavailable_reason("recall") or "No embeddings model.")
+        if endpoint_id(s) != self.id or (not s.local) != self.remote:
+            raise EmbedError("The embeddings settings changed.")
         if s.kind == "local" and not is_loopback(s.endpoint):
             raise EmbedError("A model on this computer must have a local address.")
-        if self._refused(texts, memory_ids):
-            try:
-                a.vault.log_activity(CONNECTOR_ID, "call", feature="recall", model=s.embeddings_model,
-                                     endpoint=s.host or None, kind=s.kind, result="refused_private",
-                                     memory_ids=sorted(set(memory_ids)) or None, embeddings=len(texts))
-            except OSError:
-                pass
+        g = a.guard()
+        if g is None:
+            raise EmbedError("The Assistant's access was removed.")
+        return a, s, g
+
+    def embed(self, texts: Sequence[str], kind: str, memory_ids: Sequence[str] = ()) -> list[list[float] | None]:
+        out: list[list[float] | None] = []
+        for i in range(0, len(texts), ENDPOINT_BATCH):
+            out.extend(self._request(texts[i:i + ENDPOINT_BATCH], memory_ids[i:i + ENDPOINT_BATCH], kind))
+        return out
+
+    def _log(self, a, s, result: str, memory_ids: Sequence[str], n: int, tokens: int | None = None) -> None:
+        from ..assistant.core import CONNECTOR_ID
+
+        try:
+            a.vault.log_activity(CONNECTOR_ID, "call", feature="recall", model=s.embeddings_model,
+                                 endpoint=s.host or None, kind=s.kind, result=result, tokens_in=tokens,
+                                 memory_ids=sorted(set(memory_ids)) or None, embeddings=n)
+        except OSError:
+            pass
+
+    def _request(self, texts: Sequence[str], memory_ids: Sequence[str], kind: str) -> list[list[float] | None]:
+        from .. import __version__
+        from ..assistant import Data, client
+        from ..assistant.guard import contains_any
+        from ..assistant.settings import record_usage, reserve_call
+        from ..vault import NotFound
+
+        if not texts:
+            return []
+        a, s, g = self._live()
+        withheld = g.withheld()[2]
+        vault = a.vault
+        keep: list[int] = []
+        by_memory = bool(memory_ids)  # memories' texts: each checked against the memory as it is now
+        if by_memory:
+            if len(memory_ids) != len(texts):
+                raise EmbedError("Each text needs its memory id.")
+            for i, (text, mid) in enumerate(zip(texts, memory_ids, strict=True)):
+                try:
+                    m = vault.get(mid)
+                except NotFound:
+                    continue
+                if (m.status == "active" and m.content == text and g.memory_ok(m)
+                        and not contains_any(text, withheld)):
+                    keep.append(i)
+        else:
+            keep = [i for i, text in enumerate(texts) if not contains_any(text, withheld)]
+        dropped = len(texts) - len(keep)
+        if dropped:
+            self._log(a, s, "refused_private", [memory_ids[i] for i in range(len(memory_ids)) if i not in keep],
+                      dropped)
+        if not keep:
+            if not by_memory:
+                raise EmbedError("That includes text that may not be sent to this model.")
+            return [None] * len(texts)
+        send = [texts[i] for i in keep]
+        ids = [memory_ids[i] for i in keep] if by_memory else []
+        blocks = [Data(t, memory_ids=(mid,)) for t, mid in zip(send, ids, strict=True)] if ids else [Data(t) for t in send]
+        if g.refusal(blocks) is not None:  # the Assistant's own last check of everything going out
+            self._log(a, s, "refused_private", ids, len(send))
             raise EmbedError("That includes text that may not be sent to this model.")
         capped = reserve_call(s.caps)
         if capped:
@@ -275,7 +335,7 @@ class EndpointEmbedder:
         result, payload, status = "ok", None, None
         try:
             with client._client(s, min(s.timeout, 30.0)) as http:
-                r = http.post(s.endpoint + "/embeddings", json={"model": s.embeddings_model, "input": list(texts)},
+                r = http.post(s.endpoint + "/embeddings", json={"model": s.embeddings_model, "input": send},
                               headers=headers)
                 status = r.status_code
                 payload = r.json() if r.status_code == 200 else None
@@ -283,7 +343,7 @@ class EndpointEmbedder:
             result = "timeout" if "Timeout" in type(e).__name__ else "unreachable"
         vectors: list[list[float]] | None = None
         if result == "ok":
-            vectors = _parse_embeddings(payload, len(texts))
+            vectors = _parse_embeddings(payload, len(send))
             if vectors is None:
                 result = "http" if status != 200 else "invalid"
         tokens = None
@@ -292,15 +352,13 @@ class EndpointEmbedder:
             tokens = t if isinstance(t, int) and t >= 0 else None
         if tokens:
             record_usage(tokens=tokens)
-        try:
-            a.vault.log_activity(CONNECTOR_ID, "call", feature="recall", model=s.embeddings_model,
-                                 endpoint=s.host or None, kind=s.kind, result=result, tokens_in=tokens,
-                                 memory_ids=sorted(set(memory_ids)) or None, embeddings=len(texts))
-        except OSError:
-            pass
+        self._log(a, s, result, ids, len(send), tokens)
         if vectors is None:
             raise EmbedError("The endpoint didn't return embeddings.")
-        return vectors
+        out: list[list[float] | None] = [None] * len(texts)
+        for i, vec in zip(keep, vectors, strict=True):
+            out[i] = vec
+        return out
 
 
 def _parse_embeddings(payload: Any, n: int) -> list[list[float]] | None:

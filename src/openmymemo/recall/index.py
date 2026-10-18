@@ -177,7 +177,12 @@ class EmbeddingIndex:
             snap = self.load()
             if snap is not None and snap.model != embedder.id:
                 snap = None
-            dims = snap.dims if snap else (len(next(iter(fresh.values()))[1]) if fresh else 0)
+            new_dims = {len(v) for _, v in fresh.values()}
+            if len(new_dims) > 1:
+                return snap and len(snap.ids) or 0  # mixed answers: write nothing
+            if snap is not None and new_dims and snap.dims not in new_dims:
+                snap = None  # vectors of other dimensions: the old ones are from another model
+            dims = snap.dims if snap else (new_dims.pop() if new_dims else 0)
             ids, hashes, vectors = [], [], array("f")
             for mid, h in wanted.items():
                 got = fresh.get(mid)
@@ -214,10 +219,11 @@ class EmbeddingIndex:
         fresh: dict[str, tuple[str, list[float]]] = {}
         embedded, error = 0, None
         last_save = time.monotonic()
-        for i in range(0, len(todo), BATCH):
+        queue = list(todo)
+        while queue:
             if budget is not None and time.monotonic() - started > budget:
                 break
-            batch = todo[i:i + BATCH]
+            batch, queue = queue[:BATCH], queue[BATCH:]
             try:
                 vecs = embedder.embed([text[mid] for mid in batch], "passage", memory_ids=batch)
             except EmbedError as e:
@@ -227,8 +233,18 @@ class EmbeddingIndex:
                 error = "The embedder returned the wrong number of vectors."
                 break
             for mid, vec in zip(batch, vecs, strict=True):
+                if vec is None:  # may no longer be embedded (checked again as the request was made): drop it
+                    wanted.pop(mid, None)
+                    stale = True
+                    continue
+                if snap is not None and len(vec) != snap.dims:
+                    # The same model id answering in other dimensions: the index is from another model; rebuild.
+                    snap, have, stale = None, {}, True
+                    indexed = 0
+                    queue = [m for m in wanted if m not in fresh and m != mid and m not in batch] + queue
+                    queue = list(dict.fromkeys(queue))
                 fresh[mid] = (wanted[mid], vec)
-            embedded += len(batch)
+                embedded += 1
             if progress:
                 progress(indexed + embedded, len(wanted))
             if time.monotonic() - last_save > SAVE_EVERY:  # a long build keeps what it has so far

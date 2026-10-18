@@ -69,6 +69,7 @@ describe("SemanticSettings", () => {
       index: { model: "local/multilingual-e5-small@x", count: 12, memories: 12, current: true } }));
     await vi.advanceTimersByTimeAsync(800);
     await flushPromises();
+    expect(api.semantic).toHaveBeenCalledTimes(3); // mount, the poll that saw "done", and one final read
     expect(w.get('[data-test="ready"]').text()).toBe("On: 12 of 12 memories indexed.");
     expect(store.toast?.text).toBe("Search by meaning is on.");
   });

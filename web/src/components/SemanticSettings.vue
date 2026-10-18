@@ -29,8 +29,19 @@ function take(s: SemanticStatus) {
   if (before && ["runtime", "download", "index"].includes(before.job.phase)) {
     if (s.job.phase === "done") toast(t("sem.on"));
     else if (s.job.phase === "error" && s.job.error && s.job.code !== "runtime") toast(s.job.error, "error");
+    if (s.job.phase === "done" || s.job.phase === "error") void finalRefresh();
   }
   schedule();
+}
+
+/** One more read once the job has ended, so the index count shown is the one it finished with. */
+async function finalRefresh() {
+  try {
+    const s = await api.semantic();
+    status.value = s;
+  } catch {
+    // keep what we have
+  }
 }
 
 function schedule() {

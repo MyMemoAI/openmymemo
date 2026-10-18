@@ -16,6 +16,9 @@ if TYPE_CHECKING:
 def status(vault: Vault) -> dict[str, Any]:
     """Everything the panel shows: the switch, the chosen model, the list, the runtime, the job in progress, the
     embedder in use and this folder's index."""
+    # The job first: when it finished meanwhile, it still reads as running and the panel asks once more, so a
+    # "done" never comes with an index read before the job's last write.
+    job = local.job().as_dict()
     s = local.load_semantic()
     emb = active_embedder(vault)
     if not s.enabled:
@@ -28,7 +31,7 @@ def status(vault: Vault) -> dict[str, Any]:
         "ready": s.enabled and local_embedder() is not None,
         "models": local.models_info(), "runtime": {"installed": runtime,
                                                    "command": None if runtime else local.manual_command()},
-        "job": local.job().as_dict(),
+        "job": job,
         "embedder": None if emb is None else ("local" if not emb.remote else "endpoint"),
         "embedder_id": emb.id if emb is not None else None,
         "endpoint": endpoint_embedder(vault) is not None,

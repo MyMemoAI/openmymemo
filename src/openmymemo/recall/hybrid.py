@@ -125,12 +125,27 @@ def _keyword_scores(mems: Sequence[Memory], titles: dict[str, str], query: str,
 _query_cache: OrderedDict[tuple[str, str], list[float]] = OrderedDict()
 
 
+def forget_queries(embedder_id: str) -> None:
+    for key in [k for k in _query_cache if k[0] == embedder_id]:
+        del _query_cache[key]
+
+
 def _query_vector(embedder: Embedder, query: str) -> list[float]:
     key = (embedder.id, query)
+    if embedder.id.startswith("endpoint/"):
+        # Not cached: the model behind an endpoint's name can change without notice, and its answer is how the
+        # change (other dimensions) is noticed. A local model's id includes its file's hash, so it can't.
+        _query_cache.pop(key, None)
+        vec = embedder.embed([query], "query")[0]
+        if vec is None:
+            raise EmbedError("The query may not be sent to this model.")
+        return vec
     if key in _query_cache:
         _query_cache.move_to_end(key)
         return _query_cache[key]
     vec = embedder.embed([query], "query")[0]
+    if vec is None:
+        raise EmbedError("The query may not be sent to this model.")
     _query_cache[key] = vec
     while len(_query_cache) > 256:
         _query_cache.popitem(last=False)
@@ -240,8 +255,20 @@ def search(vault: Vault, connector: Connector | None, query: str, *, topics: lis
             snap = idx.load()
             if snap is not None and snap.model == emb.id:
                 qv = _query_vector(emb, query)
-                vec_hits = idx.nearest(snap, qv, set(by_id), max(limit, RERANK_TOP), emb.min_similarity)
-                mode = "hybrid"
+                if len(qv) != snap.dims:
+                    # The model behind this id now answers in other dimensions: neither the index nor the cached
+                    # query vectors are from it. Start again.
+                    forget_queries(emb.id)
+                    idx.clear()
+                    refreshed = idx.refresh(emb, vault.memories(), budget=refresh_budget)
+                    snap = idx.load()
+                    qv = _query_vector(emb, query)
+                # Only memories the embedder may see now: a vector stored before a memory became private (or left
+                # the read scope) is never used for a remote embedder's search.
+                allowed = {mid for mid, m in by_id.items() if not emb.remote or emb.may_embed(m)}
+                if snap is not None and len(qv) == snap.dims:
+                    vec_hits = idx.nearest(snap, qv, allowed, max(limit, RERANK_TOP), emb.min_similarity)
+                    mode = "hybrid"
         except EmbedError as e:
             log.info("search: no vectors this time (%s)", e)
         except Exception as e:  # noqa: BLE001 - a broken index must never break search
@@ -341,6 +368,10 @@ def similar(vault: Vault, text: str, *, topic: str | None = None, connector: Con
         if snap is None or snap.model != emb.id:
             return []
         vec = emb.embed([text], "passage")[0]
+        if vec is None or len(vec) != snap.dims:
+            return []
+        if emb.remote:
+            by_id = {mid: m for mid, m in by_id.items() if emb.may_embed(m)}
         floor = emb.min_similarity if min_similarity is None else min_similarity
         return [(s, by_id[mid]) for s, mid in idx.nearest(snap, vec, set(by_id), limit, floor)]
     except EmbedError:
