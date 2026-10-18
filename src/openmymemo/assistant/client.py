@@ -7,7 +7,8 @@ API, over ``httpx2`` (product-design.md §17.2). No vendor SDK.
   either way, and the answer is checked here (``schema.clean``) regardless.
 * **Never followed:** redirects (a local server that redirects elsewhere would send memory text there). A local
   endpoint is never reached through a proxy, and must still be on loopback when the request is made.
-* **Errors** are ``EndpointError`` with a message for the person; they never contain the key or the text sent.
+* **Failures** are returned, not raised: a ``Failure`` with a message for the person and a short code for the
+  activity log. Its message never contains the key or the text sent.
 """
 
 from __future__ import annotations
@@ -25,13 +26,16 @@ ANTHROPIC_VERSION = "2023-06-01"
 TRANSPORT: httpx2.BaseTransport | None = None  # tests put a fake endpoint here
 
 
-class EndpointError(Exception):
+@dataclass
+class Failure:
     """A call that didn't produce an answer. ``code`` is short and stable (it goes in the activity log)."""
 
-    def __init__(self, message: str, code: str = "error", status: int | None = None):
-        super().__init__(message)
-        self.code = code
-        self.status = status
+    message: str
+    code: str = "error"
+    status: int | None = None
+
+    def __str__(self) -> str:
+        return self.message
 
 
 @dataclass
@@ -47,7 +51,7 @@ class Reply:
         return (self.input_tokens or 0) + (self.output_tokens or 0)
 
 
-def _status_message(status: int, payload: Any) -> EndpointError:
+def _status_message(status: int, payload: Any) -> Failure:
     detail = ""
     if isinstance(payload, dict):
         err = payload.get("error")
@@ -61,7 +65,7 @@ def _status_message(status: int, payload: Any) -> EndpointError:
             kind = "quota" if code == "quota_exceeded" else "plan"
             text = ("This month's allowance is used up." if kind == "quota"
                     else "This account doesn't include the Assistant.")
-            return EndpointError(text, kind, status)
+            return Failure(text, kind, status)
     detail = " ".join(detail.split())[:200]
     texts = {
         401: "The endpoint didn't accept the key.",
@@ -73,7 +77,7 @@ def _status_message(status: int, payload: Any) -> EndpointError:
     }
     text = texts.get(status) or (f"The endpoint had a problem (HTTP {status})." if status >= 500
                                  else f"The endpoint refused the request (HTTP {status}).")
-    return EndpointError(f"{text} {detail}".strip() if detail and status not in (401, 403) else text,
+    return Failure(f"{text} {detail}".strip() if detail and status not in (401, 403) else text,
                          "rate_limited" if status == 429 else "http", status)
 
 
@@ -83,19 +87,20 @@ def _client(settings: Settings, timeout: float) -> httpx2.Client:
                          follow_redirects=False, trust_env=not local)
 
 
-def _post(client: httpx2.Client, url: str, headers: dict, body: dict) -> tuple[int, Any]:
+def _post(client: httpx2.Client, url: str, headers: dict, body: dict) -> tuple[int, Any] | Failure:
     try:
         r = client.post(url, json=body, headers=headers)
     except httpx2.TimeoutException:
-        raise EndpointError("The endpoint took too long to answer.", "timeout") from None
-    except httpx2.HTTPError as e:
-        raise EndpointError(f"The endpoint couldn't be reached ({type(e).__name__}).", "unreachable") from None
+        return Failure("The endpoint took too long to answer.", "timeout")
+    except httpx2.HTTPError:
+        return Failure("The endpoint couldn't be reached. Check that it is running and the address is right.",
+                       "unreachable")
     try:
         payload = r.json()
     except ValueError:
         payload = None
     if 300 <= r.status_code < 400:
-        raise EndpointError("The endpoint redirected elsewhere; enter its final address.", "redirect", r.status_code)
+        return Failure("The endpoint redirected elsewhere; enter its final address.", "redirect", r.status_code)
     return r.status_code, payload
 
 
@@ -104,10 +109,10 @@ def _format_refused(status: int) -> bool:
 
 
 def chat(settings: Settings, system: str, user: str, *, max_tokens: int, schema: dict | None = None,
-         feature: str | None = None, timeout: float | None = None) -> Reply:
-    """One request; raises EndpointError. ``schema`` (already the wire form) asks for structured output."""
+         feature: str | None = None, timeout: float | None = None) -> Reply | Failure:
+    """One request: the reply, or a Failure. ``schema`` (already the wire form) asks for structured output."""
     if settings.kind == "local" and not is_loopback(settings.endpoint):
-        raise EndpointError("A model on this computer must have a local address.", "not_local")
+        return Failure("A model on this computer must have a local address.", "not_local")
     base = settings.endpoint
     timeout = timeout or settings.timeout
     headers = {"User-Agent": f"OpenMyMemo/{__version__}", "Accept": "application/json"}
@@ -120,14 +125,17 @@ def chat(settings: Settings, system: str, user: str, *, max_tokens: int, schema:
                                     "messages": [{"role": "user", "content": user}]}
             if schema:
                 body["output_config"] = {"format": {"type": "json_schema", "schema": schema}}
-            status, payload = _post(client, url, headers, body)
-            if schema and _format_refused(status):
+            sent = _post(client, url, headers, body)
+            if schema and not isinstance(sent, Failure) and _format_refused(sent[0]):
                 body.pop("output_config")
-                status, payload = _post(client, url, headers, body)
+                sent = _post(client, url, headers, body)
+            if isinstance(sent, Failure):
+                return sent
+            status, payload = sent
             if status != 200 or not isinstance(payload, dict):
-                raise _status_message(status, payload)
+                return _status_message(status, payload)
             if payload.get("stop_reason") == "refusal":
-                raise EndpointError("The model declined to answer.", "refused")
+                return Failure("The model declined to answer.", "refused")
             blocks = payload.get("content") if isinstance(payload.get("content"), list) else []
             text = "".join(b.get("text", "") for b in blocks if isinstance(b, dict) and b.get("type") == "text")
             usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
@@ -144,19 +152,22 @@ def chat(settings: Settings, system: str, user: str, *, max_tokens: int, schema:
             if schema:
                 body["response_format"] = {"type": "json_schema",
                                            "json_schema": {"name": "result", "schema": schema, "strict": False}}
-            status, payload = _post(client, url, headers, body)
-            if schema and _format_refused(status):
+            sent = _post(client, url, headers, body)
+            if schema and not isinstance(sent, Failure) and _format_refused(sent[0]):
                 body.pop("response_format")
-                status, payload = _post(client, url, headers, body)
+                sent = _post(client, url, headers, body)
+            if isinstance(sent, Failure):
+                return sent
+            status, payload = sent
             if status != 200 or not isinstance(payload, dict):
-                raise _status_message(status, payload)
+                return _status_message(status, payload)
             choices = payload.get("choices") if isinstance(payload.get("choices"), list) else []
             message = choices[0].get("message") if choices and isinstance(choices[0], dict) else None
             text = message.get("content") if isinstance(message, dict) else None
             if not isinstance(text, str):
                 if isinstance(message, dict) and message.get("refusal"):
-                    raise EndpointError("The model declined to answer.", "refused")
-                raise EndpointError("The endpoint's answer had no text.", "invalid")
+                    return Failure("The model declined to answer.", "refused")
+                return Failure("The endpoint's answer had no text.", "invalid")
             usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
             tokens_in, tokens_out = usage.get("prompt_tokens"), usage.get("completion_tokens")
     ms = int((time.monotonic() - started) * 1000)

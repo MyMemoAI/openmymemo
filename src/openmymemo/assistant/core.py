@@ -267,12 +267,11 @@ class Assistant:
             system = (f"{instructions.strip()}\n\n{DATA_RULES.format(tag=tag)}\n\nAnswer with one JSON object only, "
                       f"matching this JSON schema:\n{json.dumps(wire_schema(schema), ensure_ascii=False)}")
             user = self._render(blocks, tag) or f"<{tag} n=\"1\" label=\"empty\">\n</{tag}>"
-            try:
-                reply = endpoint.chat(self.settings, system, user, max_tokens=max_tokens, schema=wire_schema(schema),
-                                      feature=feature, timeout=timeout)
-            except endpoint.EndpointError as e:
-                self.last_error = str(e)
-                self._log(feature, e.code, model=self.settings.model, memory_ids=memory_ids)
+            reply = endpoint.chat(self.settings, system, user, max_tokens=max_tokens, schema=wire_schema(schema),
+                                  feature=feature, timeout=timeout)
+            if isinstance(reply, endpoint.Failure):
+                self.last_error = reply.message
+                self._log(feature, reply.code, model=self.settings.model, memory_ids=memory_ids)
                 return None
             if reply.tokens:
                 record_usage(tokens=reply.tokens)
@@ -308,12 +307,12 @@ class Assistant:
         try:
             reply = endpoint.chat(s, "Reply with the single word OK.", "Test from OpenMyMemo.", max_tokens=256,
                                   feature="test")
-        except endpoint.EndpointError as e:
-            self._log("test", e.code, model=s.model)
-            return {"ok": False, "model": s.model or None, "ms": None, "error": str(e)}
         except Exception as e:  # noqa: BLE001
             log.warning("Assistant: test failed (%s)", type(e).__name__)
             return {"ok": False, "model": s.model or None, "ms": None, "error": "Something went wrong."}
+        if isinstance(reply, endpoint.Failure):
+            self._log("test", reply.code, model=s.model)
+            return {"ok": False, "model": s.model or None, "ms": None, "error": reply.message}
         if reply.tokens:
             record_usage(tokens=reply.tokens)
         self._log("test", "ok", reply=reply)

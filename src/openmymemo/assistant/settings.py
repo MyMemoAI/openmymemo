@@ -115,10 +115,9 @@ class Settings:
                 return "MyMemo's hosted model isn't available yet."
         elif not self.model:
             return "Choose a model."
-        try:
-            check_url(self.endpoint, self.kind)
-        except SettingsError as e:
-            return str(e)
+        bad = url_problem(self.endpoint, self.kind)
+        if bad:
+            return bad
         if self.kind == "key" and not self.api_key:
             return "Enter your API key."
         return None
@@ -137,26 +136,34 @@ def is_loopback(url: str) -> bool:
         return False
 
 
-def check_url(url: str, kind: str) -> str:
-    """A base URL as stored: no user, query or fragment, no trailing slash. ``local`` must be loopback; anything else
-    must be https, or http on loopback (a proxy on this computer). Raises SettingsError."""
+def url_problem(url: str, kind: str) -> str | None:
+    """Why a base URL can't be used, for the person; None when it can. ``local`` must be loopback; anything else
+    must be https, or http on loopback (a proxy on this computer). No user, query or fragment."""
     url = url.strip().rstrip("/")
     try:
         parts = urlsplit(url)
         parts.port  # noqa: B018 - raises ValueError on a bad port
     except ValueError:
-        raise SettingsError("That isn't a valid web address.") from None
+        return "That isn't a valid web address."
     if not parts.hostname or len(url) > 300 or any(c.isspace() for c in url):
-        raise SettingsError("That isn't a valid web address.")
+        return "That isn't a valid web address."
     if parts.username is not None or parts.password is not None or parts.query or parts.fragment or "#" in url:
-        raise SettingsError("Enter the address only, without a user name, ? or #.")
+        return "Enter the address only, without a user name, ? or #."
     if parts.scheme not in ("http", "https"):
-        raise SettingsError("The address must start with http:// or https://.")
+        return "The address must start with http:// or https://."
     if kind == "local" and not is_loopback(url):
-        raise SettingsError("A model on this computer must have a local address (127.0.0.1 or localhost).")
+        return "A model on this computer must have a local address (127.0.0.1 or localhost)."
     if parts.scheme == "http" and not is_loopback(url):
-        raise SettingsError("The address must start with https:// (http:// only for a server on this computer).")
-    return url
+        return "The address must start with https:// (http:// only for a server on this computer)."
+    return None
+
+
+def check_url(url: str, kind: str) -> str:
+    """A base URL as stored (no trailing slash); raises SettingsError with ``url_problem``'s reason."""
+    bad = url_problem(url, kind)
+    if bad:
+        raise SettingsError(bad)
+    return url.strip().rstrip("/")
 
 
 # ---- the Keychain (macOS) ----------------------------------------------------------------------------------
@@ -365,9 +372,7 @@ def save_settings(*, enabled: bool | None = None, kind: str | None = None, proto
         if base_url is not None:
             raw["base_url"] = check_url(base_url, new_kind) if base_url.strip() else ""
         elif raw.get("base_url"):
-            try:
-                check_url(raw["base_url"], new_kind)
-            except SettingsError:
+            if url_problem(raw["base_url"], new_kind):
                 raw["base_url"] = ""
         if model is not None:
             if len(model) > 200 or any(c.isspace() for c in model.strip()):

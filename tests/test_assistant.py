@@ -428,7 +428,8 @@ def test_panel_routes(vault, fake):
                                                      "model": "claude-haiku-5-5", "api_key": "sk-secret",
                                                      "features": {"tidy": True}, "caps": {"calls": 50}}).json()
     assert s["enabled"] and s["has_key"] and s["ready"] and s["features"]["tidy"] and s["caps"]["calls"] == 50
-    assert "sk-secret" not in json.dumps(s) and "api.anthropic.com" in s["where"]
+    assert "sk-secret" not in json.dumps(s) and s["host"] == "api.anthropic.com"
+    assert s["where"].startswith("Memory text goes to " + s["host"] + ",")
     catalog = api.get("/api/clients", headers=H).json()
     assert catalog["assistant"]["id"] == "assistant" and all(c["id"] != "assistant" for c in catalog["custom"])
     r = api.post("/api/assistant/test", headers=H).json()
@@ -451,7 +452,8 @@ def test_cli(vault, fake):
     r = runner.invoke(app, [*v, "assistant", "set", "--kind", "key", "--protocol", "openai", "--model", "gpt-x",
                             "--key-stdin", "--feature", "sort=off", "--cap-calls", "10"], input="sk-cli\n")
     assert r.exit_code == 0, r.stdout
-    assert "gpt-x" in r.stdout and "sort off" in r.stdout and "api.openai.com" in r.stdout and "sk-cli" not in r.stdout
+    assert "gpt-x" in r.stdout and "sort off" in r.stdout and "sk-cli" not in r.stdout
+    assert "  Endpoint:  https://api.openai.com/v1" in r.stdout.splitlines()
     assert Connectors(vault).get("assistant").kind == "assistant"
     r = runner.invoke(app, [*v, "assistant", "test"])
     assert r.exit_code == 0 and "gpt-x answered in" in r.stdout

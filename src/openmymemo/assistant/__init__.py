@@ -12,7 +12,7 @@ has a rule-based fallback, and nothing here runs until the person turns it on.
 The rest of OpenMyMemo imports from here.
 """
 
-from .client import EndpointError
+from .client import Failure
 from .core import (
     CONNECTOR_ID,
     CONNECTOR_KIND,
@@ -26,6 +26,6 @@ from .settings import FEATURES, KINDS, PROTOCOLS, Settings, SettingsError, load_
 
 __all__ = [
     "CONNECTOR_ID", "CONNECTOR_KIND", "CONNECTOR_NAME", "FEATURES", "KINDS", "PROTOCOLS", "Assistant", "Data",
-    "EndpointError", "Settings", "SettingsError", "ensure_connector", "load_settings", "save_settings",
+    "Failure", "Settings", "SettingsError", "ensure_connector", "load_settings", "save_settings",
     "where_text_goes",
 ]
