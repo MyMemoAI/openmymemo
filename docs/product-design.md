@@ -658,16 +658,18 @@ Today `memory_search` and `openmymemo search` score keywords: Chinese character 
     - the model, into the per-computer application folder next to `cloud.json` (§16.4), never into the memory folder.
 
     The model is fetched from a fixed URL with its SHA-256 pinned in the code, and a file that doesn't match is deleted. The panel shows progress and the size before starting. Turning the switch off deletes the model and the index.
-  - **The default model: `multilingual-e5-small`, int8-quantized ONNX.**
-    - About 120 MB on disk, 384 dimensions, MIT license.
-    - Trained on about 100 languages, Chinese and English included.
-    - It embeds a 1,000-memory vault in well under a minute on a laptop CPU, and a query in milliseconds.
-  - **Candidates measured against it on the recall test set** before the default is fixed:
-    - `granite-embedding-97m-multilingual-r2` (IBM, Apache 2.0, about 100 MB quantized; IBM reports 60.3 vs 50.9 for `multilingual-e5-small` on multilingual MTEB retrieval, but its Chinese quality is unpublished);
-    - `EmbeddingGemma-300m` (Google, under 200 MB quantized, Gemma Terms of Use).
+  - **The person picks the model; one is recommended.** Settings → Assistant shows a short list with each model's download size, languages and license. The recommended one is preselected:
 
-    The one with the better Chinese and English hit rate becomes the default.
-  - **A larger model on request.** "Better quality (larger download)" offers `Qwen3-Embedding-0.6B` (Apache 2.0, about 640 MB at 8-bit), the strongest of these for Chinese.
+    | Model | Download | License | |
+    | --- | --- | --- | --- |
+    | `multilingual-e5-small`, int8 ONNX | about 120 MB | MIT | **Recommended (default).** 384 dimensions, about 100 languages including Chinese and English. Embeds a 1,000-memory vault in well under a minute on a laptop CPU, and a query in milliseconds. |
+    | `granite-embedding-97m-multilingual-r2` (IBM) | about 100 MB | Apache 2.0 | Similar size. IBM reports 60.3 vs 50.9 for `multilingual-e5-small` on multilingual MTEB retrieval; its Chinese quality is unpublished. |
+    | `EmbeddingGemma-300m` (Google) | under 200 MB quantized | Gemma Terms of Use | Mid-size, built for on-device use. |
+    | `Qwen3-Embedding-0.6B` | about 640 MB at 8-bit | Apache 2.0 | **Best quality, larger download.** The strongest of these for Chinese. |
+
+    - The list lives in the code with each model's URL and pinned SHA-256, so a release can add or replace a model.
+    - The recall test set reports every listed model's hit rate in CI. A model that falls behind is dropped from the list, and if another one clearly beats the recommended model, the recommendation changes in a release.
+    - People who already use a model keep it until they choose another.
   - **Not considered:** models with non-commercial licenses, such as the Jina v5 embeddings (CC BY-NC 4.0), and single-language models such as `bge-small-zh`.
   - **Switching models.** Changing the model rebuilds the index (§17.4, embedding index). The model name is stored in the index manifest, so an index is never mixed across models.
 - **Measured, not assumed.** `tests/recall/` holds a fixed English and Chinese question set over a demo vault. CI reports hit rate for keyword, keyword + vectors, and keyword + vectors + rerank (the last with a recorded model response), so a change that makes recall worse is visible.
@@ -732,7 +734,7 @@ Each step is its own release-sized piece and its own PRs. Each step is useful al
 ### 17.10 Open questions
 
 1. Where tidy-up runs on a schedule: in the Mac app and any running panel, or also as an OS scheduled task when nothing is running?
-2. ~~The default local embedding model and its download size~~ Decided 2026-10-18: opt-in from Settings, downloaded when turned on, never bundled; about 120 MB for the default (§17.4). Which of the measured candidates becomes the default is settled by the recall test set.
+2. ~~The default local embedding model and its download size~~ Decided 2026-10-18: opt-in from Settings, downloaded when turned on, never bundled; about 120 MB for the default (§17.4). The person chooses from a short list; `multilingual-e5-small` is the recommended default, and `Qwen3-Embedding-0.6B` the larger, better-quality choice.
 3. Should session-end extraction be on by default for an app once the Assistant is on, or always asked per app? Leaning: asked per app on first use.
 4. Should a proposal's evidence from transcripts expire (§11, question 2), given it is now gathered automatically?
 5. Reverse sync — writing selected topics back to `CLAUDE.md` / `AGENTS.md` for apps without MCP — needs no model. Should it be its own feature outside the Assistant?
