@@ -165,7 +165,10 @@ def _is_undo(rec: dict, p: dict | None) -> bool:
 
 def render_log_md(vault: Vault) -> str:
     """The change log (MEMORY_FORMAT.md §4.2): ``## YYYY-MM-DD`` in local time, newest day first, one line per
-    history record, newest first. The text of private memories is left out, as in MEMORY.md."""
+    history record, newest first. The text of private memories is left out, as in MEMORY.md. A batch's changes
+    (a tidy-up) are listed under one line per day: "- Tidy-up, 2026-10-25: 6 changes", then indented."""
+    from .proposals import batch_label
+
     titles = {t["slug"]: t["title"] for t in vault.topics()}
     private_topics = vault.private_topics()
     current = {m.id: m for m in vault.memories("active") + vault.memories("archived")}
@@ -227,26 +230,42 @@ def render_log_md(vault: Vault) -> str:
             return f"- {who} edited {where}: {text} {ref}"
         return f"- {who} edited {where}: {quote(prev.get('content'))} → {text} {ref}"
 
+    def batch_of(rec: dict) -> str | None:
+        """The batch (e.g. a tidy-up) of the proposal this change applied; undoing one isn't part of it."""
+        pid = rec.get("proposal_id")
+        p = proposal(str(pid)) if pid else None
+        if p is None or not p.get("batch_id") or _is_undo(rec, p):
+            return None
+        return str(p["batch_id"])
+
     previous: dict[str, dict] = {}
-    entries: list[tuple[str, str]] = []  # (local date, line), oldest first
+    entries: list[tuple[str, str, str | None]] = []  # (local date, line, batch), oldest first
     for rec in vault.history(limit=sys.maxsize)[::-1]:
         mid = str(rec.get("memory_id", ""))
         try:
             day = datetime.fromisoformat(str(rec.get("at"))).astimezone().date().isoformat()
         except ValueError:
             day = str(rec.get("at") or "")[:10] or "unknown date"
-        entries.append((day, line(rec, previous.get(mid))))
+        entries.append((day, line(rec, previous.get(mid)), batch_of(rec)))
         previous[mid] = rec
 
     out = [LOG_HEADER]
     if not entries:
         out.append("\n_Nothing has changed yet._\n")
     day = None
-    for d, text in reversed(entries[-LOG_LIMIT:]):
+    shown = entries[-LOG_LIMIT:][::-1]
+    grouped: set[tuple[str, str]] = set()
+    for d, text, batch in shown:
         if d != day:
             out.append(f"\n## {d}\n")
             day = d
-        out.append(text + "\n")
+        if batch is None:
+            out.append(text + "\n")
+        elif (d, batch) not in grouped:  # a batch's changes that day, under one line
+            grouped.add((d, batch))
+            lines = [t for dd, t, b in shown if dd == d and b == batch]
+            out.append(f"- {batch_label(batch, len(lines))}\n")
+            out.extend(f"  {t}\n" for t in lines)
     if len(entries) > LOG_LIMIT:
         out.append(f"\n_{len(entries) - LOG_LIMIT} older entries are in .openmymemo/history.jsonl._\n")
     return "".join(out)

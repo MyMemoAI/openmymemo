@@ -8,6 +8,7 @@ has a rule-based fallback, and nothing here runs until the person turns it on.
 * ``core``: ``Assistant`` — ``available(feature)``, ``json_call(...)``, ``propose(...)`` — and the ``assistant``
   connector.
 * ``features``: model-powered import splitting and sorting suggestions (§17.5).
+* ``tidy``: Tidy up (§17.6), a batch of proposals, and its schedule in the panel's process.
 
 The rest of OpenMyMemo imports from here.
 """

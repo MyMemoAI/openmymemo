@@ -93,6 +93,9 @@ function onKey(e: KeyboardEvent) {
         </div>
         <div class="flex gap-2.5"><span class="plus" aria-hidden="true">+</span><span class="min-w-0 break-words">{{ after }}</span></div>
       </template>
+      <div v-if="p.until" class="text-[13px] text-muted">
+        {{ p.before_until ? t("chg.untilWas", { date: p.until, before: p.before_until }) : t("chg.until", { date: p.until }) }}
+      </div>
       <div v-if="moved" class="flex items-center gap-1.5 text-[13px] text-muted">
         <AppIcon name="arrowRight" :size="13" />{{ t("chg.moved", { from: topicTitle(p.before_topic), to: topicTitle(topic) }) }}
       </div>
