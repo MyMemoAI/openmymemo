@@ -8,6 +8,7 @@ completions and ``/models``. Tests queue error answers from errors.json with ``f
 
 from __future__ import annotations
 
+import asyncio
 import json
 import secrets
 from urllib.parse import parse_qsl
@@ -38,6 +39,10 @@ class FakeAssistantService(FakeService):
         self.answer = lambda body: json.dumps({"items": [{"text": "ok"}]})
         self.models = json.loads(json.dumps(MODELS["response"]))
         self.expires_in = TOKEN["response"]["expires_in"]
+        self.member: dict | None = None  # the optional masked `member` in /models (models.json), when set
+        # Runs inside a chat request before it is answered (off the event loop, so it may call this service):
+        # tests use it to change the sign-in while a request is in flight. Returns an errors.json name or None.
+        self.on_chat = None
         super().__init__()
 
     def fail(self, *names: str) -> None:
@@ -49,6 +54,11 @@ class FakeAssistantService(FakeService):
         self.access.add(access)
         self.refresh = refresh
         return {**TOKEN["response"], "access_token": access, "refresh_token": refresh, "expires_in": self.expires_in}
+
+    def tokens_for_keep(self) -> dict:
+        """A fresh grant as `mymemo.keep` takes it: a sign-in made directly (as another process would)."""
+        t = self._issue()
+        return {"access": t["access_token"], "refresh": t["refresh_token"], "expires_in": t["expires_in"], "member": {}}
 
     def expire_access(self) -> None:
         """Every access token stops working (as after an hour); the refresh token still works."""
@@ -119,6 +129,11 @@ class FakeAssistantService(FakeService):
         @app.post(f"{PATH}/chat/completions")
         async def chat(request: Request):
             self.chat_auth.append(request.headers.get("authorization"))
+            hook, self.on_chat = self.on_chat, None  # once
+            if hook is not None:
+                forced = await asyncio.to_thread(hook)
+                if forced:
+                    return self._error(forced)
             if not authorized(request):
                 return self._error("invalid_token")
             body = await request.json()
@@ -138,6 +153,6 @@ class FakeAssistantService(FakeService):
             if not authorized(request):
                 return self._error("invalid_token")
             plan = {**self.models["plan"], "plan_url": f"{self.base}/openmymemo/assistant"}
-            return JSONResponse({**self.models, "plan": plan})
+            return JSONResponse({**self.models, "plan": plan, **({"member": self.member} if self.member else {})})
 
         return app

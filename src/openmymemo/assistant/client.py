@@ -12,11 +12,14 @@ API, over ``httpx2`` (product-design.md §17.2). No vendor SDK.
 * **MyMemo's hosted model** (kind ``mymemo``, §17.8) is the OpenAI-compatible shape with its access token as the
   bearer and the feature in ``X-OpenMyMemo-Feature``. The token is refreshed before it expires and once on a 401
   (then the request is sent again); a 402, 429 or 503 becomes a pause (``mymemo.note_failure``) during which the
-  Assistant makes no requests and features use their rules.
+  Assistant makes no requests and features use their rules. Each request is bound to the sign-in it started with
+  (``mymemo.Session``): if another sign-in, a sign-out or another service replaced it meanwhile, the request stops
+  instead of borrowing the new sign-in's token or sending its own elsewhere.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -110,6 +113,16 @@ def _post(client: httpx2.Client, url: str, headers: dict, body: dict | None,
     return r.status_code, payload, {k.lower(): v for k, v in r.headers.items()}
 
 
+def _signin_failure(why: str) -> Failure:
+    """Why a MyMemo request can't go on (``mymemo.refresh``'s reasons), as a Failure."""
+    if why == "signed_out":
+        return Failure(_mymemo.SIGNED_OUT, "signed_out", 401)
+    if why == "unavailable":
+        return Failure("MyMemo couldn't renew the sign-in just now. OpenMyMemo used its rules this time.",
+                       "unreachable", 401)
+    return Failure(_mymemo.CHANGED, "signin_changed")
+
+
 def _format_refused(status: int) -> bool:
     return status in (400, 422)
 
@@ -123,6 +136,18 @@ def chat(settings: Settings, system: str, user: str, *, max_tokens: int, schema:
     if settings.kind == "local" and not is_loopback(settings.endpoint):
         return Failure("A model on this computer must have a local address.", "not_local")
     base = settings.endpoint
+    sess: _mymemo.Session | None = None
+    if settings.kind == "mymemo":  # bound to the sign-in this request starts with, its service included
+        sess = _mymemo.session(settings)
+        if sess is None:
+            return _signin_failure("changed")
+        sess, why = _mymemo.access_token(settings, sess)
+        if sess is None:
+            return _signin_failure(why)
+        base = _mymemo.endpoint_for(settings, sess)
+        bad = url_problem(base, settings.kind)
+        if bad:
+            return Failure(bad, "bad_address")
     timeout = timeout or settings.timeout
     headers = {"User-Agent": f"OpenMyMemo/{__version__}", "Accept": "application/json"}
     started = time.monotonic()
@@ -151,8 +176,8 @@ def chat(settings: Settings, system: str, user: str, *, max_tokens: int, schema:
             tokens_in, tokens_out = usage.get("input_tokens"), usage.get("output_tokens")
         else:
             url = base + "/chat/completions"
-            mymemo = settings.kind == "mymemo"
-            secret = _mymemo.access_token(settings) if mymemo else settings.secret
+            mymemo = sess is not None
+            secret = sess.token if sess is not None else settings.secret
             if secret:
                 headers["Authorization"] = f"Bearer {secret}"
             if mymemo and feature:
@@ -171,10 +196,11 @@ def chat(settings: Settings, system: str, user: str, *, max_tokens: int, schema:
                 return sent
 
             sent = send()
-            if mymemo and not isinstance(sent, Failure) and sent[0] == 401:
-                fresh = _mymemo.refresh(settings)
+            if sess is not None and not isinstance(sent, Failure) and sent[0] == 401:
+                fresh, why = _mymemo.refresh(settings, sess)  # only this request's sign-in, at its service
                 if not fresh:
-                    return Failure(_mymemo.SIGNED_OUT, "signed_out", 401)
+                    return _signin_failure(why)
+                sess = dataclasses.replace(sess, token=fresh)
                 headers["Authorization"] = f"Bearer {fresh}"
                 sent = send()
             if isinstance(sent, Failure):
@@ -182,14 +208,14 @@ def chat(settings: Settings, system: str, user: str, *, max_tokens: int, schema:
             status, payload, response_headers = sent
             if mymemo and status == 401:
                 return Failure(_mymemo.SIGNED_OUT, "signed_out", 401)
-            if mymemo and status != 200:
-                held = _mymemo.note_failure(settings, status, payload, response_headers)
+            if sess is not None and status != 200:
+                held = _mymemo.note_failure(settings, sess, status, payload, response_headers)
                 if held:
                     return Failure(_mymemo.hold_message(held), held["code"], status)
             if status != 200 or not isinstance(payload, dict):
                 return _status_message(status, payload)
-            if mymemo:
-                _mymemo.clear_hold(settings)
+            if sess is not None:
+                _mymemo.clear_hold(settings, sess)
             choices = payload.get("choices") if isinstance(payload.get("choices"), list) else []
             message = choices[0].get("message") if choices and isinstance(choices[0], dict) else None
             text = message.get("content") if isinstance(message, dict) else None
@@ -206,22 +232,32 @@ def chat(settings: Settings, system: str, user: str, *, max_tokens: int, schema:
                  output_tokens=as_int(tokens_out), ms=ms)
 
 
-def get_json(settings: Settings, path: str, *, timeout: float = 20.0) -> tuple[int, Any, dict[str, str]] | Failure:
-    """GET ``endpoint + path`` with MyMemo's token (refreshed once on 401), for ``GET /models``. Same rules as
-    ``chat``: the address is checked, redirects aren't followed."""
-    bad = url_problem(settings.endpoint, settings.kind)
+def get_json(settings: Settings, sess: _mymemo.Session, path: str, *, timeout: float = 20.0
+             ) -> tuple[int, Any, dict[str, str], _mymemo.Session] | Failure:
+    """GET ``path`` at the service ``sess`` signed in to, with its token (refreshed once on 401, only while ``sess``
+    is still the stored sign-in), for ``GET /models``. Returns the session in use last. Same rules as ``chat``: the
+    address is checked, redirects aren't followed."""
+    current, why = _mymemo.access_token(settings, sess)
+    if current is None:
+        return _signin_failure(why)
+    sess = current
+    base = _mymemo.endpoint_for(settings, sess)
+    bad = url_problem(base, settings.kind)
     if bad:
         return Failure(bad, "bad_address")
     headers = {"User-Agent": f"OpenMyMemo/{__version__}", "Accept": "application/json",
-               "Authorization": f"Bearer {_mymemo.access_token(settings)}"}
+               "Authorization": f"Bearer {sess.token}"}
     with _client(settings, timeout) as client:
-        got = _post(client, settings.endpoint + path, headers, None, method="GET")
+        got = _post(client, base + path, headers, None, method="GET")
         if not isinstance(got, Failure) and got[0] == 401:
-            fresh = _mymemo.refresh(settings)
+            fresh, why = _mymemo.refresh(settings, sess)
             if not fresh:
-                return Failure(_mymemo.SIGNED_OUT, "signed_out", 401)
+                return _signin_failure(why)
+            sess = dataclasses.replace(sess, token=fresh)
             headers["Authorization"] = f"Bearer {fresh}"
-            got = _post(client, settings.endpoint + path, headers, None, method="GET")
-        if not isinstance(got, Failure) and got[0] == 401:
+            got = _post(client, base + path, headers, None, method="GET")
+        if isinstance(got, Failure):
+            return got
+        if got[0] == 401:
             return Failure(_mymemo.SIGNED_OUT, "signed_out", 401)
-        return got
+        return (*got, sess)

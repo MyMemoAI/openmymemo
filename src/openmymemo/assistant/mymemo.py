@@ -9,6 +9,15 @@ change what the Assistant does. The endpoint itself is OpenAI-compatible and cal
   ``assistant.json``. An access token is refreshed shortly before it expires and when the endpoint answers 401; the
   refresh token rotates with each refresh. Refreshing happens under the settings lock, so two processes never spend
   the same refresh token. A refresh MyMemo refuses signs this computer out.
+* **Each sign-in is its own generation.** A new sign-in gets a random ``generation`` stored with its tokens and its
+  normalized service. A request captures a ``Session`` (service, generation, token) when it starts; refreshing,
+  reusing a token another process refreshed, the retry after a 401, pauses and sign-out all go ahead only while the
+  stored sign-in is still that generation at that service, checked under the lock. Otherwise the request stops and
+  the feature uses its rules: a request never carries another sign-in's token, never sends its own to another
+  service, and never writes over a newer sign-in.
+* **The account** shown is only one this sign-in authenticated: the MyMemo Cloud account whose device token was
+  exchanged, or a masked ``member`` in the service's token or ``/models`` answer. A browser sign-in is otherwise
+  "signed in to MyMemo at <host>".
 * **Pauses.** MyMemo answers 402 when the account has no Assistant plan (``plan_required``) or this month's
   allowance is used up (``quota_exceeded``), and 429 or 503 with ``Retry-After`` when busy. Each is kept as a
   ``hold`` with an end time; until then the Assistant makes no request and every feature takes its rule-based path
@@ -21,10 +30,14 @@ Prices, allowances and plan details are the service's; this file only passes on 
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import logging
+import secrets
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from .. import cloud
 from ..cloud import CLIENT_ID, CloudError, Linker, Outcome, PendingLink, member_fields
@@ -44,6 +57,7 @@ HOLD_MAX = timedelta(days=32)
 RETRY_DEFAULT = {"rate_limited": 60, "unavailable": 30}
 RETRY_MAX = 3600
 SIGNED_OUT = "Signed out of MyMemo. Sign in again in Settings → Assistant."
+CHANGED = "The MyMemo sign-in changed while this request was running, so OpenMyMemo used its rules this time."
 
 
 def resource(service: str) -> str:
@@ -74,6 +88,53 @@ def service_of(s: Settings) -> str:
     return (service if isinstance(service, str) and service else cloud.service_url()).rstrip("/")
 
 
+def norm_service(url: str) -> str:
+    """A service URL as sign-ins are compared: scheme and host in lower case, no trailing slash, query or fragment."""
+    parts = urlsplit(url.strip())
+    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path.rstrip("/"), "", ""))
+
+
+def _hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()[:16]
+
+
+@dataclass(frozen=True)
+class Session:
+    """The sign-in a request started with. ``generation`` is "env" for a token from OPENMYMEMO_ASSISTANT_API_KEY."""
+
+    service: str
+    generation: str
+    token: str = ""
+
+    def __repr__(self) -> str:  # never the token
+        return f"Session({self.service!r}, {self.generation!r})"
+
+
+def session(s: Settings) -> Session | None:
+    """Capture the sign-in for a request about to start; None when there is no complete, consistent one (the token
+    read doesn't belong to the stored sign-in), and the request must not be made."""
+    if not s.mymemo_token:
+        return None
+    if s.key_store == "env":
+        return Session(norm_service(service_of(s)), "env", s.mymemo_token)
+    gen, service = s.mymemo.get("generation"), s.mymemo.get("service")
+    if (not isinstance(gen, str) or not gen or not isinstance(service, str) or not service
+            or s.mymemo.get("access_hash") != _hash(s.mymemo_token)):
+        return None
+    return Session(norm_service(service), gen, s.mymemo_token)
+
+
+def _matches(info: Any, sess: Session) -> bool:
+    """Whether the stored sign-in (``raw["mymemo"]``) is still the one ``sess`` started with."""
+    return (isinstance(info, dict) and sess.generation != "env" and info.get("generation") == sess.generation
+            and isinstance(info.get("service"), str) and norm_service(info["service"]) == sess.service)
+
+
+def endpoint_for(s: Settings, sess: Session) -> str:
+    """Where a request with ``sess`` goes: the service it signed in to (or an explicit address override)."""
+    return s.base_url.rstrip("/") if s.base_url else sess.service + MYMEMO_PATH
+
+
 # ---- talking to the OAuth endpoints ------------------------------------------------------------------------------
 
 
@@ -96,7 +157,8 @@ def _tokens(status: int, data: Any) -> dict | None:
     scopes = str(data.get("scope") or SCOPE).split()
     if SCOPE not in scopes:
         return None
-    return {"access": access, "refresh": refresh or "", "expires_in": min(float(expires), 86400.0)}
+    return {"access": access, "refresh": refresh or "", "expires_in": min(float(expires), 86400.0),
+            "member": member_fields(data.get("member"))}  # only if the service names the account it signed in
 
 
 def _error_code(data: Any) -> str:
@@ -117,9 +179,15 @@ def _store(raw: dict[str, Any], service: str, tokens: Mapping[str, Any], *, via:
     if tokens.get("refresh") or via is not None:
         st.set_secret(raw, "mymemo_refresh", tokens.get("refresh") or "")
     current = raw.get("mymemo") if isinstance(raw.get("mymemo"), dict) else {}
-    info = dict(current) if via is None else {"via": via, "signed_in_at": _iso(_now()),
-                                               "account": member_fields(account or {})}
-    info.update(service=service, expires_at=_iso(_now() + timedelta(seconds=tokens["expires_in"])))
+    if via is None:  # a refresh: the same sign-in, generation and account
+        info = dict(current)
+        if tokens.get("member"):
+            info["account"] = dict(tokens["member"])
+    else:  # a new sign-in: a new generation; nothing of the earlier one (account, pause) carries over
+        info = {"via": via, "signed_in_at": _iso(_now()), "generation": secrets.token_hex(12),
+                "account": member_fields(account or {})}
+    info.update(service=norm_service(service), access_hash=_hash(tokens["access"]),
+                expires_at=_iso(_now() + timedelta(seconds=tokens["expires_in"])))
     info.pop("signed_out", None)
     raw["mymemo"] = info
 
@@ -166,8 +234,8 @@ def exchange(link: cloud.Link) -> str:
         if status in (400, 401) and _error_code(data) in ("invalid_grant", "invalid_token"):
             return "use_browser"
         return "busy" if status == 429 else "failed"
-    try:
-        keep(link.service, tokens, via="cloud", account=link.member)
+    try:  # the account whose device token was exchanged, unless the service names the one it signed in
+        keep(link.service, tokens, via="cloud", account=tokens["member"] or link.member)
     except SettingsError:
         return "failed"
     return "signed_in"
@@ -222,8 +290,7 @@ class SignIn(Linker):
         tokens = _tokens(status, data)
         if tokens is None:
             return Outcome(502, self.FAILED, "MyMemo didn't accept the sign-in. Start again in OpenMyMemo.")
-        link = cloud.load_link()
-        account = link.member if link and link.service.rstrip("/") == p.service else {}
+        account = tokens["member"]  # only what this sign-in says, never another sign-in's (such as Cloud's)
         who = cloud.account_label(account) if account else "your MyMemo account"
         return Outcome(200, "Signed in to MyMemo",
                        f"The OpenMyMemo Assistant can now use MyMemo's hosted model with {who}. You can close this "
@@ -255,6 +322,7 @@ def sign_out(reason: str | None = None) -> str:
     happened, for the person."""
     s = st.load_settings(environ={})
     service = service_of(s)
+    generation = s.mymemo.get("generation")
     told = True
     token = s.mymemo_refresh or s.mymemo_token
     if token:
@@ -267,8 +335,10 @@ def sign_out(reason: str | None = None) -> str:
             told = False
     with st._lock():
         raw = st._read_raw()
-        _forget(raw, reason)
-        st._write(raw)
+        info = raw.get("mymemo") if isinstance(raw.get("mymemo"), dict) else {}
+        if info.get("generation") == generation:  # a sign-in made meanwhile (another process) stays
+            _forget(raw, reason)
+            st._write(raw)
     if not token:
         return "This computer isn't signed in to MyMemo for the Assistant."
     if told:
@@ -280,57 +350,74 @@ def sign_out(reason: str | None = None) -> str:
 # ---- tokens in use ---------------------------------------------------------------------------------------------
 
 
-def refresh(s: Settings) -> str | None:
-    """A new access token for ``s`` (updated in place), or None. When another process refreshed meanwhile, its
-    token is used instead of spending the refresh token again. A refresh MyMemo refuses signs this computer out
-    (``s.mymemo_token`` becomes ""); no network or a busy service leaves everything as it was."""
-    if s.key_store == "env":
-        return None  # a token from OPENMYMEMO_ASSISTANT_API_KEY is the script's to renew
-    used = s.mymemo_token
+def _adopt(s: Settings, raw: dict[str, Any]) -> None:
+    fresh = st._from_raw(raw)
+    s.mymemo_token, s.mymemo_refresh, s.mymemo = fresh.mymemo_token, fresh.mymemo_refresh, fresh.mymemo
+
+
+def refresh(s: Settings, sess: Session) -> tuple[str | None, str]:
+    """A new access token for the request that started with ``sess``: ``(token, "ok")``; or ``(None, why)`` with
+    why ``changed`` (the stored sign-in is no longer ``sess``'s: another sign-in, sign-out or service; nothing is
+    touched and the request must stop), ``signed_out`` (MyMemo refused the refresh: this sign-in is forgotten) or
+    ``unavailable`` (no network or a busy service: nothing changes).
+
+    Everything happens under the settings lock and only after checking ``sess`` is still the stored sign-in, so
+    a token another process refreshed is reused only when it belongs to the same sign-in and service, and a refresh
+    never writes over a newer sign-in."""
+    if sess.generation == "env":
+        return None, "unavailable"  # a token from OPENMYMEMO_ASSISTANT_API_KEY is the script's to renew
     with st._lock():
         raw = st._read_raw()
+        info = raw.get("mymemo")
+        if not _matches(info, sess):
+            return None, "changed"
         current = st._from_raw(raw)
-        if current.mymemo_token and current.mymemo_token != used:
-            s.mymemo_token, s.mymemo, s.mymemo_refresh = current.mymemo_token, current.mymemo, current.mymemo_refresh
-            return s.mymemo_token
-        service = service_of(current)
+        if current.mymemo_token and current.mymemo_token != sess.token:
+            # The same sign-in, refreshed by another process meanwhile: use its token, don't spend the refresh
+            # token again. Only when that token is the one the stored sign-in names.
+            if info.get("access_hash") != _hash(current.mymemo_token):
+                return None, "changed"
+            _adopt(s, raw)
+            return s.mymemo_token, "ok"
         if not current.mymemo_refresh:
-            if current.mymemo_token:
-                _forget(raw, "expired")
-                st._write(raw)
-                s.mymemo = dict(raw["mymemo"])
-            s.mymemo_token = s.mymemo_refresh = ""
-            return None
+            _forget(raw, "expired")
+            st._write(raw)
+            _adopt(s, raw)
+            return None, "signed_out"
         try:
-            status, data = _oauth(service, "token", {"grant_type": "refresh_token", "client_id": CLIENT_ID,
-                                                     "refresh_token": current.mymemo_refresh})
+            status, data = _oauth(sess.service, "token", {"grant_type": "refresh_token", "client_id": CLIENT_ID,
+                                                          "refresh_token": current.mymemo_refresh})
         except CloudError:
-            return None
+            return None, "unavailable"
         tokens = _tokens(status, data)
         if tokens is not None:
             try:
-                _store(raw, service, tokens)
+                _store(raw, sess.service, tokens)
             except SettingsError:
-                tokens = None
-            else:
-                st._write(raw)
-                fresh = st._from_raw(raw)
-                s.mymemo_token, s.mymemo_refresh, s.mymemo = fresh.mymemo_token, fresh.mymemo_refresh, fresh.mymemo
-                return s.mymemo_token
+                return None, "unavailable"
+            st._write(raw)
+            _adopt(s, raw)
+            return s.mymemo_token, "ok"
         if status in (400, 401) and _error_code(data) in ("invalid_grant", "invalid_client", "unauthorized_client",
                                                           "invalid_token"):
             _forget(raw, "expired")
             st._write(raw)
-            s.mymemo_token, s.mymemo_refresh, s.mymemo = "", "", dict(raw["mymemo"])
-        return None
+            _adopt(s, raw)
+            return None, "signed_out"
+        return None, "unavailable"
 
 
-def access_token(s: Settings) -> str:
-    """The access token to send now: refreshed first when it expires within a minute."""
+def access_token(s: Settings, sess: Session) -> tuple[Session | None, str]:
+    """The session to send now: refreshed first when its token expires within a minute. ``(None, why)`` when the
+    request must not be made (``refresh``'s reasons); a refresh that can't reach MyMemo keeps the old token."""
     expires = _parse(s.mymemo.get("expires_at"))
-    if s.mymemo_token and s.mymemo_refresh and expires and expires - _now() < timedelta(seconds=EARLY):
-        return refresh(s) or s.mymemo_token
-    return s.mymemo_token
+    if sess.generation != "env" and s.mymemo_refresh and expires and expires - _now() < timedelta(seconds=EARLY):
+        token, why = refresh(s, sess)
+        if token:
+            return replace(sess, token=token), "ok"
+        if why != "unavailable":
+            return None, why
+    return sess, "ok"
 
 
 # ---- pauses the service asked for ------------------------------------------------------------------------------
@@ -386,8 +473,10 @@ def _retry_after(headers: Mapping[str, str] | None, default: int) -> int:
     return min(max(seconds, 1), RETRY_MAX)
 
 
-def note_failure(s: Settings, status: int, payload: Any, headers: Mapping[str, str] | None) -> dict | None:
-    """Keep a pause for a 402, 429 or 503 from the endpoint; returns it (None for any other answer)."""
+def note_failure(s: Settings, sess: Session, status: int, payload: Any,
+                 headers: Mapping[str, str] | None) -> dict | None:
+    """Keep a pause for a 402, 429 or 503 from the endpoint; returns it (None for any other answer). It is kept only
+    while ``sess`` is still the stored sign-in: one account's answer never pauses another's."""
     err = payload.get("error") if isinstance(payload, dict) else None
     err = err if isinstance(err, dict) else {}
     code = err.get("code") or err.get("type")
@@ -400,7 +489,7 @@ def note_failure(s: Settings, status: int, payload: Any, headers: Mapping[str, s
         else:
             until = now + PLAN_HOLD
             h = {"code": "plan_required", "resets_at": None}
-        h["plan_url"] = _plan_url(err.get("plan_url"), service_of(s))
+        h["plan_url"] = _plan_url(err.get("plan_url"), sess.service)
     elif status in (429, 503):
         kind = "rate_limited" if status == 429 else "unavailable"
         until = now + timedelta(seconds=_retry_after(headers, RETRY_DEFAULT[kind]))
@@ -408,19 +497,20 @@ def note_failure(s: Settings, status: int, payload: Any, headers: Mapping[str, s
     else:
         return None
     h["until"] = _iso(until)
-    _set_hold(s, h)
+    _set_hold(s, sess, h)
     return h
 
 
-def _set_hold(s: Settings, h: dict | None) -> None:
+def _set_hold(s: Settings, sess: Session, h: dict | None) -> None:
     with st._lock():
         raw = st._read_raw()
-        info = raw.get("mymemo") if isinstance(raw.get("mymemo"), dict) else {}
+        info = raw.get("mymemo")
+        if not _matches(info, sess):
+            return
         if h is None:
             info.pop("hold", None)
         else:
             info["hold"] = h
-        raw["mymemo"] = info
         st._write(raw)
     if h is None:
         s.mymemo.pop("hold", None)
@@ -428,12 +518,24 @@ def _set_hold(s: Settings, h: dict | None) -> None:
         s.mymemo["hold"] = h
 
 
-def clear_hold(s: Settings, codes: tuple[str, ...] | None = None) -> None:
-    """Lift a pause (any, or only these codes) after the endpoint answered normally."""
+def clear_hold(s: Settings, sess: Session, codes: tuple[str, ...] | None = None) -> None:
+    """Lift a pause (any, or only these codes) after the endpoint answered ``sess`` normally."""
     h = s.mymemo.get("hold")
     if isinstance(h, dict) and (codes is None or h.get("code") in codes):
         with contextlib.suppress(OSError):
-            _set_hold(s, None)
+            _set_hold(s, sess, None)
+
+
+def _keep_member(s: Settings, sess: Session, member: Mapping[str, str]) -> None:
+    """The account the service named for this sign-in (``/models``), kept while it is still the stored one."""
+    with st._lock():
+        raw = st._read_raw()
+        info = raw.get("mymemo")
+        if not _matches(info, sess) or info.get("account") == dict(member):
+            return
+        info["account"] = dict(member)
+        st._write(raw)
+    s.mymemo["account"] = dict(member)
 
 
 # ---- what the panel shows ----------------------------------------------------------------------------------------
@@ -486,22 +588,28 @@ def account(s: Settings) -> dict[str, Any]:
 
     if not s.mymemo_token:
         return {"ok": False, "error": "Sign in to MyMemo to use its hosted model.", "signed_out": True}
-    got = client.get_json(s, "/models")
+    sess = session(s)
+    if sess is None:
+        return {"ok": False, "error": CHANGED, "signed_out": False}
+    got = client.get_json(s, sess, "/models")
     if isinstance(got, client.Failure):
         return {"ok": False, "error": got.message, "signed_out": got.code == "signed_out"}
-    status, data, headers = got
+    status, data, headers, sess = got
     if status != 200 or not isinstance(data, dict):
-        h = note_failure(s, status, data, headers)
+        h = note_failure(s, sess, status, data, headers)
         return {"ok": False, "error": hold_message(h) if h else "MyMemo couldn't show your plan right now.",
                 "signed_out": False}
-    out = _models_shape(data, service_of(s))
+    out = _models_shape(data, sess.service)
+    member = member_fields(data.get("member"))
+    if member:
+        _keep_member(s, sess, member)
     if out["plan"]["active"]:
-        clear_hold(s, ("plan_required",))
+        clear_hold(s, sess, ("plan_required",))
     return {"ok": True, **out}
 
 
 __all__ = [
-    "EXCHANGE_MESSAGES", "MYMEMO_PATH", "SIGNED_OUT", "SignIn", "access_token", "account", "clear_hold", "exchange",
+    "CHANGED", "EXCHANGE_MESSAGES", "MYMEMO_PATH", "SIGNED_OUT", "Session", "SignIn", "access_token", "account", "clear_hold", "exchange",
     "hold", "hold_message", "keep", "keep_signin", "note_failure", "public_status", "refresh", "resource",
-    "service_of", "sign_in_with_browser", "sign_out",
+    "service_of", "session", "sign_in_with_browser", "sign_out",
 ]

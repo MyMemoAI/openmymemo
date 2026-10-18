@@ -361,3 +361,165 @@ def test_private_memories_never_reach_mymemo(vault, fake):
 def test_the_fixtures_name_no_prices():
     text = json.dumps([fixture("assistant/models.json"), fixture("assistant/errors.json")]).lower()
     assert "$" not in text and "usd" not in text and "price" not in text
+
+
+# ---- a request is bound to the sign-in it started with ---------------------------------------------------------------
+
+
+def grants(fake, kind: str = "refresh_token") -> int:
+    return sum(f["grant_type"] == kind for f in fake.token_forms)
+
+
+def test_signing_out_and_in_as_another_account_mid_request_stops_that_request(vault, fake):
+    a = signed_in(vault, fake)  # as Sam, through the MyMemo Cloud link
+    old = raw()["mymemo_token"]
+    bob = {}
+
+    def switch():  # while the request is in flight: sign out, and sign in as someone else
+        mymemo.sign_out()
+        tokens = fake.tokens_for_keep()
+        mymemo.keep(fake.base, tokens, via="browser", account={"display_name": "Bob"})
+        bob.update(tokens)
+        return "invalid_token"  # the request's own (revoked) token is refused
+
+    fake.on_chat = switch
+    refreshes = grants(fake)
+    assert a.json_call("sort", "x", ["some text"], SCHEMA) is None
+    assert a.last_error == mymemo.CHANGED
+    # The request never retried with Bob's token, nor spent anyone's refresh token.
+    assert fake.chat_auth == [f"Bearer {old}"] and grants(fake) == refreshes
+    stored = raw()  # Bob's sign-in is intact
+    assert stored["mymemo_token"] == bob["access"] and stored["mymemo_refresh"] == bob["refresh"]
+    assert stored["mymemo"]["account"] == {"display_name": "Bob"} and "signed_out" not in stored["mymemo"]
+    assert a.settings.mymemo_token == old  # the stopped request's settings didn't take Bob's token either
+    fresh = Assistant.from_settings(vault)
+    assert fresh.json_call("sort", "x", ["t"], SCHEMA) is not None and fake.chat_auth[-1] == f"Bearer {bob['access']}"
+
+
+def test_an_old_sign_ins_answer_never_pauses_a_newer_one(vault, fake):
+    a = signed_in(vault, fake)
+
+    def switch():
+        mymemo.keep(fake.base, fake.tokens_for_keep(), via="browser")
+        return "quota_exceeded"
+
+    fake.on_chat = switch
+    assert a.json_call("sort", "x", ["t"], SCHEMA) is None
+    assert "hold" not in raw()["mymemo"] and Assistant.from_settings(vault).available("sort")
+
+
+@pytest.mark.parametrize("how", ["new sign-in", "service edited"])
+def test_a_service_change_mid_request_never_sends_tokens_across_services(how, vault, fake):
+    other = FakeAssistantService().start()
+    try:
+        a = signed_in(vault, fake)
+        old = raw()["mymemo_token"]
+        fake.expire_access()
+
+        def switch():
+            if how == "new sign-in":
+                mymemo.keep(other.base, other.tokens_for_keep(), via="browser")
+            else:  # same generation, another service written in (by hand, or a bug elsewhere)
+                stored = raw()
+                stored["mymemo"]["service"] = other.base
+                settings_mod._write(stored)
+            return None
+
+        fake.on_chat = switch
+        assert a.json_call("sort", "x", ["t"], SCHEMA) is None and a.last_error == mymemo.CHANGED
+        assert fake.chat_auth == [f"Bearer {old}"] and grants(fake) == 0  # no refresh at either service
+        assert other.chat_auth == [] and other.model_calls == [] and grants(other) == 0
+        assert all(f.get("refresh_token") != raw().get("mymemo_refresh") for f in fake.token_forms)
+    finally:
+        other.stop()
+
+
+def test_a_refresh_by_a_second_process_mid_request_is_reused_once(vault, fake):
+    import subprocess
+    import sys
+
+    a = signed_in(vault, fake)
+    fake.expire_access()
+    script = ("from openmymemo.assistant import load_settings, mymemo\n"
+              "s = load_settings()\n"
+              "print(mymemo.refresh(s, mymemo.session(s))[1])\n")
+
+    def other_process():  # the request's token has expired; another process refreshes first
+        out = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=60,
+                             env=os.environ.copy())
+        assert out.stdout.strip() == "ok", out.stderr
+        return None
+
+    fake.on_chat = other_process
+    assert a.json_call("sort", "x", ["t"], SCHEMA) is not None
+    assert grants(fake) == 1  # the in-flight request reused the second process's token instead of refreshing
+    assert fake.chat_auth[-1] == f"Bearer {raw()['mymemo_token']}" and raw()["mymemo_refresh"] == fake.refresh
+    assert raw()["mymemo_refresh"] not in fake.spent
+
+
+def test_a_refresh_due_before_the_request_checks_the_sign_in_too(vault, fake):
+    signed_in(vault, fake)
+    stored = raw()
+    stored["mymemo"]["expires_at"] = "2020-01-01T00:00:00+00:00"
+    settings_mod._write(stored)
+    a = Assistant.from_settings(vault)
+    sess = mymemo.session(a.settings)
+    mymemo.sign_out()  # between capturing the sign-in and refreshing it
+    mymemo.keep(fake.base, fake.tokens_for_keep(), via="browser")
+    newer = raw()
+    assert mymemo.access_token(a.settings, sess) == (None, "changed")
+    assert mymemo.refresh(a.settings, sess) == (None, "changed")
+    assert raw() == newer and grants(fake) == 0
+
+
+def test_a_token_that_doesnt_match_the_stored_sign_in_is_never_sent(vault, fake):
+    a = signed_in(vault, fake)
+    a.settings.mymemo_token = "oma_TEST_ONLY_from_elsewhere"  # e.g. read from the Keychain mid-change
+    assert mymemo.session(a.settings) is None
+    assert a.json_call("sort", "x", ["t"], SCHEMA) is None and fake.chat_auth == []
+
+
+def test_signing_out_never_forgets_a_sign_in_made_meanwhile(vault, fake, monkeypatch):
+    signed_in(vault, fake)
+    real = mymemo._oauth
+    newer = {}
+
+    def revoke_slowly(service, path, form):
+        result = real(service, path, form)
+        if path == "revoke":  # another process signs in while this one is still signing out
+            newer.update(fake.tokens_for_keep())
+            mymemo.keep(fake.base, newer, via="browser")
+        return result
+
+    monkeypatch.setattr(mymemo, "_oauth", revoke_slowly)
+    mymemo.sign_out()
+    assert raw()["mymemo_token"] == newer["access"] and load_settings().mymemo_token == newer["access"]
+
+
+# ---- the account shown is only one this sign-in authenticated --------------------------------------------------------
+
+
+def test_a_browser_sign_in_never_shows_the_mymemo_cloud_account(vault, fake, api):
+    cloud.save_link(cloud.Link(service=fake.base, device_id="dev-1", device_token=fake.token, private_key="",
+                               key_id="", vault=str(vault.root),
+                               member={"display_name": "Alice", "email_masked": "a***@example.com"}))
+    api.patch("/api/assistant", headers=H, json={"enabled": True, "kind": "mymemo"})
+    url = api.post("/api/assistant/mymemo/signin", headers=H, json={"browser": True}).json()["url"]
+    r = api.get(callback_path(fake.authorize(url)))  # the person signs in as Bob
+    assert r.status_code == 200 and "Alice" not in r.text and "a***" not in r.text
+    s = api.get("/api/assistant", headers=H).json()
+    assert s["mymemo"]["signed_in"] and s["mymemo"]["account"] is None and s["mymemo"]["via"] == "browser"
+    assert "Alice" not in settings_mod.settings_path().read_text()
+    # Once the service names the account it signed in (optional `member` in /models), that is shown.
+    fake.member = fixture("assistant/models.json")["member"]
+    assert api.get("/api/assistant/mymemo", headers=H).json()["account"]["ok"]
+    s = api.get("/api/assistant", headers=H).json()
+    assert s["mymemo"]["account"] == {"display_name": "Bob", "email_masked": "b***@example.com"}
+    assert "Alice" not in settings_mod.settings_path().read_text()
+
+
+def test_the_cli_shows_no_account_for_a_browser_sign_in(vault, fake):
+    mymemo.keep(fake.base, fake.tokens_for_keep(), via="browser")
+    save_settings(enabled=True, kind="mymemo")
+    r = CliRunner().invoke(app, ["--vault", str(vault.root), "assistant", "status"])
+    assert "Signed in: a MyMemo account" in r.stdout
