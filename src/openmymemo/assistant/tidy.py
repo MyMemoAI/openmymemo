@@ -50,7 +50,7 @@ from typing import Any
 
 from ..proposals import PermissionDenied, Proposals, batch_label, is_protected
 from ..textutil import grams, normalize, similarity
-from ..vault import Conflict, Memory, Vault, VaultError, parse_until
+from ..vault import Conflict, Memory, NotFound, Vault, VaultError, parse_until
 from . import settings as settings_mod
 from .core import CONNECTOR_ID, Assistant, Data
 
@@ -365,51 +365,110 @@ def _parse(answer: dict, chunk: Sequence[Memory], pairs: set[frozenset[str]], cl
     return out
 
 
+CHANGED = "A memory it is about changed while the Assistant looked at it, so this wasn't suggested."
+
+
+def _still_valid(assistant: Assistant, ids: Sequence[str], mems: dict[str, Memory]) -> bool:
+    """Every memory a suggestion is made from, checked again now (call under the vault lock): still active, exactly
+    as it was sent, not private and not in a private topic (a topic may have become private since), inside the
+    Assistant's read scope and not in a topic blocked for it. Derived text (a merge, a rewrite) is only filed when
+    all of them pass, so it can't carry text from a memory that has since become private or out of scope."""
+    vault = assistant.vault
+    connector = assistant.connector()
+    if connector is None or connector.write == "none":
+        return False
+    guard = assistant.guard(connector)
+    private = vault.private_topics()
+    for mid in ids:
+        try:
+            cur = vault.get(mid)
+        except NotFound:
+            return False
+        seen = mems.get(mid)
+        if (seen is None or cur.status != "active" or cur.version != seen.version or cur.until != seen.until
+                or cur.content != seen.content or cur.private or cur.topic in private
+                or cur.topic in connector.blocked_topics or guard is None or not guard.memory_ok(cur)):
+            return False
+    return True
+
+
 def _file(assistant: Assistant, item: Item, batch_id: str, mems: dict[str, Memory]) -> None:
     """File one suggestion as the Assistant's proposals (§17.6 holds on top of §5.5). ``mems`` is the snapshot the
-    model was sent: every proposal expects the memories it depends on to be as they were then."""
+    model was sent. The whole suggestion is one transaction under the vault lock: every memory it is made from is
+    checked again first (``_still_valid``), every proposal expects the memories it depends on to be exactly as
+    checked, and when the second step of a merge or contradiction can't be filed, the first is taken back."""
     key = f"tidy:{item.fingerprint}"
+    vault = assistant.vault
 
     def seen(*ids: str) -> dict[str, tuple[int, str | None]]:
         return {i: (mems[i].version, mems[i].until) for i in ids}
 
     def propose(op: str, memory_id: str, *, step: int = 1, hold: str | None = None, reason: str | None = None,
-                expect: Sequence[str] = (), **kw: Any) -> dict:
+                expected: dict[str, tuple[int, str | None]] | None = None, **kw: Any) -> dict:
         target = mems[memory_id]
         hold = hold or ("protected" if is_protected(target) else None)
         res = assistant.propose(op, memory_id=memory_id, reason=reason or item.reason, hold=hold, batch_id=batch_id,
                                 idempotency_key=key if step == 1 else f"{key}:{step}",
-                                expected=seen(*(expect or (memory_id,))), **kw)
+                                expected=expected if expected is not None else seen(memory_id), **kw)
         item.filed.append(res)
         return res
 
-    try:
-        if item.kind in ("merge", "contradiction"):
-            keep, drop = item.memory_ids
-            skip_update = similarity(item.content or "", mems[keep].content) >= 0.999
-            if skip_update:
-                first = {"status": "duplicate"}  # the earlier memory already says it all: only archive the copy
-            else:  # both memories as the model saw them: the new text is made from the two
-                first = propose("update", keep, content=item.content, expect=(keep, drop))
-            if first.get("status") in ("applied", "pending", "duplicate"):
-                waits = first["status"] == "pending"
-                note = "merged into" if item.kind == "merge" else "now said by"
-                propose("archive", drop, step=2, hold="review" if waits else None,
-                        expect=(keep, drop) if skip_update else (drop,),
-                        reason=f"{item.reason} (This copy is {note} memory {keep}"
-                               + (", once you accept that change.)" if waits else ".)"))
-        elif item.kind == "outdated":
-            propose("archive", item.memory_ids[0], hold="review")
-        elif item.kind == "until":
-            m = mems[item.memory_ids[0]]
-            propose("update", m.id, content=m.content, until=item.until)
-        elif item.kind == "rewrite":
-            propose("update", item.memory_ids[0], content=item.content)
-    except Conflict:
-        item.changed = True
-        item.error = "A memory it is about changed while the Assistant looked at it, so this wasn't suggested."
-    except (PermissionDenied, VaultError) as e:
-        item.error = str(e)
+    def take_back(res: dict) -> None:
+        """Undo (applied) or reject (waiting) a first step whose second step couldn't be filed."""
+        pid = res.get("proposal_id")
+        if not pid:
+            return
+        props = Proposals(vault)
+        try:
+            if res.get("status") == "applied":
+                props.undo(pid)
+                res["status"] = "undone"
+            elif res.get("status") == "pending":
+                props.reject(pid)
+                res["status"] = "rejected"
+        except VaultError:  # changed again since (only possible from this same process): its history has both
+            pass
+
+    with vault.lock():
+        if not _still_valid(assistant, item.memory_ids, mems):
+            item.changed, item.error = True, CHANGED
+            return
+        try:
+            if item.kind in ("merge", "contradiction"):
+                keep, drop = item.memory_ids
+                skip_update = similarity(item.content or "", mems[keep].content) >= 0.999
+                if skip_update:
+                    first = {"status": "duplicate"}  # the earlier memory already says it all: only archive the copy
+                    after = seen(keep)
+                else:  # both memories as the model saw them: the new text is made from the two
+                    first = propose("update", keep, content=item.content, expected=seen(keep, drop))
+                    after = seen(keep)
+                    if first.get("status") == "applied":  # keep exactly as the first step left it
+                        now = vault.get(keep)
+                        after = {keep: (Proposals(vault).get(first["proposal_id"]).applied_version or now.version,
+                                        now.until)}
+                if first.get("status") in ("applied", "pending", "duplicate"):
+                    waits = first["status"] == "pending"
+                    note = "merged into" if item.kind == "merge" else "now said by"
+                    try:
+                        propose("archive", drop, step=2, hold="review" if waits else None,
+                                expected={**after, **seen(drop)},
+                                reason=f"{item.reason} (This copy is {note} memory {keep}"
+                                       + (", once you accept that change.)" if waits else ".)"))
+                    except VaultError:
+                        take_back(first)
+                        raise
+            elif item.kind == "outdated":
+                propose("archive", item.memory_ids[0], hold="review")
+            elif item.kind == "until":
+                m = mems[item.memory_ids[0]]
+                propose("update", m.id, content=m.content, until=item.until)
+            elif item.kind == "rewrite":
+                propose("update", item.memory_ids[0], content=item.content)
+        except Conflict:
+            item.changed, item.error = True, CHANGED
+        except (PermissionDenied, VaultError) as e:
+            item.error = str(e)
 
 
 def run(vault: Vault, *, topic: str | None = None, dry_run: bool = False, max_calls: int = MAX_CALLS,

@@ -529,3 +529,110 @@ def test_end_to_end_the_endpoint_never_gets_private_or_out_of_scope_memories(vau
         assert secret not in sent
     assert [i.memory_ids for i in r.items] == [(shown.id, shown2.id)]  # nothing about what it wasn't shown
     assert vault.get(hidden.id).status == "active" and vault.get(near.id).status == "active"
+
+
+# ---- a merge is one transaction; derived text is filed only from memories that are still sendable ------------------
+
+
+def _pair(vault):
+    a = vault.add("lifestyle", "Prefers green tea over coffee in the morning", actor=AI,
+                  created_at="2026-01-01T09:00:00+00:00")
+    b = vault.add("lifestyle", "Prefers green tea over coffee in the mornings", actor=AI)
+    return a, b
+
+
+def _merge(a, b, marker="MERGEDMARK"):
+    return json.dumps({**EMPTY, "merges": [{"ids": [a.id, b.id], "content": f"Prefers green tea, {marker}",
+                                            "reason": "Same."}]})
+
+
+def _between_steps(monkeypatch, action):
+    """Run `action` right after a merge's first step was filed, before its second."""
+    from openmymemo.assistant import core
+
+    original = core.Assistant.propose
+
+    def propose(self, op, **kw):
+        res = original(self, op, **kw)
+        if op == "update":
+            action()
+        return res
+
+    monkeypatch.setattr(core.Assistant, "propose", propose)
+
+
+@pytest.mark.parametrize("which", ["keep", "drop"])
+def test_a_merge_whose_other_half_changes_in_between_is_taken_back(vault, fake, monkeypatch, which):
+    a, b = _pair(vault)
+    tidy_on(vault)
+    fake.answer = lambda body: _merge(a, b)
+    _between_steps(monkeypatch, lambda: vault.archive(a.id if which == "keep" else b.id, actor="user"))
+    r = tidy.run(vault)
+    assert r.items[0].changed
+    if which == "drop":
+        assert r.applied == 0  # the update was undone: the earlier memory reads as before
+        assert vault.get(a.id).content == "Prefers green tea over coffee in the morning"
+        assert vault.get(a.id).status == "active" and vault.get(b.id).status == "archived"
+    else:  # the copy isn't archived, so the person keeps one of the two (the update can't be taken back once the
+        # same process archived its memory; the history has both)
+        assert vault.get(b.id).status == "active"
+    assert not [p for p in Proposals(vault).list() if p.op == "archive" and p.status == "applied"]
+
+
+def test_another_process_waits_until_the_merge_is_complete(vault, fake, monkeypatch):
+    import threading
+
+    from openmymemo.vault import Vault
+
+    a, b = _pair(vault)
+    tidy_on(vault)
+    fake.answer = lambda body: _merge(a, b)
+    other = threading.Thread(target=lambda: Vault(vault.root).archive(a.id, actor="user"))
+    seen = {}
+
+    def start_other():
+        other.start()
+        other.join(0.3)
+        seen["blocked"] = other.is_alive()  # the other writer waits for the lock the merge holds
+
+    _between_steps(monkeypatch, start_other)
+    r = tidy.run(vault)
+    other.join(5)
+    assert seen["blocked"] and r.applied == 2 and not other.is_alive()
+    # The merge completed first; the other process's archive came after it, on the merged memory.
+    assert vault.get(b.id).status == "archived" and vault.get(a.id).status == "archived"
+    assert vault.history(a.id)[0]["op"] == "archive" and vault.history(a.id)[1]["content"].endswith("MERGEDMARK")
+
+
+@pytest.mark.parametrize("change", ["mark_private", "move_to_private_topic", "topic_made_private", "scope_narrowed",
+                                    "blocked_topic"])
+def test_nothing_derived_from_a_memory_that_stopped_being_sendable_is_filed(vault, fake, change):
+    a, b = _pair(vault)
+    c = vault.add("lifestyle", LONG, actor=AI)
+    tidy_on(vault)
+
+    def answer(body):
+        if change == "mark_private":
+            vault.update(b.id, private=True)
+            vault.update(c.id, private=True)
+        elif change == "move_to_private_topic":
+            vault.update(b.id, topic="health")
+            vault.update(c.id, topic="health")
+        elif change == "topic_made_private":
+            vault.update_topic("lifestyle", private=True)
+        elif change == "scope_narrowed":
+            Connectors(vault).update("assistant", read_topics=["work"])
+        else:
+            Connectors(vault).update("assistant", blocked_topics=["lifestyle"])
+        return json.dumps({**json.loads(_merge(a, b)),
+                           "rewrites": [{"id": c.id, "content": "Short, REWRITEMARK.", "reason": "Long."}]})
+
+    fake.answer = answer
+    r = tidy.run(vault)
+    assert r.applied == 0 and r.waiting == 0 and Proposals(vault).list() == []
+    assert all(i.changed for i in r.items)
+    for path in vault.root.rglob("*"):
+        if path.is_file():
+            text = path.read_text(encoding="utf-8", errors="replace")
+            assert "MERGEDMARK" not in text and "REWRITEMARK" not in text, path
+    assert vault.get(a.id).content == "Prefers green tea over coffee in the morning"
