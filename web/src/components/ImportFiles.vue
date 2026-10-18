@@ -71,7 +71,7 @@ function imported(done: { slug: string; n: number; named: number }) {
     <div class="flex flex-wrap gap-2">
       <input
         v-model="path"
-        class="input min-w-0 flex-1 font-mono text-xs"
+        class="input min-w-48 flex-1 font-mono text-xs"
         :placeholder="t('imp.files.pathHint')"
         :aria-label="t('imp.files.path')"
         spellcheck="false"
