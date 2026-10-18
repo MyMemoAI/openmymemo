@@ -36,6 +36,9 @@ from .connectors import Connector, Connectors
 from .context import compile_context
 from .mcp_server import build_server
 from .proposals import PermissionDenied, Proposals
+from .recall import search as recall_search
+from .recall import semantic
+from .recall.local import SemanticError
 from .snippets import http_snippets, stdio_snippets
 from .textutil import KINDS, classify_topic
 from .topics import IMPORTED_GROUP
@@ -178,6 +181,7 @@ class AssistantPatch(BaseModel):
     protocol: str | None = None
     base_url: str | None = None
     model: str | None = None
+    embeddings_model: str | None = None
     api_key: str | None = None
     features: dict[str, bool] | None = None
     private_topics: list[str] | None = None
@@ -197,6 +201,13 @@ class ChatPlanIn(BaseModel):
 
 class ChatStartIn(BaseModel):
     max_calls: int | None = None
+
+
+class SemanticPatch(BaseModel):
+    """Settings → Assistant → "Search by meaning on this computer"."""
+    enabled: bool
+    model: str | None = None
+    accept_terms: bool = False
 
 
 class TidyIn(BaseModel):
@@ -546,6 +557,29 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
     @api.post("/api/assistant/test")
     def test_assistant() -> dict:
         return Assistant.from_settings(vault).test()
+
+    # ---- search by meaning (product-design.md §17.4) -----------------------------------------------------------
+
+    @api.get("/api/search")
+    def search_memories(q: str, limit: int = 50) -> dict:
+        """The panel's search box: every memory, private ones included (it is the person's own view). Without an
+        embedding index the panel filters by itself, so ``mode`` ``keyword`` tells it to keep doing that."""
+        found = recall_search(vault, None, q[:500], limit=max(1, min(limit, 200)), everything=True)
+        return {"mode": found.mode, "results": [{"id": h.memory.id, "score": h.score, "match": h.match}
+                                                for h in found.hits]}
+
+    @api.get("/api/semantic")
+    def get_semantic() -> dict:
+        return semantic.status(vault)
+
+    @api.post("/api/semantic")
+    def set_semantic(body: SemanticPatch) -> dict:
+        if not body.enabled:
+            return semantic.turn_off(vault)
+        try:
+            return semantic.start(vault, body.model, accept_terms=body.accept_terms)
+        except SemanticError as e:
+            raise HTTPException(400, str(e)) from None
 
     # Tidy up (§17.6): on demand here; on its schedule from the panel's process (``tidy.Scheduler``).
 

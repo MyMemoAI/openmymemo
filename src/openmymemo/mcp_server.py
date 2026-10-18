@@ -19,8 +19,9 @@ from mcp_types import ToolAnnotations
 from . import __version__
 from .clients import display_name
 from .connectors import Connector, Connectors
-from .context import compile_context, search
+from .context import compile_context
 from .proposals import Proposals
+from .recall import search as recall_search
 from .vault import Vault, VaultError
 
 INSTRUCTIONS = """\
@@ -120,10 +121,15 @@ def build_server(vault: Vault, *, stdio_connector: str | None = None, panel_url:
     async def memory_search(ctx: Context, query: str, topics: list[str] | None = None,
                             limit: int = 10) -> dict[str, Any]:
         """Search the user's memory by keywords (any language). Returns matching memories with their ids."""
+        # The description is part of MyMemo Cloud's wire fixture (tests/fixtures/cloud/bridge/hello.json), so it
+        # stays as is: search by meaning and the Assistant's rerank (§17.4) are added without changing the tool.
         c = who(ctx)
-        hits = await run(search, vault, c, query, topics=topics, limit=max(1, min(limit, 50)))
-        rows = [{"id": m.id, "content": m.content, "topic": m.topic, "kind": m.kind, "updated_at": m.updated_at,
-                 "score": round(s, 2)} for s, m in hits]
+        found = await run(recall_search, vault, c, query, topics=topics, limit=max(1, min(limit, 50)), model=True)
+        rows = [{"id": h.memory.id, "content": h.memory.content, "topic": h.memory.topic, "kind": h.memory.kind,
+                 "updated_at": h.memory.updated_at, "score": round(h.score, 2)} for h in found.hits]
+        if found.mode != "keyword":
+            for row, h in zip(rows, found.hits, strict=True):
+                row["match"] = h.match
         vault.log_activity(c.id, "search", query=query, memory_ids=[r["id"] for r in rows])
         return {"results": rows}
 
