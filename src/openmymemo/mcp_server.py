@@ -184,7 +184,7 @@ def build_server(vault: Vault, *, stdio_connector: str | None = None, panel_url:
         """
         c = who(ctx)
         out = await run(proposals.propose, c, op, content=content, memory_id=memory_id, topic=topic, kind=kind,
-                        reason=reason, evidence=evidence, idempotency_key=idempotency_key)
+                        reason=reason, evidence=evidence, idempotency_key=idempotency_key, check=True)
         if panel_url and relayed is None and out.get("status") in ("applied", "pending"):
             out["review_url"] = f"{panel_url}/#/changes"
         return out

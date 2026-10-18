@@ -10,7 +10,14 @@ Every AI write is a proposal. What happens to it is decided when it arrives (doc
   of memories an AI wrote last; changes to **protected** memories wait. A memory is protected when its
   latest version was written by the person (``last_actor`` is ``user``, ``file`` or ``import:*``).
 
-Why a proposal waits is kept in ``hold``: ``approval``, ``protected`` or ``private``.
+Why a proposal waits is kept in ``hold``: ``approval``, ``protected``, ``private`` or ``sensitive``.
+
+With the OpenMyMemo Assistant's ``check`` feature on, an app's proposal gets a second look before it is filed
+(``propose(..., check=True)``, ``assistant/checks.py``, product-design.md §17.7): within a short time budget, the
+model may turn an ``add`` into an ``update`` of a memory it repeats or contradicts, pick a topic the app didn't give,
+or make a sensitive one wait (``hold: sensitive``, or a private topic). It can only make a proposal more cautious,
+never apply something the table above says must wait; it is recorded as ``checked_by`` and ``check_note``. When the
+check is off, slow or fails, the proposal is filed exactly as without it.
 
 Lifecycle::
 
@@ -57,6 +64,7 @@ HOLD_MESSAGES = {
     "protected": "Waiting for the user: they wrote this memory themselves.",
     "private": "Waiting for the user: it is in a private topic.",
     "approval": "Waiting for the user: they review every change first.",
+    "sensitive": "Waiting for the user: it looks sensitive (health, money or credentials).",
 }
 APPLIED_MESSAGE = "Applied. The user will see it in their OpenMyMemo digest and can undo it."
 CHANGED_SINCE = "The memory has changed since this proposal; use its version history instead"
@@ -88,7 +96,7 @@ class Proposal:
     created_at: str = ""
     queue_id: str | None = None  # filed from MyMemo Cloud's offline queue: its receipt's id
     status: str = "pending"
-    hold: str | None = None  # why it waits: approval | protected | private (None when it applied at once)
+    hold: str | None = None  # why it waits: approval | protected | private | sensitive (None: applied at once)
     decided_at: str | None = None
     reviewed_at: str | None = None  # when the user saw an applied change; None = still in the digest
     final_content: str | None = None
@@ -102,6 +110,8 @@ class Proposal:
     similarity: float | None = None
     conflict: bool = False
     topic_confidence: float | None = None
+    checked_by: str | None = None  # "assistant" when the OpenMyMemo Assistant checked it before it was filed
+    check_note: str | None = None  # what that check found or changed, for the person
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -202,9 +212,10 @@ class Proposals:
     def propose(self, connector: Connector, op: str, *, content: str | None = None, memory_id: str | None = None,
                 topic: str | None = None, kind: str | None = None, reason: str | None = None,
                 evidence: str | None = None, idempotency_key: str | None = None,
-                created_at: str | None = None, queue_id: str | None = None) -> dict:
+                created_at: str | None = None, queue_id: str | None = None, check: bool = False) -> dict:
         """`created_at`: when the AI proposed it, if that was earlier, and `queue_id`: the receipt it got then
-        (both from MyMemo Cloud's offline queue)."""
+        (both from MyMemo Cloud's offline queue). `check`: give the OpenMyMemo Assistant a look first, when it is
+        on for that (an app's own `memory_propose`; imports and the Assistant's own proposals aren't checked)."""
         v = self.vault
         if connector.write == "none":
             raise PermissionDenied("This connector is read-only. The user can allow proposals in the OpenMyMemo panel.")
@@ -217,6 +228,12 @@ class Proposals:
             raise VaultError(f"content is required for {op}")
         if content and len(content) > 1000:
             raise VaultError("A memory must be a single statement of at most 1000 characters")
+
+        verdict = None
+        if check and not (idempotency_key and self._known_key(connector.id, idempotency_key)):
+            from .assistant.checks import check_proposal  # the Assistant imports this module
+
+            verdict = check_proposal(v, connector, op, content=content, memory_id=memory_id, topic=topic)
 
         with v.lock():
             if idempotency_key:
@@ -245,6 +262,8 @@ class Proposals:
             confidence = None
             if topic and topic not in slugs:
                 topic = next((t["slug"] for t in topics if t["title"] == topic), None) or None
+            if op == "add" and not topic and verdict and verdict.topic in slugs and verdict.topic not in private:
+                topic = verdict.topic
             if op == "add" and not topic:
                 topic, confidence = classify_topic(content, [t for t in topics if t["group"] != IMPORTED_GROUP])
                 topic = topic or ("identity" if "identity" in slugs else next(iter(slugs)))
@@ -283,6 +302,15 @@ class Proposals:
                     p.topic = best.topic if not topic or confidence is not None else topic
                     p.similarity = round(best_sim, 3)
                     p.conflict = looks_contradictory(content, best.content)
+                elif verdict and verdict.target:
+                    found = self._readable(connector, verdict.target, private)
+                    if found is not None and found.topic not in connector.blocked_topics:
+                        # The model saw what word overlap missed: an update of that memory, so §5.5 applies to it.
+                        target = found
+                        p.original_op, p.op, p.memory_id = "add", "update", found.id
+                        p.before_content, p.before_topic = found.content, found.topic
+                        p.topic = found.topic if not topic or confidence is not None else topic
+                        p.conflict = bool(verdict.contradicts) or looks_contradictory(content, found.content)
             elif op == "update" and target:
                 if similarity(content, target.content) >= 0.999 and topic == target.topic:
                     return {"status": "duplicate", "memory_id": target.id,
@@ -291,6 +319,8 @@ class Proposals:
             if target is not None and target.topic in connector.blocked_topics:  # e.g. an add that became an update
                 raise PermissionDenied(f"The user does not accept proposals about '{target.topic}' from this app.")
 
+            if verdict is not None:
+                self._record_check(connector, p, target, verdict, private, topics)
             p.hold = self._hold(connector, p, target, private)
             if p.hold is None:
                 self._apply(p, actor=f"connector:{connector.id}")
@@ -304,6 +334,8 @@ class Proposals:
         """Why this proposal must wait for the user, or None when it applies now (the table in §5.5)."""
         if p.topic in private or (target is not None and (target.topic in private or target.private)):
             return "private"  # nothing writes into a private topic without the user, not even `auto`
+        if p.hold == "sensitive":
+            return "sensitive"  # the Assistant's check flagged it: it waits, whatever the writing mode
         if connector.write == "auto":
             return None
         if self.vault.settings()["require_approval"]:
@@ -312,8 +344,41 @@ class Proposals:
             return "protected"
         return None
 
+    def _known_key(self, connector_id: str, key: str) -> bool:
+        return any(p.idempotency_key == key for p in self.list(connector_id=connector_id))
+
+    def _readable(self, connector: Connector, memory_id: str, private: set[str]) -> Memory | None:
+        try:
+            m = self.vault.get(memory_id)
+        except NotFound:
+            return None
+        if m.status != "active" or not connector.can_read_topic(m.topic, private) or (
+                m.private and not connector.include_private):
+            return None
+        return m
+
+    def _record_check(self, connector: Connector, p: Proposal, target: Memory | None, verdict, private: set[str],
+                      topics: list[dict]) -> None:
+        """Apply what the Assistant's check may change (only ever more cautious) and record it on the proposal."""
+        from .assistant.checks import describe, private_route
+
+        routed = None
+        held = False
+        if verdict.sensitive and p.topic not in private:
+            if p.op == "add" and target is None:
+                routed = private_route(self.vault, connector, p.content or "", verdict.sensitive)
+            if routed:
+                p.topic, p.topic_confidence = routed, None  # waits there: hold "private"
+            else:
+                p.hold = held = "sensitive"
+        p.checked_by = "assistant"
+        p.check_note = describe(verdict, converted=p.original_op == "add" and p.similarity is None,
+                                routed=routed, held=bool(held), topic_titles={t["slug"]: t["title"] for t in topics})
+
     def _result(self, p: Proposal, deduplicated: bool = False, private_topics: set[str] | None = None) -> dict:
         out = {"proposal_id": p.id, "status": p.status, "op": p.op, "topic": p.topic, "hold": p.hold}
+        if p.checked_by:
+            out["checked_by"] = p.checked_by
         if p.memory_id or p.applied_memory_id:
             out["memory_id"] = p.memory_id or p.applied_memory_id
         if p.original_op:

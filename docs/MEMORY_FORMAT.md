@@ -277,7 +277,7 @@ Per-memory metadata, keyed by id.
 | `status` | `active`, `archived` | Archived memories have no line in any file |
 | `until`, `private` | as inline | Mirrors of the inline attributes |
 | `pinned` | boolean | Listed first in what AI sees |
-| `evidence` | string ≤ 2000 chars | The conversation snippet behind the proposal that created it |
+| `evidence` | string ≤ 2000 chars | The conversation snippet behind the proposal that created it, or, for a memory imported from a chat export or session, the person's quoted message with its source and date |
 
 `meta.json` is a cache with a memory of its own: if it is lost, every memory survives — ids, content, topic, section, `until` and `private` come back from the files; `kind` is guessed again, `source` becomes `user` and `last_actor` becomes `file`, and timestamps restart. Only `history.jsonl` keeps the real past.
 
@@ -323,11 +323,12 @@ One file per proposal, named by its id (`p` plus hexadecimal; the id must be alp
 | `status` | `pending`, `accepted`, `edited_accepted`, `rejected`, `expired`, `applied`, `undone` |
 | `decided_at` | When the status left `pending` or `applied` was set |
 | `reviewed_at` | Version 2: when the person saw an applied change in the digest. Applied proposals without it are "unreviewed". |
-| `hold` | Version 2: why a pending proposal waits: `approval` (the person reviews every change first), `protected` (the target memory was last written by the person) or `private` (a private topic or memory). Absent on applied proposals. |
+| `hold` | Version 2: why a pending proposal waits: `approval` (the person reviews every change first), `protected` (the target memory was last written by the person), `private` (a private topic or memory) or `sensitive` (the OpenMyMemo Assistant's check found it looks like health, money or credentials and there was no private topic to put it in). Absent on applied proposals. |
 | `applied_version` | Version 2: the memory's version right after the change was applied or accepted. Undo is offered while this is still the memory's current version. |
 | `final_content`, `final_topic`, `applied_memory_id` | What was actually written |
 | `before_content`, `before_topic` | The memory before an update or archive, for undo and for the diff |
 | `original_op`, `similarity`, `conflict`, `topic_confidence` | How the proposal was adjusted: an `add` turned into an `update` of a similar memory, whether it looks contradictory, how sure the classifier was |
+| `checked_by`, `check_note` | Optional: `assistant` when the OpenMyMemo Assistant checked an app's proposal before it was filed (product-design.md §17.7), and a short note for the person on what it found or changed. Such a check can turn an `add` into an `update` of a memory it repeats or contradicts (then `original_op` is `add` and `similarity` is absent), pick the topic, or make the proposal wait; it never makes one apply that would otherwise wait. |
 | `undo_until` | Version 1 only. Version 2 allows undo for as long as the change is the memory's latest version, and ignores this field. |
 
 Pending proposals expire after 30 days.
@@ -407,6 +408,7 @@ The folder can live inside an Obsidian vault. Block ids are Obsidian's own synta
 | Gemini, Grok, any assistant | One memory per line, bullets or numbers optional |
 | Markdown | List items; headings are shown in the preview as the source's own grouping |
 | JSON | A list of strings, or of objects with `content` / `memory` / `text` / `value` and optional `topic` (used when it names an existing topic, which is how OpenMyMemo's own export round-trips), `kind`, `created_at`, `categories` (Mem0) |
+| Chats (needs the OpenMyMemo Assistant) | ChatGPT's data export (`conversations.json`, or the export's `.zip`), Claude's data export (`conversations.json` or `.zip`), Claude Code sessions (`~/.claude/projects/<project>/<session>.jsonl`) and Codex sessions (`~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`). The model suggests memories from what the person wrote; each keeps the person's quoted words and the date as `evidence` in `meta.json`. Sources `chatgpt-export`, `claude-export`, `claude-code-sessions`, `codex-sessions` |
 
 Imports land in `memories/from-<source>.md` in the source's order; nothing is classified at import time.
 

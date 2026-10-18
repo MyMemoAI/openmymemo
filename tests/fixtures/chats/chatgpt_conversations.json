@@ -1,0 +1,30 @@
+[
+ {
+  "title": "Lisbon trip",
+  "create_time": 1758000000.0,
+  "update_time": 1758003600.0,
+  "current_node": "n4",
+  "conversation_id": "c-new",
+  "mapping": {
+   "root": {"id": "root", "message": null, "parent": null, "children": ["n0"]},
+   "n0": {"id": "n0", "parent": "root", "children": ["n1"], "message": {"author": {"role": "system"}, "content": {"content_type": "text", "parts": ["You are ChatGPT"]}, "create_time": null, "metadata": {"is_visually_hidden_from_conversation": true}}},
+   "n1": {"id": "n1", "parent": "n0", "children": ["n2", "n2b"], "message": {"author": {"role": "user"}, "content": {"content_type": "text", "parts": ["I'm vegetarian and I'm going to Lisbon in November. Where should I eat?"]}, "create_time": 1758000000.0, "metadata": {}}},
+   "n2b": {"id": "n2b", "parent": "n1", "children": [], "message": {"author": {"role": "assistant"}, "content": {"content_type": "text", "parts": ["An abandoned branch."]}, "create_time": 1758000050.0, "metadata": {}}},
+   "n2": {"id": "n2", "parent": "n1", "children": ["n3"], "message": {"author": {"role": "assistant"}, "content": {"content_type": "text", "parts": ["Try Ao 26 for vegan food."]}, "create_time": 1758000100.0, "metadata": {}}},
+   "n3": {"id": "n3", "parent": "n2", "children": ["n4"], "message": {"author": {"role": "tool"}, "content": {"content_type": "code", "text": "search()"}, "create_time": 1758000200.0, "metadata": {}}},
+   "n4": {"id": "n4", "parent": "n3", "children": [], "message": {"author": {"role": "user"}, "content": {"content_type": "multimodal_text", "parts": [{"content_type": "image_asset_pointer"}, "Thanks! My API key is sk-abcdefghijklmnopqrstuvwx by the way."]}, "create_time": 1758003600.0, "metadata": {}}}
+  }
+ },
+ {
+  "title": "Old chat",
+  "create_time": 1600000000.0,
+  "update_time": 1600000100.0,
+  "current_node": "m2",
+  "id": "c-old",
+  "mapping": {
+   "m1": {"id": "m1", "parent": null, "children": ["m2"], "message": {"author": {"role": "user"}, "content": {"content_type": "text", "parts": ["I work as a nurse in Porto."]}, "create_time": 1600000000.0, "metadata": {}}},
+   "m2": {"id": "m2", "parent": "m1", "children": [], "message": {"author": {"role": "assistant"}, "content": {"content_type": "text", "parts": ["Nice!"]}, "create_time": 1600000100.0, "metadata": {}}}
+  }
+ },
+ "not a conversation"
+]

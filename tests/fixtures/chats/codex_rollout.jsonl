@@ -1,0 +1,7 @@
+{"timestamp":"2026-10-16T08:00:00.000Z","type":"session_meta","payload":{"id":"0199-abcd","timestamp":"2026-10-16T08:00:00.000Z","cwd":"/home/ann/api","originator":"codex_cli_rs"}}
+{"timestamp":"2026-10-16T08:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <cwd>/home/ann/api</cwd>\n</environment_context>"}]}}
+{"timestamp":"2026-10-16T08:00:02.000Z","type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"<permissions instructions>"}]}}
+{"timestamp":"2026-10-16T08:00:05.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"I always write commit messages in English, even though I'm Chinese."}]}}
+{"timestamp":"2026-10-16T08:00:06.000Z","type":"event_msg","payload":{"type":"user_message","message":"I always write commit messages in English, even though I'm Chinese."}}
+{"timestamp":"2026-10-16T08:00:09.000Z","type":"response_item","payload":{"type":"function_call","name":"shell","arguments":"{}"}}
+{"timestamp":"2026-10-16T08:00:10.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Understood."}]}}

@@ -10,13 +10,13 @@ function status(extra: Partial<AssistantStatus> = {}): AssistantStatus {
     host: "127.0.0.1", model: "", has_key: false, key_store: null,
     features: { import: true, sort: true, recall: true, check: true, session: false, tidy: false },
     private_topics: [], caps: { calls: 1000, tokens: 2000000 }, usage: { month: "2026-10", calls: 3, tokens: 1234 },
-    timeout: 60, from_env: [], local: true, problem: "Choose a model.", ready: false, reason: "The Assistant is off.",
+    timeout: 60, check_budget: 2, session_apps: { "claude-code": null, codex: null }, from_env: [], local: true, problem: "Choose a model.", ready: false, reason: "The Assistant is off.",
     where: "The Assistant is off: memory text goes nowhere.", connector_id: null, revoked: false,
     kinds: { local: true, key: true, mymemo: false }, ...extra,
   };
 }
 
-const { api } = vi.hoisted(() => ({ api: { assistant: vi.fn(), assistantSettings: vi.fn(), assistantTest: vi.fn() } }));
+const { api } = vi.hoisted(() => ({ api: { assistant: vi.fn(), assistantSettings: vi.fn(), assistantTest: vi.fn(), assistantSessions: vi.fn() } }));
 vi.mock("../api", () => ({ api }));
 
 const radio = (w: VueWrapper, text: string) => w.findAll('[role="radio"]').find((b) => b.text() === text)!;
@@ -96,5 +96,26 @@ describe("AssistantSettings", () => {
     const w = await mountIt();
     expect(w.text()).toContain("never sent to a model outside this computer");
     expect(w.findAll("button").find((b) => b.text() === "Health")).toBeUndefined();
+  });
+
+  it("asks per app before reading sessions", async () => {
+    const on = status({ enabled: true, model: "llama3.2", problem: null, features: { import: true, sort: true, recall: true, check: true, session: true, tidy: false }, session_apps: { "claude-code": "asked", codex: null } });
+    api.assistant.mockResolvedValue(on);
+    api.assistantSessions.mockResolvedValue({ ...on, session_apps: { "claude-code": "allowed", codex: null } });
+    const w = await mountIt();
+    const rows = w.get('[data-test="session-apps"]');
+    expect(rows.text()).toContain("Claude Code");
+    expect(rows.text()).toContain("Asking you");
+    expect(rows.text()).toContain("Not asked yet");
+    await rows.findAll("button").find((b) => b.text() === "Allow")!.trigger("click");
+    await flushPromises();
+    expect(api.assistantSessions).toHaveBeenCalledWith("claude-code", true);
+    expect(w.get('[data-test="session-apps"]').text()).toContain("Allowed");
+  });
+
+  it("doesn't list apps while reading sessions is off", async () => {
+    api.assistant.mockResolvedValue(status({ enabled: true, model: "m", problem: null }));
+    const w = await mountIt();
+    expect(w.find('[data-test="session-apps"]').exists()).toBe(false);
   });
 });
