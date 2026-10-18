@@ -126,8 +126,28 @@ class Settings:
 # ---- addresses ---------------------------------------------------------------------------------------------
 
 
+_URL_CHARS = re.compile(r"[A-Za-z0-9._~:/%\[\]@!$&'()*+,;=?#-]*")
+
+
+def _host(url: str) -> str | None:
+    """The host a request to ``url`` really goes to, or None when it is unclear: the standard library and the HTTP
+    client must agree, and the address must be plain ASCII without backslashes (which parsers read differently)."""
+    if not _URL_CHARS.fullmatch(url):
+        return None
+    try:
+        import httpx2
+
+        ours = (urlsplit(url).hostname or "").lower()
+        theirs = httpx2.URL(url).host.lower()
+    except Exception:  # noqa: BLE001 - httpx2 raises its own InvalidURL
+        return None
+    return ours if ours and ours == theirs.strip("[]") else None
+
+
 def is_loopback(url: str) -> bool:
-    host = urlsplit(url).hostname or ""
+    host = _host(url)
+    if host is None:
+        return False
     if host == "localhost":
         return True
     try:
@@ -145,7 +165,7 @@ def url_problem(url: str, kind: str) -> str | None:
         parts.port  # noqa: B018 - raises ValueError on a bad port
     except ValueError:
         return "That isn't a valid web address."
-    if not parts.hostname or len(url) > 300 or any(c.isspace() for c in url):
+    if not parts.hostname or len(url) > 300 or _host(url) is None:
         return "That isn't a valid web address."
     if parts.username is not None or parts.password is not None or parts.query or parts.fragment or "#" in url:
         return "Enter the address only, without a user name, ? or #."
