@@ -135,6 +135,57 @@ def test_private_memories_are_never_sent_to_a_remote_check(vault, fake):
     assert len(fake.requests) == 1 and "checked_by" not in out
 
 
+def test_the_check_cant_pull_a_topicless_add_out_of_a_private_topic(vault, fake):
+    turn_on(vault)
+    fake.answer = lambda body: verdict(topic="work")
+    for mode, content in (("propose", "Earns 90k salary a year"), ("auto", "Pays a mortgage on a salary of 90k")):
+        out = Proposals(vault).propose(app_connector(vault, write=mode), "add", content=content, check=True)
+        assert out["topic"] == "finance" and out["status"] == "pending" and out["hold"] == "private"
+        assert out["checked_by"] == "assistant"
+
+
+CASES = [  # (content, topic, setup memories [(topic, content, actor)], verdict maker)
+    ("Earns 90k salary a year", None, [], lambda ids: {"topic": "work"}),
+    ("Earns 90k salary a year", None, [("work", "Works at Acme as an engineer", "connector:x")],
+     lambda ids: {"contradicts": ids[0]}),
+    ("Quit the job to travel", None, [("work", "Works at Acme as a designer", "user")],
+     lambda ids: {"contradicts": ids[0], "topic": "interests"}),
+    ("Prefers green tea", "lifestyle", [("health", "Avoids caffeine for heart reasons", "user")],
+     lambda ids: {"duplicate_of": ids[0]}),
+    ("Collects vinyl records", None, [], lambda ids: {"topic": "health"}),
+    ("Has a cat named Miso", "people", [("people", "Has a dog named Rex", "connector:x")],
+     lambda ids: {"contradicts": ids[0], "sensitive": "money"}),
+]
+
+
+@pytest.mark.parametrize("mode", ["propose", "auto"])
+@pytest.mark.parametrize("approval", [False, True])
+@pytest.mark.parametrize("case", range(len(CASES)))
+def test_a_check_is_never_less_restrictive_than_the_rules(tmp_path, fake, mode, approval, case):
+    from openmymemo.vault import Vault
+
+    content, topic, memories, make = CASES[case]
+    results = []
+    for name, check in (("rules", False), ("checked", True)):
+        v = Vault.create(tmp_path / name)
+        v.update_settings(require_approval=approval)
+        ids = [v.add(t, c, actor=a, source="user" if a == "user" else a).id for t, c, a in memories]
+        turn_on(v)
+        con = app_connector(v, write=mode, include_private=True)
+        fake.answer = lambda body, ids=ids: verdict(**make(ids))
+        try:
+            out = Proposals(v).propose(con, "add", content=content, topic=topic, check=check)
+        except Exception as e:  # noqa: BLE001
+            out = {"status": "refused", "error": type(e).__name__}
+        private = v.private_topics()
+        results.append((out, private))
+    (base, private), (checked, _) = results
+    rank = {"applied": 0, "duplicate": 1, "pending": 2, "refused": 3}
+    assert rank[checked["status"]] >= rank[base["status"]] or base["status"] == "duplicate", (base, checked)
+    if base.get("topic") in private:
+        assert checked.get("topic") in private or checked["status"] == "pending", (base, checked)
+
+
 def test_a_slow_check_doesnt_hold_up_the_app(vault, fake):
     turn_on(vault)
     save_settings(check_budget=0.5)

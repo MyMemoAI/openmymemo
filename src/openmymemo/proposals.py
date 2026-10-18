@@ -246,82 +246,18 @@ class Proposals:
 
             private = v.private_topics()
             topics = v.topics()
-            slugs = {t["slug"] for t in topics}
-            target = None
-            if op in ("update", "archive"):
-                if not memory_id:
-                    raise VaultError(f"memory_id is required for {op}")
-                try:
-                    target = v.get(memory_id)
-                except NotFound:
-                    raise VaultError(f"No memory with id {memory_id}") from None
-                if target.status != "active" or not connector.can_read_topic(target.topic, private) or (
-                        target.private and not connector.include_private):
-                    raise VaultError(f"No memory with id {memory_id}")
-
-            confidence = None
-            if topic and topic not in slugs:
-                topic = next((t["slug"] for t in topics if t["title"] == topic), None) or None
-            if op == "add" and not topic and verdict and verdict.topic in slugs and verdict.topic not in private:
-                topic = verdict.topic
-            if op == "add" and not topic:
-                topic, confidence = classify_topic(content, [t for t in topics if t["group"] != IMPORTED_GROUP])
-                topic = topic or ("identity" if "identity" in slugs else next(iter(slugs)))
-            if op == "update" and not topic:
-                topic = target.topic
-            if op == "archive":
-                topic = target.topic
-
-            if topic in connector.blocked_topics:
-                raise PermissionDenied(f"The user does not accept proposals about '{topic}' from this app.")
-
-            p = Proposal(id=_new_id(), connector_id=connector.id, connector_name=connector.name, op=op,
-                         content=content, topic=topic, memory_id=memory_id, kind=kind, reason=reason,
-                         evidence=(evidence or None) and evidence[:2000], idempotency_key=idempotency_key,
-                         created_at=created_at or now_iso(), queue_id=queue_id, topic_confidence=confidence)
-            if target:
-                p.before_content, p.before_topic = target.content, target.topic
-
-            if op == "add":
-                readable = [m for m in v.memories()
-                            if connector.can_read_topic(m.topic, private) and (connector.include_private or not m.private)]
-                best, best_sim = None, 0.0
-                for m in readable:
-                    s = similarity(content, m.content)
-                    if s > best_sim:
-                        best, best_sim = m, s
-                if best and best_sim >= DUPLICATE_AT:
-                    v.log_activity(connector.id, "propose", op="add", memory_ids=[best.id], result="duplicate")
-                    return {"status": "duplicate", "memory_id": best.id,
-                            "message": "The user already has this memory; nothing to do."}
-                if best and best_sim >= SIMILAR_AT:
-                    # An update of that memory from here on, so its protection applies too.
-                    target = best
-                    p.original_op, p.op, p.memory_id = "add", "update", best.id
-                    p.before_content, p.before_topic = best.content, best.topic
-                    p.topic = best.topic if not topic or confidence is not None else topic
-                    p.similarity = round(best_sim, 3)
-                    p.conflict = looks_contradictory(content, best.content)
-                elif verdict and verdict.target:
-                    found = self._readable(connector, verdict.target, private)
-                    if found is not None and found.topic not in connector.blocked_topics:
-                        # The model saw what word overlap missed: an update of that memory, so §5.5 applies to it.
-                        target = found
-                        p.original_op, p.op, p.memory_id = "add", "update", found.id
-                        p.before_content, p.before_topic = found.content, found.topic
-                        p.topic = found.topic if not topic or confidence is not None else topic
-                        p.conflict = bool(verdict.contradicts) or looks_contradictory(content, found.content)
-            elif op == "update" and target:
-                if similarity(content, target.content) >= 0.999 and topic == target.topic:
-                    return {"status": "duplicate", "memory_id": target.id,
-                            "message": "The memory already says exactly this; nothing to do."}
-                p.conflict = looks_contradictory(content, target.content)
-            if target is not None and target.topic in connector.blocked_topics:  # e.g. an add that became an update
-                raise PermissionDenied(f"The user does not accept proposals about '{target.topic}' from this app.")
-
-            if verdict is not None:
-                self._record_check(connector, p, target, verdict, private, topics)
+            args = dict(op=op, content=content, memory_id=memory_id, topic=topic, kind=kind, reason=reason,
+                        evidence=evidence, idempotency_key=idempotency_key, created_at=created_at,
+                        queue_id=queue_id)
+            # The rules first, exactly as without a check: the baseline the check may only make stricter.
+            routed = self._route(connector, private, topics, verdict=None, **args)
+            if isinstance(routed, dict):
+                v.log_activity(connector.id, "propose", op=op, memory_ids=[routed["memory_id"]], result="duplicate")
+                return routed
+            p, target = routed
             p.hold = self._hold(connector, p, target, private)
+            if verdict is not None:
+                p, target = self._checked(connector, p, target, verdict, private, topics, args)
             if p.hold is None:
                 self._apply(p, actor=f"connector:{connector.id}")
                 p.status, p.decided_at = "applied", now_iso()
@@ -329,6 +265,109 @@ class Proposals:
             v.log_activity(connector.id, "propose", op=p.op, proposal_id=p.id,
                            memory_ids=[x for x in [p.memory_id or p.applied_memory_id] if x], result=p.status)
             return self._result(p, private_topics=private)
+
+    def _checked(self, connector: Connector, base: Proposal, base_target: Memory | None, verdict,
+                 private: set[str], topics: list[dict], args: dict) -> tuple[Proposal, Memory | None]:
+        """The proposal with the Assistant's check applied, never less restrictive than ``base`` (the rules alone):
+        it keeps the base's private topic and its hold, and falls back to the base when the check's version would be
+        refused. Recorded on the proposal either way."""
+        try:
+            routed = self._route(connector, private, topics, verdict=verdict, **args)
+        except VaultError:
+            routed = None
+        if routed is None or isinstance(routed, dict) or (base.topic in private and routed[0].topic not in private):
+            self._record_check(connector, base, base_target, verdict, private, topics, apply=False)
+            return base, base_target
+        p, target = routed
+        p.id = base.id
+        self._record_check(connector, p, target, verdict, private, topics)
+        p.hold = self._hold(connector, p, target, private) or base.hold
+        return p, target
+
+    def _route(self, connector: Connector, private: set[str], topics: list[dict], *, verdict, op: str,
+               content: str | None, memory_id: str | None, topic: str | None, kind: str | None, reason: str | None,
+               evidence: str | None, idempotency_key: str | None, created_at: str | None, queue_id: str | None
+               ) -> tuple[Proposal, Memory | None] | dict:
+        """Where a proposal goes (its op, topic, target), without saving anything: a Proposal and its target, or a
+        ``duplicate`` result. ``verdict``: the Assistant's check, or None for the rules alone. Raises
+        PermissionDenied for a blocked topic, VaultError for a bad target."""
+        v = self.vault
+        slugs = {t["slug"] for t in topics}
+        target = None
+        if op in ("update", "archive"):
+            if not memory_id:
+                raise VaultError(f"memory_id is required for {op}")
+            try:
+                target = v.get(memory_id)
+            except NotFound:
+                raise VaultError(f"No memory with id {memory_id}") from None
+            if target.status != "active" or not connector.can_read_topic(target.topic, private) or (
+                    target.private and not connector.include_private):
+                raise VaultError(f"No memory with id {memory_id}")
+
+        confidence = None
+        if topic and topic not in slugs:
+            topic = next((t["slug"] for t in topics if t["title"] == topic), None) or None
+        if op == "add" and not topic:
+            topic, confidence = classify_topic(content, [t for t in topics if t["group"] != IMPORTED_GROUP])
+            topic = topic or ("identity" if "identity" in slugs else next(iter(slugs)))
+            # The check may name another topic only in place of an ordinary one the rules picked: never instead of
+            # a private one, and never to get around a topic the person blocked for this app.
+            if (verdict is not None and verdict.topic in slugs and verdict.topic not in private
+                    and verdict.topic not in connector.blocked_topics and topic not in private
+                    and topic not in connector.blocked_topics):
+                topic, confidence = verdict.topic, None
+        if op == "update" and not topic:
+            topic = target.topic
+        if op == "archive":
+            topic = target.topic
+
+        if topic in connector.blocked_topics:
+            raise PermissionDenied(f"The user does not accept proposals about '{topic}' from this app.")
+
+        p = Proposal(id=_new_id(), connector_id=connector.id, connector_name=connector.name, op=op,
+                     content=content, topic=topic, memory_id=memory_id, kind=kind, reason=reason,
+                     evidence=(evidence or None) and evidence[:2000], idempotency_key=idempotency_key,
+                     created_at=created_at or now_iso(), queue_id=queue_id, topic_confidence=confidence)
+        if target:
+            p.before_content, p.before_topic = target.content, target.topic
+
+        if op == "add":
+            readable = [m for m in v.memories()
+                        if connector.can_read_topic(m.topic, private) and (connector.include_private or not m.private)]
+            best, best_sim = None, 0.0
+            for m in readable:
+                s = similarity(content, m.content)
+                if s > best_sim:
+                    best, best_sim = m, s
+            if best and best_sim >= DUPLICATE_AT:
+                return {"status": "duplicate", "memory_id": best.id,
+                        "message": "The user already has this memory; nothing to do."}
+            if best and best_sim >= SIMILAR_AT:
+                # An update of that memory from here on, so its protection applies too.
+                target = best
+                p.original_op, p.op, p.memory_id = "add", "update", best.id
+                p.before_content, p.before_topic = best.content, best.topic
+                p.topic = best.topic if not topic or confidence is not None else topic
+                p.similarity = round(best_sim, 3)
+                p.conflict = looks_contradictory(content, best.content)
+            elif verdict is not None and verdict.target:
+                found = self._readable(connector, verdict.target, private)
+                if found is not None and found.topic not in connector.blocked_topics:
+                    # The model saw what word overlap missed: an update of that memory, so §5.5 applies to it.
+                    target = found
+                    p.original_op, p.op, p.memory_id = "add", "update", found.id
+                    p.before_content, p.before_topic = found.content, found.topic
+                    p.topic = found.topic if p.topic not in private else p.topic
+                    p.conflict = bool(verdict.contradicts) or looks_contradictory(content, found.content)
+        elif op == "update" and target:
+            if similarity(content, target.content) >= 0.999 and topic == target.topic:
+                return {"status": "duplicate", "memory_id": target.id,
+                        "message": "The memory already says exactly this; nothing to do."}
+            p.conflict = looks_contradictory(content, target.content)
+        if target is not None and target.topic in connector.blocked_topics:  # e.g. an add that became an update
+            raise PermissionDenied(f"The user does not accept proposals about '{target.topic}' from this app.")
+        return p, target
 
     def _hold(self, connector: Connector, p: Proposal, target: Memory | None, private: set[str]) -> str | None:
         """Why this proposal must wait for the user, or None when it applies now (the table in §5.5)."""
@@ -358,13 +397,21 @@ class Proposals:
         return m
 
     def _record_check(self, connector: Connector, p: Proposal, target: Memory | None, verdict, private: set[str],
-                      topics: list[dict]) -> None:
-        """Apply what the Assistant's check may change (only ever more cautious) and record it on the proposal."""
+                      topics: list[dict], apply: bool = True) -> None:
+        """Apply what the Assistant's check may change (only ever more cautious) and record it on the proposal.
+        ``apply=False``: the rules' version is kept; only the sensitivity flag (which only adds a wait) applies."""
         from .assistant.checks import describe, private_route
 
         routed = None
         held = False
-        if verdict.sensitive and p.topic not in private:
+        if not apply:
+            from dataclasses import replace
+
+            verdict = replace(verdict, topic=None, duplicate_of=None, contradicts=None)
+        if not apply and verdict.sensitive and p.topic not in private:
+            p.hold = p.hold or "sensitive"
+            held = True
+        elif verdict.sensitive and p.topic not in private:
             if p.op == "add" and target is None:
                 routed = private_route(self.vault, connector, p.content or "", verdict.sensitive)
             if routed:

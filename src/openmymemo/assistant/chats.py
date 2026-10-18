@@ -387,6 +387,20 @@ def mask_secrets(text: str) -> str:
     return _SECRETS.sub("[secret]", text)
 
 
+def clean_meta(text: str, limit: int) -> str:
+    """A title, name or path as it may go out or be kept: keys and tokens masked first, control characters dropped,
+    then cut to ``limit``."""
+    text = mask_secrets(" ".join(str(text or "").split()))
+    text = "".join(ch for ch in text if ch.isprintable())
+    return text[:limit]
+
+
+def conversation_header(conv: Conversation) -> str:
+    """The line that introduces a conversation to the model: its title, the app and the date only."""
+    return (f'== Conversation "{clean_meta(conv.title, 120)}" ({LABELS.get(conv.source, "chats")}'
+            + (f", {conv.updated_at[:10]})" if conv.updated_at else ")"))
+
+
 def forbidden_texts(assistant: Assistant) -> list[str]:
     """Everything the Assistant may not send to its model (``Guard.withheld``: private and out-of-scope memories,
     their history and the proposals about them); a message containing any of it is left out of what is sent."""
@@ -396,26 +410,16 @@ def forbidden_texts(assistant: Assistant) -> list[str]:
 
 def chunks(conversations: Sequence[Conversation], *, forbidden: Sequence[str] = (), chunk_chars: int = CHUNK_CHARS,
            skip: Callable[[Conversation, Message], bool] | None = None) -> list[Chunk]:
-    """Rendered chunks for the model, newest conversation first. Messages that contain a forbidden memory, or that
-    ``skip`` says to leave out, aren't included; keys and tokens are masked. A conversation longer than a chunk
-    continues in the next one. Chunks without a message from the person are dropped."""
-    out: list[Chunk] = []
-    lines: list[str] = []
-    refs: dict[int, tuple[Conversation, Message]] = {}
-    size = users = 0
-    n = 0
-
-    def flush() -> None:
-        nonlocal lines, refs, size, users
-        if users:
-            out.append(Chunk("\n".join(lines), refs, users))
-        lines, refs, size, users = [], {}, 0, 0
-
-    ordered = sorted(conversations, key=lambda c: c.updated_at or "", reverse=True)
-    for conv in ordered:
-        header = f'== Conversation "{conv.title[:120]}" ({LABELS.get(conv.source, conv.source)}' + (
-            f", {conv.updated_at[:10]})" if conv.updated_at else ")")
-        started = False
+    """Rendered chunks for the model, newest first: the newest conversation first, and a conversation longer than a
+    chunk from its end backwards, so reading only the first chunks reads the latest messages. Inside a chunk,
+    messages keep their order. Messages that contain withheld text, or that ``skip`` says to leave out, aren't
+    included; keys and tokens are masked, in messages and in what describes them. Chunks without a message from the
+    person are dropped."""
+    # 1. Each conversation in pieces of at most a chunk, in time order; then the pieces newest first.
+    pieces: list[tuple[Conversation, str, list[tuple[Message, str]]]] = []
+    for conv in sorted(conversations, key=lambda c: c.updated_at or "", reverse=True):
+        header = conversation_header(conv)
+        rows: list[tuple[Message, str]] = []
         for msg in conv.messages:
             if skip and skip(conv, msg):
                 continue
@@ -424,23 +428,41 @@ def chunks(conversations: Sequence[Conversation], *, forbidden: Sequence[str] = 
             text = mask_secrets(msg.text)
             limit = USER_CHARS if msg.role == "user" else REPLY_CHARS
             text = text[:limit] + ("…" if len(text) > limit else "")
-            n += 1
-            line = (f"#{n} {msg.role}" + (f" {msg.at[:10]}" if msg.at else "") + f": {text}") if msg.role == "user" \
-                else f"#{n} assistant: {text}"
-            extra = len(line) + (0 if started else len(header) + 1) + 1
-            if size and size + extra > chunk_chars:
-                flush()
-                started = False
-                extra = len(line) + len(header) + 2
-            if not started:
-                lines.append(header)
-                started = True
-            lines.append(line)
-            refs[n] = (conv, msg)
+            body = (f"{msg.role}" + (f" {msg.at[:10]}" if msg.role == "user" and msg.at else "") + f": {text}")
+            rows.append((msg, body))
+        own: list[list[tuple[Message, str]]] = []
+        size = len(header) + 1
+        for row in rows:
+            extra = len(row[1]) + 12  # the line's number
+            if own and own[-1] and size + extra > chunk_chars:
+                own.append([])
+                size = len(header) + 1
+            if not own:
+                own.append([])
+            own[-1].append(row)
             size += extra
-            if msg.role == "user":
-                users += 1
-    flush()
+        pieces += [(conv, header, piece) for piece in reversed(own) if piece]
+
+    # 2. Pieces packed into chunks in that order, numbered as sent.
+    out: list[Chunk] = []
+    lines: list[str] = []
+    refs: dict[int, tuple[Conversation, Message]] = {}
+    size = users = n = 0
+    for conv, header, piece in pieces:
+        cost = len(header) + 1 + sum(len(body) + 12 for _, body in piece)
+        if lines and size + cost > chunk_chars:
+            if users:
+                out.append(Chunk("\n".join(lines), refs, users))
+            lines, refs, size, users = [], {}, 0, 0
+        lines.append(header)
+        for msg, body in piece:
+            n += 1
+            lines.append(f"#{n} {body}")
+            refs[n] = (conv, msg)
+            users += msg.role == "user"
+        size += cost
+    if lines and users:
+        out.append(Chunk("\n".join(lines), refs, users))
     return out
 
 
@@ -529,8 +551,8 @@ def evidence_for(msg: Message, conv: Conversation, quote: str) -> str:
     text = mask_secrets(msg.text)
     if not quote or _norm(quote) not in _norm(text):
         quote = text[:QUOTE_CHARS] + ("…" if len(text) > QUOTE_CHARS else "")
-    where = f'{LABELS.get(conv.source, conv.source)}, "{conv.title[:80]}"'
-    return f"“{quote[:QUOTE_CHARS]}” — {where}" + (f", {msg.at[:10]}" if msg.at else "")
+    where = f'{LABELS.get(conv.source, "chats")}, "{clean_meta(conv.title, 80)}"'
+    return f"“{mask_secrets(quote)[:QUOTE_CHARS]}” — {where}" + (f", {msg.at[:10]}" if msg.at else "")
 
 
 def extract(assistant: Assistant, feature: str, chunk: Chunk, topic_list: Sequence[dict],
@@ -570,6 +592,25 @@ def unique(cands: Iterable[Candidate], against: Sequence[str] = (), at: float = 
     return kept
 
 
+def destination(assistant: Assistant) -> tuple:
+    """Where requests go and what they may carry, as the person saw it when they were told the cost."""
+    s = assistant.settings
+    return (s.enabled, s.kind, s.protocol, s.endpoint, s.model, tuple(sorted(s.private_topics)))
+
+
+SETTINGS_CHANGED = ("The Assistant was turned off or its settings changed since the cost was shown, so nothing more "
+                    "was sent. Start again to see the cost with the new settings.")
+
+
+def live_assistant(assistant: Assistant, feature: str, planned: tuple) -> Assistant | None:
+    """The Assistant as its settings are now, when ``feature`` is still available and requests would still go where
+    they went when the work was planned (``destination``); None otherwise. Checked before every call."""
+    now = Assistant.from_settings(assistant.vault)
+    if destination(now) != planned or not now.available(feature):
+        return None
+    return now
+
+
 # ---- chat-export import (§17.5) -----------------------------------------------------------------------------
 
 
@@ -588,6 +629,7 @@ class ChatImport:
         self.source = source
         self.conversations = list(conversations)
         self.assistant = assistant or Assistant.from_settings(vault)
+        self.planned = destination(self.assistant)  # where the estimate said the text goes
         self.chunks = chunks(self.conversations, forbidden=forbidden_texts(self.assistant))
         self.done = 0  # chunks processed so far
         self.failed = 0
@@ -607,26 +649,33 @@ class ChatImport:
             cancelled: Callable[[], bool] | None = None) -> list:
         from .. import transfer
 
-        todo = self.screened(self.chunks[: len(self.chunks) if max_calls is None else max(0, max_calls)])
-        topic_list = targets(self.vault, self.assistant)
         found: list[Candidate] = []
+        todo: list[Chunk] = []
+        current = live_assistant(self.assistant, "import", self.planned)
+        if current is None:
+            self.error = SETTINGS_CHANGED
+        else:
+            self.assistant = current
+            todo = self.screened(self.chunks[: len(self.chunks) if max_calls is None else max(0, max_calls)])
         for chunk in todo:
             if cancelled and cancelled():
                 break
-            if not self.assistant.available("import"):
-                self.error = self.assistant.unavailable_reason("import")
+            current = live_assistant(self.assistant, "import", self.planned)  # re-read before every call
+            if current is None:
+                self.error = SETTINGS_CHANGED
                 break
-            got = extract(self.assistant, "import", chunk, topic_list)
+            got = extract(current, "import", chunk, targets(self.vault, current))
             self.done += 1
             if got is None:
                 self.failed += 1
-                self.error = self.assistant.last_error
+                self.error = current.last_error
             else:
                 found.extend(got)
             if progress:
                 progress(self.done, len(todo))
         items = [transfer.ImportItem(content=c.content, topic=c.topic, kind=c.kind,
-                                     created_at=(c.at or "")[:10] or None, hint=c.conversation[:80] or None,
+                                     created_at=(c.at or "")[:10] or None,
+                                     hint=clean_meta(c.conversation, 80) or None,
                                      by="assistant", evidence=c.evidence, flag="sensitive" if c.sensitive else None)
                  for c in unique(found)]
         items = transfer.plan(self.vault, items)

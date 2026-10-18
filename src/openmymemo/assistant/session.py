@@ -218,6 +218,12 @@ def _work(vault: Vault, app: str, transcript: Path, session_id: str, event: str,
         return {"result": "no-transcript"}
     key = f"{app}:{session_id}"[:240]
     with _session_lock():
+        # The lock may have waited for another worker: the settings and the consent are read again.
+        assistant = Assistant.from_settings(vault)
+        if not assistant.available("session"):
+            return {"result": "off"}
+        if assistant.settings.session_apps.get(app) != "allowed":
+            return {"result": "no-consent"}
         conv = chats.read_transcript(SOURCE[app], path)
         if conv is None:
             return {"result": "empty"}
@@ -229,7 +235,7 @@ def _work(vault: Vault, app: str, transcript: Path, session_id: str, event: str,
             return {"result": "too-little", "new_user_messages": users}
         conv.messages = new
         filed = _extract_and_file(vault, assistant, app, conv)
-        if filed["calls"] and filed["failed"] == filed["calls"]:
+        if filed["result"] == "stopped" or (filed["calls"] and filed["failed"] == filed["calls"]):
             return filed  # the model couldn't be reached: the next run tries these messages again
         state[key] = {"messages": seen + len(new), "at": datetime.now(UTC).isoformat(timespec="seconds")}
         _save_state(state)
@@ -268,17 +274,25 @@ def _extract_and_file(vault: Vault, assistant: Assistant, app: str, conv: chats.
             break
         todo.append(ch)
         size += ch.chars
-    extra = [Data("\n".join(f"- {t}" for t in proposed), label="already saved")] if proposed else []
+    extra = [Data("\n".join(f"- {chats.mask_secrets(t)}" for t in proposed), label="already saved")] if proposed else []
     topic_list = chats.targets(vault, assistant)
     found: list[chats.Candidate] = []
     calls = failed = 0
+    planned = chats.destination(assistant)
+    stopped = False
     for ch in todo:
-        got = chats.extract(assistant, "session", ch, topic_list, extra=extra)
+        current = chats.live_assistant(assistant, "session", planned)  # re-read before every call
+        if current is None or current.settings.session_apps.get(app) != "allowed":
+            stopped = True
+            break
+        got = chats.extract(current, "session", ch, topic_list, extra=extra)
         calls += 1
         if got is None:
             failed += 1
             continue
         found.extend(c for c in got if not c.sensitive)  # the Assistant never writes into a private topic
+    if stopped:  # turned off, consent withdrawn or the endpoint changed meanwhile: nothing is filed
+        return {"result": "stopped", "calls": calls, "failed": failed}
     filed = {"applied": 0, "pending": 0, "duplicate": 0, "refused": 0}
     name = APP_NAMES.get(app, app)
     for c in chats.unique(found, against=proposed, at=0.6):

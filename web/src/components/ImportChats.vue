@@ -101,6 +101,7 @@ async function start() {
     timer = setTimeout(poll, 500);
   } catch (e) {
     toast(e instanceof Error ? e.message : String(e), "error");
+    job.value = null; // e.g. the Assistant's settings changed since the cost was shown: read it again
   } finally {
     busy.value = false;
   }
