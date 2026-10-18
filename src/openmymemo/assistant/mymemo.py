@@ -30,6 +30,7 @@ Prices, allowances and plan details are the service's; this file only passes on 
 from __future__ import annotations
 
 import contextlib
+import functools
 import hashlib
 import logging
 import secrets
@@ -94,8 +95,11 @@ def norm_service(url: str) -> str:
     return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path.rstrip("/"), "", ""))
 
 
+@functools.lru_cache(maxsize=64)
 def _hash(token: str) -> str:
-    return hashlib.sha256(token.encode()).hexdigest()[:16]
+    """A short fingerprint that tells tokens apart without keeping them. A slow key-derivation hash, so a stored
+    fingerprint can't be matched against guessed tokens cheaply; cached, since the same tokens come back."""
+    return hashlib.pbkdf2_hmac("sha256", token.encode(), b"openmymemo-assistant-token-id", 100_000).hex()[:16]
 
 
 @dataclass(frozen=True)
