@@ -225,6 +225,22 @@ class Assistant:
         except OSError:
             log.warning("Assistant: couldn't write the activity log")
 
+    def screen(self, feature: str, text: str) -> bool:
+        """Check material as it was given, before a feature splits, numbers or reformats it: False (logged as
+        ``refused_private``) when it contains anything that may not be sent, or nothing may be sent at all. A feature
+        that transforms its input calls this first and takes its rule-based path on False; ``json_call`` checks the
+        transformed blocks again."""
+        connector = self.connector()
+        if connector is None:
+            self.last_error = "The Assistant's access was removed."
+            return False
+        if self._refusal([Data(text)], connector):
+            self.last_error = ("Private memories are never sent to a model outside this computer." if self.remote
+                               else "That includes memories the Assistant may not read.")
+            self._log(feature, "refused_private", model=self.settings.model)
+            return False
+        return True
+
     def json_call(self, feature: str, instructions: str, data: Sequence[Data | str], schema: dict, *,
                   max_tokens: int = 2048, timeout: float | None = None) -> dict | None:
         """Ask the model for JSON matching ``schema`` (an object schema; see ``schema.py`` for the keywords).

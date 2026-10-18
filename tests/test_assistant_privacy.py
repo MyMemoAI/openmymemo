@@ -255,3 +255,56 @@ def test_redirects_are_never_followed(vault):
     finally:
         server.shutdown()
     assert load_settings().enabled
+
+
+# ---- the import path checks the text as given, before splitting it into numbered chunks ---------------------------
+
+LONG_SECRET = "Has been seeing Dr. Okonkwo for panic attacks since the spring of 2024"
+CJK_SECRET = "因为惊恐发作，从二零二四年春天起一直在看奥孔科医生"
+
+
+def _variants() -> list[str]:
+    words = LONG_SECRET.split()
+    filler = "\n".join(f"- Likes item number {i} in the list of harmless things" for i in range(300))
+    return [
+        "\n".join(words),  # one word per line: numbering lands between every word
+        "\n\n".join(" ".join(words[i:i + 2]) for i in range(0, len(words), 2)),  # blank lines between pieces
+        "- **Has been** seeing\n  _Dr. Okonkwo_ for\n  > panic attacks since\n  the spring of 2024",  # Markdown
+        "\r\n".join(words),  # Windows line ends
+        filler + "\n" + "\n".join(words),  # past the first chunk
+        filler[: len(filler) - 40] + " ".join(words[:4]) + "\n" + " ".join(words[4:]),  # across a chunk boundary
+        "\n".join(CJK_SECRET),  # CJK, one character per line
+        "（备忘）" + CJK_SECRET.replace("，", "\n，\n"),  # full-width punctuation on its own lines
+    ]
+
+
+@pytest.mark.parametrize("n", range(len(_variants())))
+def test_panel_import_never_sends_a_split_or_reformatted_private_memory(vault, fake, n):
+    vault.add("health", LONG_SECRET)
+    vault.add("health", CJK_SECRET)
+    remote(vault)
+    fake.answer = split_answer
+    api = TestClient(create_api(vault, 8787), base_url="http://127.0.0.1:8787")
+    text = _variants()[n]
+    items = api.post("/api/import/preview", headers=H, json={"source": "text", "text": text}).json()
+    assert fake.requests == [] and {i["by"] for i in items} <= {"rules"}
+    api.post("/api/import/file", headers=H, json={"name": "memory.md", "text": text})
+    assert fake.requests == []
+
+
+@pytest.mark.parametrize("n", range(len(_variants())))
+def test_cli_import_never_sends_a_split_or_reformatted_private_memory(vault, fake, tmp_path, n):
+    vault.add("health", LONG_SECRET)
+    vault.add("health", CJK_SECRET)
+    remote(vault)
+    f = tmp_path / "notes.md"
+    f.write_text(_variants()[n], encoding="utf-8")
+    r = CliRunner().invoke(app, ["--vault", str(vault.root), "import", "markdown", str(f), "--yes"])
+    assert r.exit_code == 0 and fake.requests == []
+
+
+def test_numbered_lines_are_checked_without_their_numbers(vault, fake):
+    vault.add("health", LONG_SECRET)
+    a = remote(vault)
+    numbered = "\n".join(f"L{i + 1}: {w}" for i, w in enumerate(LONG_SECRET.split()))
+    assert a.json_call("import", "x", [numbered], SCHEMA) is None and fake.requests == []

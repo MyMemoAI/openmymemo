@@ -129,6 +129,10 @@ def import_preview(vault: Vault, source: str, text: str, assistant: Assistant | 
     assistant = assistant or Assistant.from_settings(vault)
     if not assistant.available("import"):
         return transfer.plan(vault, rules)
+    if not assistant.screen("import", text):  # the whole text as given, before chunks and line numbers
+        for it in rules:
+            it.by = "rules"
+        return transfer.plan(vault, rules)
 
     lines = text.replace("\r\n", "\n").split("\n")
     norm_lines = [_norm(x) for x in lines]
