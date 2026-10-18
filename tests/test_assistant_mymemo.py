@@ -523,3 +523,68 @@ def test_the_cli_shows_no_account_for_a_browser_sign_in(vault, fake):
     save_settings(enabled=True, kind="mymemo")
     r = CliRunner().invoke(app, ["--vault", str(vault.root), "assistant", "status"])
     assert "Signed in: a MyMemo account" in r.stdout
+
+
+# ---- a token from OPENMYMEMO_ASSISTANT_API_KEY has pauses of its own ---------------------------------------------------
+
+
+def env_token(vault, fake, monkeypatch) -> str:
+    """MyMemo chosen, with an access token from the environment (a script's), not a stored sign-in."""
+    token = fake.tokens_for_keep()["access"]
+    monkeypatch.setenv("OPENMYMEMO_ASSISTANT_API_KEY", token)
+    save_settings(enabled=True, kind="mymemo")
+    ensure_connector(vault, regrant=True)
+    assert load_settings().key_store == "env"
+    return token
+
+
+@pytest.mark.parametrize("name", ["rate_limit_exceeded", "model_unavailable", "plan_required", "quota_exceeded"])
+def test_an_environment_token_keeps_its_pause_across_fresh_settings(name, vault, fake, monkeypatch):
+    env_token(vault, fake, monkeypatch)
+    fake.fail(name)
+    assert Assistant.from_settings(vault).json_call("sort", "x", ["t"], SCHEMA) is None
+    fresh = Assistant.from_settings(vault)  # the next feature, settings loaded again
+    assert not fresh.available("sort") and fresh.json_call("sort", "x", ["t"], SCHEMA) is None
+    assert features.import_preview(vault, "markdown", PASTE) and len(fake.chats) == 1
+    if name in ("rate_limit_exceeded", "model_unavailable"):  # the Test button respects Retry-After too
+        assert not Assistant.from_settings(vault).test()["ok"] and len(fake.chats) == 1
+
+
+def test_another_environment_token_or_service_isnt_paused_by_the_first(vault, fake, monkeypatch):
+    env_token(vault, fake, monkeypatch)
+    fake.fail("rate_limit_exceeded")
+    assert Assistant.from_settings(vault).json_call("sort", "x", ["t"], SCHEMA) is None
+    monkeypatch.setenv("OPENMYMEMO_ASSISTANT_API_KEY", fake.tokens_for_keep()["access"])  # another token
+    assert Assistant.from_settings(vault).json_call("sort", "x", ["t"], SCHEMA) is not None
+    fake.fail("rate_limit_exceeded")
+    assert Assistant.from_settings(vault).json_call("sort", "x", ["t"], SCHEMA) is None
+    other = FakeAssistantService().start()
+    try:  # the same token's identity at another service is another identity
+        token = other.tokens_for_keep()["access"]
+        monkeypatch.setenv("OPENMYMEMO_CLOUD_URL", other.base)
+        monkeypatch.setenv("OPENMYMEMO_ASSISTANT_API_KEY", token)
+        a = Assistant.from_settings(vault)
+        assert a.available("sort") and a.json_call("sort", "x", ["t"], SCHEMA) is not None
+        assert other.chat_auth == [f"Bearer {token}"]
+    finally:
+        other.stop()
+
+
+def test_environment_failures_never_touch_a_stored_sign_in_and_vice_versa(vault, fake, monkeypatch):
+    signed_in(vault, fake)
+    before = raw()["mymemo"]
+    env_token(vault, fake, monkeypatch)
+    fake.fail("plan_required")
+    assert Assistant.from_settings(vault).json_call("sort", "x", ["t"], SCHEMA) is None
+    assert raw()["mymemo"] == before  # no pause, account or tokens changed for the stored sign-in
+    monkeypatch.delenv("OPENMYMEMO_ASSISTANT_API_KEY")
+    stored = Assistant.from_settings(vault)
+    assert stored.available("sort") and stored.json_call("sort", "x", ["t"], SCHEMA) is not None
+    fake.fail("quota_exceeded")  # the stored sign-in's pause ...
+    assert Assistant.from_settings(vault).json_call("sort", "x", ["t"], SCHEMA) is None
+    assert raw()["mymemo"]["hold"]["code"] == "quota_exceeded"
+    paused_env = raw().get("mymemo_env")
+    env_token(vault, fake, monkeypatch)  # ... doesn't pause the environment's token, nor change its slot
+    assert Assistant.from_settings(vault).available("sort")
+    assert Assistant.from_settings(vault).json_call("sort", "x", ["t"], SCHEMA) is not None
+    assert raw()["mymemo"]["hold"]["code"] == "quota_exceeded" and raw().get("mymemo_env") == paused_env

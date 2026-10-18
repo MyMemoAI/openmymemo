@@ -423,9 +423,31 @@ def access_token(s: Settings, sess: Session) -> tuple[Session | None, str]:
 # ---- pauses the service asked for ------------------------------------------------------------------------------
 
 
+def _env_identity(token: str, service: str) -> str:
+    """Who a token from OPENMYMEMO_ASSISTANT_API_KEY is: a hash of the token and its normalized service."""
+    return _hash(f"{token}|{norm_service(service)}")
+
+
+def _env_hold(s: Settings, raw: Mapping[str, Any] | None = None) -> dict | None:
+    """The pause kept for the environment's token (``raw["mymemo_env"]``), if it is for this token and service."""
+    slot = (st._read_raw() if raw is None else raw).get("mymemo_env")
+    if not isinstance(slot, dict) or slot.get("identity") != _env_identity(s.mymemo_token, service_of(s)):
+        return None
+    return slot.get("hold") if isinstance(slot.get("hold"), dict) else None
+
+
+def _stored_hold(s: Settings) -> dict | None:
+    """The pause recorded for the credential ``s`` uses, expired or not: the environment's token has its own,
+    kept apart from the stored sign-in's."""
+    if s.key_store == "env":
+        return _env_hold(s)
+    h = s.mymemo.get("hold")
+    return h if isinstance(h, dict) else None
+
+
 def hold(s: Settings) -> dict | None:
     """The pause in force (``code``: plan_required, quota_exceeded, rate_limited, unavailable), or None."""
-    h = s.mymemo.get("hold")
+    h = _stored_hold(s)
     if not isinstance(h, dict):
         return None
     until = _parse(h.get("until"))
@@ -502,6 +524,19 @@ def note_failure(s: Settings, sess: Session, status: int, payload: Any,
 
 
 def _set_hold(s: Settings, sess: Session, h: dict | None) -> None:
+    if sess.generation == "env":  # its own slot, keyed by the token and service; the stored sign-in is untouched
+        identity = _env_identity(sess.token, sess.service)
+        with st._lock():
+            raw = st._read_raw()
+            slot = raw.get("mymemo_env")
+            if h is not None:
+                raw["mymemo_env"] = {"identity": identity, "hold": h}
+            elif isinstance(slot, dict) and slot.get("identity") == identity:
+                raw.pop("mymemo_env")
+            else:
+                return
+            st._write(raw)
+        return
     with st._lock():
         raw = st._read_raw()
         info = raw.get("mymemo")
@@ -520,7 +555,7 @@ def _set_hold(s: Settings, sess: Session, h: dict | None) -> None:
 
 def clear_hold(s: Settings, sess: Session, codes: tuple[str, ...] | None = None) -> None:
     """Lift a pause (any, or only these codes) after the endpoint answered ``sess`` normally."""
-    h = s.mymemo.get("hold")
+    h = _stored_hold(s)
     if isinstance(h, dict) and (codes is None or h.get("code") in codes):
         with contextlib.suppress(OSError):
             _set_hold(s, sess, None)
