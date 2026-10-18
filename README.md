@@ -150,7 +150,15 @@ With it on, imports are split into memories by the model (the preview flags any 
   ```
 - **saves what a Claude Code or Codex session taught** that the app didn't, when the session ends (off until you turn on "Reading sessions", then asked per app: `openmymemo assistant sessions --allow claude-code`). The plugin's session-end hook and the Codex hook from `openmymemo setup codex` run it; the transcript is read on your computer and never stored, and what it saves are the Assistant's proposals, each with your quoted words.
 
- Each feature has its own switch and a fallback to the rules, and there are monthly limits. A model on this computer keeps everything on the computer; with your own key, the memories a feature uses go to that provider, never private topics. Every request is in the activity log, without its text.
+**Tidy up** (turn it on with `--feature tidy=on` or its switch in Settings → Assistant) looks through your memories and files one batch of changes: merging near-duplicates, replacing a memory a later one contradicts, adding review dates to time-bound memories, rewriting memories that are too long, and asking about memories that may be outdated (those only go if you say so). Changes to memories you wrote wait for you too; the rest apply and can be undone. The batch shows up as "Tidy-up, <date>: N changes" with Keep all / Undo all on the Changes page and in `openmymemo review`, and a suggestion you rejected or undid isn't made again. Private topics are never included.
+
+```bash
+openmymemo tidy --dry-run          # no calls: what would be sent, likely duplicates, estimated calls and tokens
+openmymemo tidy [--topic work]     # run it ("Tidy up" on the Changes page does the same)
+openmymemo tidy --schedule weekly  # off (the default), daily, weekly or monthly
+```
+
+One run makes at most 20 calls; on a large folder the next run continues where it stopped. A schedule runs on this computer while OpenMyMemo's panel is running (the Mac app, `openmymemo serve`, or an AI app's plugin); nothing runs when none of them is. Each feature has its own switch and a fallback to the rules, and there are monthly limits. A model on this computer keeps everything on the computer; with your own key, the memories a feature uses go to that provider, never private topics. Every request is in the activity log, without its text.
 
 ## What happens when an AI writes
 

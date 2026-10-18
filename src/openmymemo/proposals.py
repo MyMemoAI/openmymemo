@@ -10,7 +10,9 @@ Every AI write is a proposal. What happens to it is decided when it arrives (doc
   of memories an AI wrote last; changes to **protected** memories wait. A memory is protected when its
   latest version was written by the person (``last_actor`` is ``user``, ``file`` or ``import:*``).
 
-Why a proposal waits is kept in ``hold``: ``approval``, ``protected``, ``private`` or ``sensitive``.
+Why a proposal waits is kept in ``hold``: ``approval``, ``protected``, ``private``, ``sensitive`` (the Assistant's
+check found it looks sensitive), or ``review`` when the proposer asked for the person's decision even though the
+rules would have applied it (the Assistant's tidy-up does for "possibly outdated" archives, product-design.md §17.6).
 
 With the OpenMyMemo Assistant's ``check`` feature on, an app's proposal gets a second look before it is filed
 (``propose(..., check=True)``, ``assistant/checks.py``, product-design.md §17.7): within a short time budget, the
@@ -46,15 +48,17 @@ from __future__ import annotations
 import json
 import secrets
 import time
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 
 from .connectors import Connector, Connectors
 from .textutil import KINDS, classify_topic, looks_contradictory, similarity
 from .topics import IMPORTED_GROUP
-from .vault import Memory, NotFound, Vault, VaultError, _atomic_write, now_iso
+from .vault import Conflict, Memory, NotFound, Vault, VaultError, _atomic_write, now_iso, parse_until
 
 OPS = ("add", "update", "archive")
+HOLDS = ("approval", "protected", "private", "review")  # what a proposer may ask for (`sensitive` is the check's)
 UNDOABLE = ("applied", "accepted", "edited_accepted")
 PENDING_TTL = timedelta(days=30)
 DUPLICATE_AT = 0.92
@@ -65,6 +69,7 @@ HOLD_MESSAGES = {
     "private": "Waiting for the user: it is in a private topic.",
     "approval": "Waiting for the user: they review every change first.",
     "sensitive": "Waiting for the user: it looks sensitive (health, money or credentials).",
+    "review": "Waiting for the user: this change is only made when they agree.",
 }
 APPLIED_MESSAGE = "Applied. The user will see it in their OpenMyMemo digest and can undo it."
 CHANGED_SINCE = "The memory has changed since this proposal; use its version history instead"
@@ -72,6 +77,15 @@ CHANGED_SINCE = "The memory has changed since this proposal; use its version his
 
 class PermissionDenied(VaultError):
     pass
+
+
+def batch_label(batch_id: str, n: int) -> str:
+    """How a batch is named in the digest, ``openmymemo review`` and log.md: "Tidy-up, 2026-10-25: 6 changes"
+    (a tidy-up's id is ``tidy-YYYY-MM-DD-xxxx``)."""
+    changes = f"{n} change" + ("" if n == 1 else "s")
+    if batch_id.startswith("tidy-") and len(batch_id) >= 15:
+        return f"Tidy-up, {batch_id[5:15]}: {changes}"
+    return f"{batch_id}: {changes}"
 
 
 def is_protected(m: Memory) -> bool:
@@ -112,6 +126,9 @@ class Proposal:
     topic_confidence: float | None = None
     checked_by: str | None = None  # "assistant" when the OpenMyMemo Assistant checked it before it was filed
     check_note: str | None = None  # what that check found or changed, for the person
+    until: str | None = None  # a review date this proposal sets (`until` of MEMORY_FORMAT.md §3.5)
+    before_until: str | None = None  # the memory's `until` before an update that sets one, for undo
+    batch_id: str | None = None  # proposals filed together by one run, e.g. a tidy-up: grouped in the digest
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -207,15 +224,56 @@ class Proposals:
                 self._save(p)
             return len(todo)
 
+    # ---- batches (one run's proposals, e.g. a tidy-up) -----------------------------------------
+
+    def batch(self, batch_id: str) -> list[Proposal]:
+        """The proposals filed with this ``batch_id``, newest first."""
+        return [p for p in self.list() if p.batch_id == batch_id]
+
+    def keep_batch(self, batch_id: str) -> int:
+        """"Keep all": every applied change of the batch still in the digest is marked seen. Returns how many."""
+        with self.vault.lock():
+            todo = [p for p in self.batch(batch_id) if p.status == "applied" and not p.reviewed_at]
+            now = now_iso()
+            for p in todo:
+                p.reviewed_at = now
+                self._save(p)
+            return len(todo)
+
+    def undo_batch(self, batch_id: str) -> dict:
+        """"Undo all": undoes every change of the batch that applied without the person and is still unreviewed,
+        newest first. A change something else has changed since is left alone (its version history takes over)
+        and only marked seen. Returns ``{"undone", "kept"}`` counts."""
+        undone = kept = 0
+        for p in self.batch(batch_id):
+            if p.status != "applied" or p.reviewed_at:
+                continue
+            try:
+                self.undo(p.id)
+                undone += 1
+            except VaultError:
+                self.mark_reviewed(p.id)
+                kept += 1
+        return {"undone": undone, "kept": kept}
+
     # ---- proposing -----------------------------------------------------------------------------
 
     def propose(self, connector: Connector, op: str, *, content: str | None = None, memory_id: str | None = None,
                 topic: str | None = None, kind: str | None = None, reason: str | None = None,
                 evidence: str | None = None, idempotency_key: str | None = None,
-                created_at: str | None = None, queue_id: str | None = None, check: bool = False) -> dict:
+                created_at: str | None = None, queue_id: str | None = None, until: str | None = None,
+                hold: str | None = None, batch_id: str | None = None,
+                expected: Mapping[str, tuple[int, str | None]] | None = None, check: bool = False) -> dict:
         """`created_at`: when the AI proposed it, if that was earlier, and `queue_id`: the receipt it got then
-        (both from MyMemo Cloud's offline queue). `check`: give the OpenMyMemo Assistant a look first, when it is
-        on for that (an app's own `memory_propose`; imports and the Assistant's own proposals aren't checked)."""
+        (both from MyMemo Cloud's offline queue). `until`: a review date to set (``YYYY-MM`` or ``YYYY-MM-DD``).
+        `hold`: make it wait for the person with this reason even where the rules would apply it (a reason the
+        rules give, such as ``private``, still wins). `batch_id`: groups the proposals of one run.
+        `expected`: memory id → (version, until) as the proposer last saw them; checked under the lock this
+        proposal is filed and applied under, and Conflict is raised when any of them is no longer active at
+        that version and review date, so a suggestion made from older text never lands on newer text.
+        `check`: give the OpenMyMemo Assistant a look first, when it is on for that (an app's own
+        `memory_propose`; imports and the Assistant's own proposals aren't checked). The check never lifts a
+        hold the rules or the proposer set."""
         v = self.vault
         if connector.write == "none":
             raise PermissionDenied("This connector is read-only. The user can allow proposals in the OpenMyMemo panel.")
@@ -228,6 +286,10 @@ class Proposals:
             raise VaultError(f"content is required for {op}")
         if content and len(content) > 1000:
             raise VaultError("A memory must be a single statement of at most 1000 characters")
+        if until is not None and (op == "archive" or parse_until(until) is None):
+            raise VaultError("until must be a date, YYYY-MM or YYYY-MM-DD, on an add or update")
+        if hold is not None and hold not in HOLDS:
+            raise VaultError(f"hold must be one of {', '.join(HOLDS)}")
 
         verdict = None
         if check and not (idempotency_key and self._known_key(connector.id, idempotency_key)):
@@ -246,25 +308,40 @@ class Proposals:
 
             private = v.private_topics()
             topics = v.topics()
+            for mid, (version, until_seen) in (expected or {}).items():
+                try:
+                    seen = v.get(mid)
+                except NotFound:
+                    raise Conflict(f"Memory {mid} is gone") from None
+                if seen.status != "active" or seen.version != version or seen.until != until_seen:
+                    raise Conflict(f"Memory {mid} has changed since this was suggested")
             args = dict(op=op, content=content, memory_id=memory_id, topic=topic, kind=kind, reason=reason,
                         evidence=evidence, idempotency_key=idempotency_key, created_at=created_at,
-                        queue_id=queue_id)
+                        queue_id=queue_id, until=until, batch_id=batch_id)
             # The rules first, exactly as without a check: the baseline the check may only make stricter.
             routed = self._route(connector, private, topics, verdict=None, **args)
             if isinstance(routed, dict):
                 v.log_activity(connector.id, "propose", op=op, memory_ids=[routed["memory_id"]], result="duplicate")
                 return routed
             p, target = routed
-            p.hold = self._hold(connector, p, target, private)
+            p.hold = self._hold(connector, p, target, private) or hold
             if verdict is not None:
                 p, target = self._checked(connector, p, target, verdict, private, topics, args)
+                p.hold = p.hold or hold
             if p.hold is None:
                 self._apply(p, actor=f"connector:{connector.id}")
                 p.status, p.decided_at = "applied", now_iso()
             self._save(p)
+            self._batch_logged(p)
             v.log_activity(connector.id, "propose", op=p.op, proposal_id=p.id,
                            memory_ids=[x for x in [p.memory_id or p.applied_memory_id] if x], result=p.status)
             return self._result(p, private_topics=private)
+
+    def _batch_logged(self, p: Proposal) -> None:
+        """log.md groups a batch's changes by the proposal's ``batch_id``, but it was rendered while the change was
+        written, before the proposal file existed: render it again."""
+        if p.batch_id and p.applied_memory_id:
+            self.vault._render_log_md()
 
     def _checked(self, connector: Connector, base: Proposal, base_target: Memory | None, verdict,
                  private: set[str], topics: list[dict], args: dict) -> tuple[Proposal, Memory | None]:
@@ -286,8 +363,8 @@ class Proposals:
 
     def _route(self, connector: Connector, private: set[str], topics: list[dict], *, verdict, op: str,
                content: str | None, memory_id: str | None, topic: str | None, kind: str | None, reason: str | None,
-               evidence: str | None, idempotency_key: str | None, created_at: str | None, queue_id: str | None
-               ) -> tuple[Proposal, Memory | None] | dict:
+               evidence: str | None, idempotency_key: str | None, created_at: str | None, queue_id: str | None,
+               until: str | None = None, batch_id: str | None = None) -> tuple[Proposal, Memory | None] | dict:
         """Where a proposal goes (its op, topic, target), without saving anything: a Proposal and its target, or a
         ``duplicate`` result. ``verdict``: the Assistant's check, or None for the rules alone. Raises
         PermissionDenied for a blocked topic, VaultError for a bad target."""
@@ -328,9 +405,12 @@ class Proposals:
         p = Proposal(id=_new_id(), connector_id=connector.id, connector_name=connector.name, op=op,
                      content=content, topic=topic, memory_id=memory_id, kind=kind, reason=reason,
                      evidence=(evidence or None) and evidence[:2000], idempotency_key=idempotency_key,
-                     created_at=created_at or now_iso(), queue_id=queue_id, topic_confidence=confidence)
+                     created_at=created_at or now_iso(), queue_id=queue_id, topic_confidence=confidence,
+                     until=until, batch_id=batch_id)
         if target:
             p.before_content, p.before_topic = target.content, target.topic
+            if until is not None:
+                p.before_until = target.until
 
         if op == "add":
             readable = [m for m in v.memories()
@@ -348,6 +428,8 @@ class Proposals:
                 target = best
                 p.original_op, p.op, p.memory_id = "add", "update", best.id
                 p.before_content, p.before_topic = best.content, best.topic
+                if until is not None:
+                    p.before_until = best.until
                 p.topic = best.topic if not topic or confidence is not None else topic
                 p.similarity = round(best_sim, 3)
                 p.conflict = looks_contradictory(content, best.content)
@@ -358,10 +440,13 @@ class Proposals:
                     target = found
                     p.original_op, p.op, p.memory_id = "add", "update", found.id
                     p.before_content, p.before_topic = found.content, found.topic
+                    if until is not None:
+                        p.before_until = found.until
                     p.topic = found.topic if p.topic not in private else p.topic
                     p.conflict = bool(verdict.contradicts) or looks_contradictory(content, found.content)
         elif op == "update" and target:
-            if similarity(content, target.content) >= 0.999 and topic == target.topic:
+            if (similarity(content, target.content) >= 0.999 and topic == target.topic
+                    and (until is None or until == target.until)):
                 return {"status": "duplicate", "memory_id": target.id,
                         "message": "The memory already says exactly this; nothing to do."}
             p.conflict = looks_contradictory(content, target.content)
@@ -454,9 +539,10 @@ class Proposals:
         op = "add" if as_new else p.op
         if op == "add":
             m = v.add(topic, content, kind=kind or p.kind, source=f"connector:{p.connector_id}", actor=actor,
-                      evidence=p.evidence, proposal_id=p.id)
+                      evidence=p.evidence, proposal_id=p.id, until=p.until)
         elif op == "update":
-            m = v.update(p.memory_id, content=content, topic=topic, kind=kind or p.kind, actor=actor, proposal_id=p.id)
+            m = v.update(p.memory_id, content=content, topic=topic, kind=kind or p.kind, until=p.until, actor=actor,
+                         proposal_id=p.id)
         elif op == "archive":
             m = v.archive(p.memory_id, actor=actor, proposal_id=p.id)
         else:
@@ -477,6 +563,7 @@ class Proposals:
             p.status = "edited_accepted" if edited else "accepted"
             p.decided_at = now_iso()
             self._save(p)
+            self._batch_logged(p)
             return p
 
     def reject(self, pid: str, *, block_topic: bool = False) -> Proposal:
@@ -502,17 +589,24 @@ class Proposals:
         return max(versions) if versions else None
 
     def can_undo(self, p: Proposal, *, versions: dict[str, int] | None = None,
-                 history: list[dict] | None = None) -> bool:
-        """True while this change is still the memory's latest version."""
+                 history: list[dict] | None = None, untils: dict[str, str | None] | None = None) -> bool:
+        """True while this change is still the memory's latest version. A change that set a review date
+        (``until``) also needs that date to be the memory's current one: changing a date makes no new version, so
+        undo would otherwise reset a date set since."""
         if p.status not in UNDOABLE or not p.applied_memory_id:
             return False
-        if versions is not None:
+        sets_until = p.op == "update" and p.until is not None
+        if versions is not None and (untils is not None or not sets_until):
             current = versions.get(p.applied_memory_id)
+            current_until = (untils or {}).get(p.applied_memory_id)
         else:
             try:
-                current = self.vault.get(p.applied_memory_id).version
+                m = self.vault.get(p.applied_memory_id)
+                current, current_until = m.version, m.until
             except NotFound:
-                current = None
+                current, current_until = None, None
+        if sets_until and current_until != p.until:
+            return False
         return current is not None and current == self._applied_version(p, history)
 
     def as_dict(self, p: Proposal) -> dict:
@@ -523,13 +617,15 @@ class Proposals:
         if not items:
             return []
         versions = None
+        untils = None
         history = None
         if any(p.status in UNDOABLE for p in items):
             mems = self.vault.memories("active") + self.vault.memories("archived")
             versions = {m.id: m.version for m in mems}
+            untils = {m.id: m.until for m in mems}
             if any(p.status in UNDOABLE and p.applied_version is None for p in items):
                 history = self.vault.history(limit=1_000_000)
-        return [{**p.to_dict(), "can_undo": self.can_undo(p, versions=versions, history=history)} for p in items]
+        return [{**p.to_dict(), "can_undo": self.can_undo(p, versions=versions, history=history, untils=untils)} for p in items]
 
     def undo(self, pid: str, *, block_topic: bool = False) -> Proposal:
         """Revert an applied or accepted change; with ``block_topic`` this app may no longer propose to the topic."""
@@ -544,7 +640,8 @@ class Proposals:
             if p.op == "add":
                 v.archive(mid, actor="user", proposal_id=p.id)
             elif p.op == "update":
-                v.update(mid, content=p.before_content, topic=p.before_topic, actor="user", proposal_id=p.id)
+                v.update(mid, content=p.before_content, topic=p.before_topic, actor="user", proposal_id=p.id,
+                         until=None if p.until is None else (p.before_until or ""))
             elif p.op == "archive":
                 v.restore(mid, actor="user", proposal_id=p.id)
             now = now_iso()

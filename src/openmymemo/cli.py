@@ -14,7 +14,7 @@ from . import __version__, memfiles, transfer
 from .assistant import features as assistant_features
 from .connectors import Connectors
 from .context import compile_context, search
-from .proposals import Proposals
+from .proposals import Proposals, batch_label
 from .snippets import http_snippets, stdio_snippets
 from .vault import NotFound, Vault, VaultError, vault_path
 
@@ -378,6 +378,74 @@ def sort_(ctx: typer.Context,
     typer.secho(f"Moved {moved} memories.", fg="green")
 
 
+@app.command("tidy")
+def tidy_(ctx: typer.Context,
+          dry_run: Annotated[bool, typer.Option("--dry-run", help="Make no calls and change nothing: show what "
+                                                "would be sent, likely duplicates and the estimated calls and "
+                                                "tokens.")] = False,
+          topic: Annotated[str | None, typer.Option("--topic", help="Only this topic (its slug).")] = None,
+          max_calls: Annotated[int | None, typer.Option("--max-calls", min=1, max=200,
+                                                        help="At most this many model calls in this run.")] = None,
+          schedule: Annotated[str | None, typer.Option(
+              "--schedule", help="Set when it runs by itself, on this computer, while the panel runs (the Mac "
+                                 "app, `openmymemo serve` or an AI app's plugin): off, daily, weekly or monthly. "
+                                 "Doesn't run it now.")] = None) -> None:
+    """Tidy up with the OpenMyMemo Assistant: one batch of suggested merges, fixes for contradictions, outdated
+    memories, review dates and rewrites, for you to keep or undo. Needs the Assistant, with tidy-up turned on."""
+    from .assistant import SettingsError, tidy
+
+    vault = _vault(ctx)
+    if schedule is not None:
+        try:
+            tidy.set_schedule(schedule)
+        except SettingsError as e:
+            typer.secho(str(e), fg="red", err=True)
+            raise typer.Exit(2) from None
+        s = tidy.schedule(vault)
+        if s["every_days"] is None:
+            typer.echo("Tidy-up doesn't run by itself on this computer.")
+        else:
+            typer.echo(f"Tidy-up runs {schedule} on this computer while the panel runs; next: {s['next_run']}.")
+            typer.echo("Nothing runs when no panel does (the Mac app, `openmymemo serve`, or an AI app's plugin).")
+        return
+    result = tidy.run(vault, topic=topic, dry_run=dry_run, max_calls=max_calls or tidy.MAX_CALLS)
+    if dry_run:
+        typer.echo(f"Memories it would look at: {result.memories}"
+                   + (f" ({result.left_out} private or not readable by the Assistant are left out)"
+                      if result.left_out else ""))
+        typer.echo(f"Estimated: {result.estimate['calls']} calls, about {result.estimate['tokens']:,} tokens")
+        if result.candidates:
+            mems = {m.id: m for m in vault.memories()}
+            typer.secho(f"\nLikely duplicates for the model to confirm: {len(result.candidates)}", bold=True)
+            for a, b in result.candidates[:20]:
+                typer.echo(f"  - {mems[a].content}\n    {mems[b].content}")
+            if len(result.candidates) > 20:
+                typer.echo(f"  … and {len(result.candidates) - 20} more")
+        typer.echo("")
+    for item in result.items:
+        head = {"merge": "Merge", "contradiction": "Contradiction", "outdated": "Possibly outdated",
+                "until": "Review date", "rewrite": "Rewrite"}[item.kind]
+        statuses = ", ".join(r.get("status", "?") for r in item.filed) or "not filed"
+        typer.secho(f"\n{head} ({statuses})", bold=True)
+        for text in item.before:
+            typer.secho(f"  - {text}", fg="red" if item.kind != "until" else None)
+        if item.content and item.kind != "contradiction":
+            typer.secho(f"  + {item.content}", fg="green")
+        if item.kind == "contradiction":
+            typer.secho(f"  + {item.content}  (replaces the first)", fg="green")
+        if item.until:
+            typer.secho(f"  until {item.until}", fg="green")
+        typer.echo(f"  why: {item.reason}")
+        if item.error:
+            typer.secho(f"  {item.error}", fg="yellow")
+    typer.secho(("\n" if result.items else "") + result.message, fg=None if result.ok else "yellow",
+                err=not result.ok)
+    if result.applied or result.waiting:
+        typer.echo("Review them with `openmymemo review` or on the panel's Changes page.")
+    if not result.ok:
+        raise typer.Exit(1)
+
+
 @app.command()
 def export(ctx: typer.Context,
            fmt: Annotated[str, typer.Option("--format", "-f", help="markdown, claude, chatgpt or json")] = "markdown",
@@ -485,6 +553,7 @@ WAITS_BECAUSE = {
     "protected": "you wrote this memory yourself",
     "private": "it is in a private topic",
     "approval": "approval is on, so every AI change waits for you",
+    "review": "this change is only made if you agree",
 }
 
 
@@ -501,11 +570,47 @@ def review(ctx: typer.Context) -> None:
     titles = {t["slug"]: t["title"] for t in vault.topics()}
     if digest:
         typer.secho(f"Changed since you last looked: {len(digest)}", bold=True)
-        if not _review_digest(props, digest, titles):
+        if not _review_batches(props, digest, titles):
             return
     if pending:
         typer.secho(f"\nWaiting for you: {len(pending)}", bold=True)
         _review_pending(props, pending, titles)
+
+
+def _review_batches(props: Proposals, digest: list, titles: dict[str, str]) -> bool:
+    """The digest with each batch (a tidy-up) offered as a whole first: keep all, undo all, or one by one.
+    Returns False when the user quits."""
+    groups: list[tuple[str | None, list]] = []
+    for p in digest:
+        if p.batch_id and groups and groups[-1][0] == p.batch_id:
+            groups[-1][1].append(p)
+        elif p.batch_id and any(b == p.batch_id for b, _ in groups):
+            next(items for b, items in groups if b == p.batch_id).append(p)
+        else:
+            groups.append((p.batch_id, [p]))
+    singles: list = []
+    for batch, items in groups:
+        if batch is None:
+            singles.extend(items)
+            continue
+        if singles and not _review_digest(props, singles, titles):
+            return False
+        singles = []
+        typer.secho(f"\n{batch_label(batch, len(items))} by {items[0].connector_name}", bold=True)
+        choice = typer.prompt("  [k]eep all  [u]ndo all  [o]ne by one  [s]kip  [q]uit", default="o").lower()[:1]
+        if choice == "k":
+            n = props.keep_batch(batch)
+            typer.secho(f"  kept {n}", fg="green")
+        elif choice == "u":
+            done = props.undo_batch(batch)
+            extra = f"; {done['kept']} had changed since and stay" if done["kept"] else ""
+            typer.echo(f"  undid {done['undone']}{extra}")
+        elif choice == "o":
+            if not _review_digest(props, items, titles):
+                return False
+        elif choice == "q":
+            return False
+    return not singles or _review_digest(props, singles, titles)
 
 
 def _review_digest(props: Proposals, digest: list, titles: dict[str, str]) -> bool:

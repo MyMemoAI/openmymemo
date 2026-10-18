@@ -158,10 +158,16 @@ CASES = [  # (content, topic, setup memories [(topic, content, actor)], verdict 
 ]
 
 
+TIDY = {"hold": "review", "until": "2027-01", "batch_id": "tidy-2026-10-25-abcd"}  # how a tidy-up proposes
+
+
+@pytest.mark.parametrize("tidy", [False, True], ids=["app", "tidy-style"])
 @pytest.mark.parametrize("mode", ["propose", "auto"])
 @pytest.mark.parametrize("approval", [False, True])
 @pytest.mark.parametrize("case", range(len(CASES)))
-def test_a_check_is_never_less_restrictive_than_the_rules(tmp_path, fake, mode, approval, case):
+def test_a_check_is_never_less_restrictive_than_the_rules(tmp_path, fake, mode, approval, case, tidy):
+    """Also for a proposal that asks to wait (`hold="review"`) and carries a review date and a batch, as the
+    tidy-up's do: the check keeps the wait it asked for, the date and the batch."""
     from openmymemo.vault import Vault
 
     content, topic, memories, make = CASES[case]
@@ -174,16 +180,23 @@ def test_a_check_is_never_less_restrictive_than_the_rules(tmp_path, fake, mode, 
         con = app_connector(v, write=mode, include_private=True)
         fake.answer = lambda body, ids=ids: verdict(**make(ids))
         try:
-            out = Proposals(v).propose(con, "add", content=content, topic=topic, check=check)
+            out = Proposals(v).propose(con, "add", content=content, topic=topic, check=check,
+                                       **(TIDY if tidy else {}))
         except Exception as e:  # noqa: BLE001
             out = {"status": "refused", "error": type(e).__name__}
         private = v.private_topics()
-        results.append((out, private))
-    (base, private), (checked, _) = results
+        filed = Proposals(v).get(out["proposal_id"]) if out.get("proposal_id") else None
+        results.append((out, private, filed))
+    (base, private, _), (checked, _, filed) = results
     rank = {"applied": 0, "duplicate": 1, "pending": 2, "refused": 3}
     assert rank[checked["status"]] >= rank[base["status"]] or base["status"] == "duplicate", (base, checked)
     if base.get("topic") in private:
         assert checked.get("topic") in private or checked["status"] == "pending", (base, checked)
+    if tidy and checked["status"] == "pending":
+        assert base["status"] == "pending" and checked["hold"], (base, checked)  # some wait, at least as strict
+        assert filed.until == TIDY["until"] and filed.batch_id == TIDY["batch_id"], filed
+    if tidy:  # it asked to wait: neither version applies without the person
+        assert "applied" not in (base["status"], checked["status"]), (base, checked)
 
 
 def test_a_slow_check_doesnt_hold_up_the_app(vault, fake):

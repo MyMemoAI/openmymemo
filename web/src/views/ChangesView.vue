@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { api, type Memory, type Proposal } from "../api";
 import AppIcon from "../components/AppIcon.vue";
 import ApprovalSwitch from "../components/ApprovalSwitch.vue";
@@ -8,6 +8,7 @@ import HistoryDialog from "../components/HistoryDialog.vue";
 import PageHeader from "../components/PageHeader.vue";
 import ProposalCard from "../components/ProposalCard.vue";
 import SessionConsent from "../components/SessionConsent.vue";
+import TidyDialog from "../components/TidyDialog.vue";
 import { dayKey, dayLabel, t, tn } from "../i18n";
 import { act, pending, store, toast } from "../store";
 
@@ -26,9 +27,27 @@ function pick(v: Tab) {
 
 const historyFor = ref<Memory | null>(null);
 
-/** The digest grouped by local day (newest first), and within a day by app. */
+// Tidy up (§17.6): the button shows once the Assistant is on.
+const tidyShown = ref(false);
+const tidyOpen = ref(false);
+onMounted(async () => {
+  try {
+    tidyShown.value = (await api.tidy()).enabled;
+  } catch {
+    tidyShown.value = false;
+  }
+});
+
+/** "Tidy-up, 2026-10-25: 6 changes" for a batch id "tidy-2026-10-25-xxxx". */
+function batchTitle(batch: string, n: number): string {
+  return tn("chg.batch", n, { date: batch.startsWith("tidy-") ? batch.slice(5, 15) : batch });
+}
+
+/** The digest grouped by local day (newest first), and within a day by app, with each batch (a tidy-up) as a group
+ * of its own that can be kept or undone as a whole. */
+type Group = { id: string; name: string; batch: string | null; items: Proposal[] };
 const days = computed(() => {
-  const out: { key: string; label: string; apps: { id: string; name: string; items: Proposal[] }[] }[] = [];
+  const out: { key: string; label: string; apps: Group[] }[] = [];
   for (const p of store.unreviewed) {
     const key = dayKey(p.decided_at ?? p.created_at);
     let day = out.find((d) => d.key === key);
@@ -36,9 +55,10 @@ const days = computed(() => {
       day = { key, label: dayLabel(key), apps: [] };
       out.push(day);
     }
-    let app = day.apps.find((a) => a.id === p.connector_id);
+    const id = p.batch_id ? `batch:${p.batch_id}` : p.connector_id;
+    let app = day.apps.find((a) => a.id === id);
     if (!app) {
-      app = { id: p.connector_id, name: p.connector_name, items: [] };
+      app = { id, name: p.connector_name, batch: p.batch_id ?? null, items: [] };
       day.apps.push(app);
     }
     app.items.push(p);
@@ -49,6 +69,16 @@ const days = computed(() => {
 async function looksGood() {
   const res = await act(() => api.reviewedAll());
   if (res) toast(tn("chg.lookedGood", res.reviewed));
+}
+
+async function keepAll(batch: string) {
+  const res = await act(() => api.keepBatch(batch));
+  if (res) toast(tn("chg.keptAll", res.reviewed));
+}
+
+async function undoAll(batch: string) {
+  const res = await act(() => api.undoBatch(batch));
+  if (res) toast(res.kept ? t("chg.undidSome", res) : tn("chg.undidAll", res.undone));
 }
 
 async function acceptAll() {
@@ -73,6 +103,9 @@ watch([tab, () => store.version], () => tab.value === "history" && loadHistory()
     <PageHeader :title="t('nav.changes')" :subtitle="t('chg.subtitle')" />
     <ApprovalSwitch />
     <SessionConsent banner />
+    <div v-if="tidyShown" class="flex justify-end">
+      <button class="btn btn-sm" data-test="tidy-open" @click="tidyOpen = true"><AppIcon name="refresh" :size="14" />{{ t("tidy.button") }}</button>
+    </div>
 
     <div class="seg" role="tablist" :aria-label="t('nav.changes')">
       <button class="seg-item" :class="{ 'is-on': tab === 'review' }" role="tab" :aria-selected="tab === 'review'" @click="pick('review')">
@@ -108,10 +141,16 @@ watch([tab, () => store.version], () => tab.value === "history" && loadHistory()
           <div class="label px-1 pt-1">{{ day.label }}</div>
           <div v-for="app in day.apps" :key="app.id" class="card overflow-hidden">
             <div class="flex items-center justify-between gap-2 border-b border-sep px-4.5 py-2.5">
-              <span class="flex items-center gap-2 text-sm font-semibold">
-                <span class="avatar avatar-on size-[22px] rounded-md text-[11px]" aria-hidden="true">{{ app.name.slice(0, 1) }}</span>{{ app.name }}
+              <span class="flex min-w-0 items-center gap-2 text-sm font-semibold">
+                <span class="avatar avatar-on size-[22px] shrink-0 rounded-md text-[11px]" aria-hidden="true">{{ app.name.slice(0, 1) }}</span>
+                <span v-if="app.batch" class="min-w-0" data-test="batch-title">{{ batchTitle(app.batch, app.items.length) }}<span class="font-normal text-muted"> · {{ app.name }}</span></span>
+                <template v-else>{{ app.name }}</template>
               </span>
-              <span class="text-xs text-muted">{{ tn("chg.count", app.items.length) }}</span>
+              <span v-if="app.batch" class="flex shrink-0 gap-1.5">
+                <button class="btn btn-sm" data-test="keep-all" @click="keepAll(app.batch)">{{ t("chg.keepAll") }}</button>
+                <button class="btn btn-sm" data-test="undo-all" @click="undoAll(app.batch)">{{ t("chg.undoAll") }}</button>
+              </span>
+              <span v-else class="text-xs text-muted">{{ tn("chg.count", app.items.length) }}</span>
             </div>
             <div class="divide-y divide-sep">
               <DigestRow v-for="p in app.items" :key="p.id" :proposal="p" @history="historyFor = $event" />
@@ -133,5 +172,6 @@ watch([tab, () => store.version], () => tab.value === "history" && loadHistory()
     </template>
 
     <HistoryDialog v-if="historyFor" :memory="historyFor" @close="historyFor = null" />
+    <TidyDialog v-if="tidyOpen" @close="tidyOpen = false" />
   </div>
 </template>

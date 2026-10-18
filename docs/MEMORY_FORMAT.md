@@ -166,7 +166,16 @@ The human-readable change log, following the Open Knowledge Format's `log.md`: `
 - **You** undid Cursor's change to Tools (^t00l5)
 ```
 
-It is rendered from `history.jsonl`, `connectors.yaml` (for app names) and the proposals (to tell an undo from an ordinary change). The file starts with an HTML comment saying it is generated and a `# Change log` heading. The text of a private memory is left out ("added a private memory to Health"), as in `MEMORY.md`; quoted text is cut at 160 characters; an edit that also moves the memory reads `edited Work → People: "old" → "new"`. Only the newest 500 lines are kept, with a closing line pointing at `history.jsonl` when older entries were left out. Readers must not parse it for data; use `history.jsonl`.
+The changes of one batch of proposals (`batch_id`, §6.6, such as a tidy-up) on a day are listed under one line naming the batch, indented:
+
+```markdown
+## 2026-10-25
+- Tidy-up, 2026-10-25: 2 changes
+  - **OpenMyMemo Assistant** archived from Lifestyle: "Prefers green tea in the mornings" (^jay1x)
+  - **OpenMyMemo Assistant** edited Lifestyle: "Prefers green tea" → "Prefers green tea, mostly in the morning" (^nf7u0)
+```
+
+It is rendered from `history.jsonl`, `connectors.yaml` (for app names) and the proposals (to tell an undo from an ordinary change, and to find a change's batch). The file starts with an HTML comment saying it is generated and a `# Change log` heading. The text of a private memory is left out ("added a private memory to Health"), as in `MEMORY.md`; quoted text is cut at 160 characters; an edit that also moves the memory reads `edited Work → People: "old" → "new"`. Only the newest 500 lines are kept, with a closing line pointing at `history.jsonl` when older entries were left out. Readers must not parse it for data; use `history.jsonl`.
 
 ## 5. `connectors.yaml`
 
@@ -317,13 +326,16 @@ One file per proposal, named by its id (`p` plus hexadecimal; the id must be alp
 | --- | --- |
 | `id`, `connector_id`, `connector_name` | |
 | `op` | `add`, `update`, `archive` |
-| `content`, `topic`, `memory_id`, `kind`, `reason`, `evidence`, `idempotency_key` | What was proposed |
+| `content`, `topic`, `memory_id`, `kind`, `reason`, `evidence`, `idempotency_key` | What was proposed. The OpenMyMemo Assistant's tidy-up sets `idempotency_key` to `tidy:<fingerprint>` (the second step of a merge: `tidy:<fingerprint>:2`), a hash of the kind of suggestion and the ids and text of the memories it is about, so it never makes the same suggestion twice |
+| `until` | Optional: a review date (`YYYY-MM` or `YYYY-MM-DD`, §3.5) the proposal sets on an `add` or `update`. An update may change only this; the text stays the same and, as for any change of an inline attribute, the memory gets no new version (§7) |
+| `before_until` | The memory's `until` before an update that set `until`; undo restores it (absent: there was none). Since a changed `until` makes no new version, such a change can be undone only while the memory's `until` is still the one it set |
+| `batch_id` | Optional: proposals filed together by one run share it, and the digest, `openmymemo review` and `log.md` group them ("Tidy-up, 2026-10-25: 6 changes") with Keep all / Undo all. A tidy-up's id is `tidy-YYYY-MM-DD-` plus four hexadecimal digits |
 | `created_at` | |
 | `queue_id` | Optional: the MyMemo Cloud queue id of a proposal filed from the offline queue (product-design.md §16.3), so the AI can match its `queued` receipt to it |
 | `status` | `pending`, `accepted`, `edited_accepted`, `rejected`, `expired`, `applied`, `undone` |
 | `decided_at` | When the status left `pending` or `applied` was set |
 | `reviewed_at` | Version 2: when the person saw an applied change in the digest. Applied proposals without it are "unreviewed". |
-| `hold` | Version 2: why a pending proposal waits: `approval` (the person reviews every change first), `protected` (the target memory was last written by the person), `private` (a private topic or memory) or `sensitive` (the OpenMyMemo Assistant's check found it looks like health, money or credentials and there was no private topic to put it in). Absent on applied proposals. |
+| `hold` | Version 2: why a pending proposal waits: `approval` (the person reviews every change first), `protected` (the target memory was last written by the person), `private` (a private topic or memory) `sensitive` (the OpenMyMemo Assistant's check found it looks like health, money or credentials and there was no private topic to put it in), or `review` (the proposer asked for the person's decision although the rules would have applied it, as the tidy-up does for archiving a possibly outdated memory). Absent on applied proposals. |
 | `applied_version` | Version 2: the memory's version right after the change was applied or accepted. Undo is offered while this is still the memory's current version. |
 | `final_content`, `final_topic`, `applied_memory_id` | What was actually written |
 | `before_content`, `before_topic` | The memory before an update or archive, for undo and for the diff |
