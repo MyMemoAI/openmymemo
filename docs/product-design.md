@@ -651,7 +651,25 @@ Today `memory_search` and `openmymemo search` score keywords: Chinese character 
 - **Hybrid search.** The keyword score and the vector similarity are combined with reciprocal rank fusion, so exact names and ids still win, and with no index the keyword path is unchanged.
 - **Optional rerank and query expansion.** When there are more candidates than the limit, the chat model reranks the top 30 for the query. Without an embedding index (for example on MyMemo's hosted model, §17.8), the chat model first expands the query into keywords and synonyms in the vault's languages. This is used by `memory_search` and `recall` only, never by `memory_context`, which stays fast and deterministic.
 - **`openmymemo recall "<question>" [--max-chars N] [--connector id]`.** Prints the memories most relevant to a question, ranked and cut to a budget, ready to paste into a prompt or a hook. Without the Assistant it uses keyword search. A matching MCP tool isn't needed: `memory_search` gets the same ranking.
-- **A local embedding model.** For people without an endpoint, a small multilingual ONNX model is offered as an optional extra (`openmymemo[semantic]`). It is not part of the default install, and torch is never required.
+- **A local embedding model**, for anyone who wants vectors without sending memory anywhere, whatever chat model the Assistant uses (none, local, a key, or MyMemo's):
+  - **Turned on in Settings → Assistant → "Search by meaning on this computer".** The switch downloads and starts it. Nothing is bundled into the app or the default install, so people who never turn it on download nothing. `openmymemo semantic on|off|status` does the same from the terminal.
+  - **What it downloads:**
+    - the ONNX Runtime and `tokenizers` wheels (about 20 MB, as the extra `openmymemo[semantic]`; torch is never required);
+    - the model, into the per-computer application folder next to `cloud.json` (§16.4), never into the memory folder.
+
+    The model is fetched from a fixed URL with its SHA-256 pinned in the code, and a file that doesn't match is deleted. The panel shows progress and the size before starting. Turning the switch off deletes the model and the index.
+  - **The default model: `multilingual-e5-small`, int8-quantized ONNX.**
+    - About 120 MB on disk, 384 dimensions, MIT license.
+    - Trained on about 100 languages, Chinese and English included.
+    - It embeds a 1,000-memory vault in well under a minute on a laptop CPU, and a query in milliseconds.
+  - **Candidates measured against it on the recall test set** before the default is fixed:
+    - `granite-embedding-97m-multilingual-r2` (IBM, Apache 2.0, about 100 MB quantized; IBM reports 60.3 vs 50.9 for `multilingual-e5-small` on multilingual MTEB retrieval, but its Chinese quality is unpublished);
+    - `EmbeddingGemma-300m` (Google, under 200 MB quantized, Gemma Terms of Use).
+
+    The one with the better Chinese and English hit rate becomes the default.
+  - **A larger model on request.** "Better quality (larger download)" offers `Qwen3-Embedding-0.6B` (Apache 2.0, about 640 MB at 8-bit), the strongest of these for Chinese.
+  - **Not considered:** models with non-commercial licenses, such as the Jina v5 embeddings (CC BY-NC 4.0), and single-language models such as `bge-small-zh`.
+  - **Switching models.** Changing the model rebuilds the index (§17.4, embedding index). The model name is stored in the index manifest, so an index is never mixed across models.
 - **Measured, not assumed.** `tests/recall/` holds a fixed English and Chinese question set over a demo vault. CI reports hit rate for keyword, keyword + vectors, and keyword + vectors + rerank (the last with a recorded model response), so a change that makes recall worse is visible.
 
 ### 17.5 Import and sorting
@@ -714,7 +732,7 @@ Each step is its own release-sized piece and its own PRs. Each step is useful al
 ### 17.10 Open questions
 
 1. Where tidy-up runs on a schedule: in the Mac app and any running panel, or also as an OS scheduled task when nothing is running?
-2. The default local embedding model and its download size: is a ~100 MB first-use download acceptable, or should it be opt-in only from Settings?
+2. ~~The default local embedding model and its download size~~ Decided 2026-10-18: opt-in from Settings, downloaded when turned on, never bundled; about 120 MB for the default (§17.4). Which of the measured candidates becomes the default is settled by the recall test set.
 3. Should session-end extraction be on by default for an app once the Assistant is on, or always asked per app? Leaning: asked per app on first use.
 4. Should a proposal's evidence from transcripts expire (§11, question 2), given it is now gathered automatically?
 5. Reverse sync — writing selected topics back to `CLAUDE.md` / `AGENTS.md` for apps without MCP — needs no model. Should it be its own feature outside the Assistant?
