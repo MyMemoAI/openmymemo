@@ -2,6 +2,7 @@
 import { ref, watch } from "vue";
 import { api, type AppStatus, type Connector } from "../api";
 import AppIcon from "../components/AppIcon.vue";
+import AssistantSettings from "../components/AssistantSettings.vue";
 import CloudSettings from "../components/CloudSettings.vue";
 import ConnectApps from "../components/ConnectApps.vue";
 import ConnectorPanel from "../components/ConnectorPanel.vue";
@@ -12,7 +13,7 @@ import { act, store } from "../store";
 
 /**
  * The AI apps: connect them with one click, then set what each connected one may read and write. In a browser,
- * which has no Settings sheet, MyMemo Cloud's settings (shown or not, its service) sit at the bottom.
+ * which has no Settings sheet, the Assistant's and MyMemo Cloud's settings (shown or not, its service) sit at the bottom.
  */
 const props = defineProps<{ initialConnector: string | null }>();
 
@@ -54,6 +55,7 @@ async function remove(app: AppStatus | null, c: Connector, alsoSettings: boolean
       </template>
     </ConnectApps>
 
+    <AssistantSettings v-if="!desktop" />
     <CloudSettings v-if="!desktop" />
   </div>
 </template>

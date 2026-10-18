@@ -11,6 +11,12 @@ def _no_real_cloud_link(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path_factory.mktemp("home")))
     monkeypatch.setenv("OPENMYMEMO_CLOUD_DIR", str(tmp_path_factory.mktemp("cloud") / "config"))
     monkeypatch.setenv("OPENMYMEMO_CLOUD_URL", "http://127.0.0.1:9")
+    # The Assistant: settings in that same folder, never the real Keychain, and no variables from the shell.
+    import os
+
+    for name in [n for n in os.environ if n.startswith("OPENMYMEMO_ASSISTANT_")]:
+        monkeypatch.delenv(name)
+    monkeypatch.setenv("OPENMYMEMO_ASSISTANT_KEYCHAIN", "0")
 
 
 @pytest.fixture

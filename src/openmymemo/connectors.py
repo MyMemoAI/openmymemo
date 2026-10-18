@@ -17,6 +17,9 @@ token. Only the SHA-256 of a token is stored. ``cloud`` connectors (``cloud-chat
 web apps that reach the folder through MyMemo Cloud (``cloud.py``); like stdio apps they have no token and are
 created on first use. Ids starting with ``cloud-`` belong to them alone, so a web app can never answer as an app
 the person added: another app whose name would slugify to ``cloud-…`` gets ``app-cloud-…`` instead.
+The ``assistant`` connector (kind ``assistant``) is the OpenMyMemo Assistant (``assistant/``), created when the
+person first turns it on in Settings; its id is kept for it, it has no token, and it never reads private topics
+through ``include_private`` (a model on this computer gets the private topics opted in in Settings → Assistant).
 
 Removing a connector leaves a ``revoked`` tombstone. A stdio app keeps launching ``openmymemo mcp
 --connector <id>`` after the user removes it, and without the tombstone its next call would quietly
@@ -34,8 +37,9 @@ import yaml
 from .vault import NotFound, Vault, VaultError, _atomic_write, now_iso, slugify
 
 WRITE_MODES = ("none", "propose", "auto")
-KINDS = ("stdio", "http", "cloud")
+KINDS = ("stdio", "http", "cloud", "assistant")
 CLOUD_PREFIX = "cloud-"  # kept for kind "cloud"
+ASSISTANT_ID = "assistant"  # kept for kind "assistant", the OpenMyMemo Assistant (product-design.md §17.3)
 
 
 class Revoked(VaultError):
@@ -46,7 +50,7 @@ class Revoked(VaultError):
 class Connector:
     id: str
     name: str
-    kind: str = "stdio"  # stdio | http | cloud
+    kind: str = "stdio"  # stdio | http | cloud | assistant
     read_topics: list[str] | str = "all"
     include_private: bool = False
     write: str = "propose"
@@ -126,7 +130,7 @@ class Connectors:
     def create(self, name: str, kind: str = "stdio", *, connector_id: str | None = None, write: str = "propose",
                read_topics: list[str] | str = "all", include_private: bool = False) -> tuple[Connector, str | None]:
         if kind not in KINDS:
-            raise VaultError("kind must be stdio, http or cloud")
+            raise VaultError("kind must be stdio, http, cloud or assistant")
         if write not in WRITE_MODES:
             raise VaultError(f"write must be one of {', '.join(WRITE_MODES)}")
         cid = connector_id or slugify(name)
@@ -137,6 +141,12 @@ class Connectors:
                 raise VaultError(f"Ids starting with {CLOUD_PREFIX} are kept for apps using MyMemo Cloud; choose "
                                  "another id")
             cid = "app-" + cid
+        if (kind == "assistant") != (cid == ASSISTANT_ID):
+            if kind == "assistant" or connector_id:
+                raise VaultError(f"The id {ASSISTANT_ID} is kept for the OpenMyMemo Assistant; choose another id")
+            cid = "app-" + cid
+        if kind == "assistant" and include_private:
+            raise VaultError("The Assistant's private topics are chosen in Settings → Assistant")
         with self.vault.lock():
             items = [c for c in self._load() if not (c.id == cid and c.revoked_at)]  # re-grant replaces the tombstone
             if any(c.id == cid for c in items):
@@ -159,6 +169,8 @@ class Connectors:
                 if c.id == connector_id:
                     if c.revoked_at:
                         raise Revoked("The user revoked this app's access in OpenMyMemo.")
+                    if c.kind == "assistant" and kind != "assistant":
+                        raise VaultError(f"The id {ASSISTANT_ID} is kept for the OpenMyMemo Assistant")
                     return c
             return None
 
@@ -188,6 +200,9 @@ class Connectors:
                 rt = changes["read_topics"]
                 c.read_topics = "all" if rt == "all" else list(rt)
             if changes.get("include_private") is not None:
+                if c.kind == "assistant" and changes["include_private"]:
+                    # Private topics reach only a model on this computer, opted in per topic (§17.2).
+                    raise VaultError("The Assistant's private topics are chosen in Settings → Assistant")
                 c.include_private = bool(changes["include_private"])
             if changes.get("blocked_topics") is not None:
                 c.blocked_topics = sorted(set(changes["blocked_topics"]))
@@ -206,6 +221,8 @@ class Connectors:
                 raise NotFound(f"No connector {connector_id}")
             if c.kind == "cloud":
                 raise VaultError("A MyMemo Cloud app signs in with your MyMemo account; it has no token")
+            if c.kind == "assistant":
+                raise VaultError("The OpenMyMemo Assistant runs inside OpenMyMemo; it has no token")
             token = self._new_token(c)
             if c.kind == "stdio":
                 c.kind = "http"

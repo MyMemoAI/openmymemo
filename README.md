@@ -126,6 +126,19 @@ Tools AI apps see: `memory_context`, `memory_search`, `memory_get`, `memory_prop
 4. Zero dependencies — no database, Docker, account, API key or telemetry.
 5. Open protocols and open conventions — standard MCP, Markdown + frontmatter (an [Open Knowledge Format](https://github.com/GoogleCloudPlatform/open-knowledge-format) bundle), Obsidian block ids, open import and export formats, no vendor lock-in.
 
+## OpenMyMemo Assistant (optional)
+
+OpenMyMemo needs no model. If you want help with the work rules do badly, turn on the Assistant in Settings → Assistant (in a browser: at the bottom of the Connectors page), or from the terminal:
+
+```bash
+openmymemo assistant set --kind local --model llama3.2          # Ollama or another server on this computer
+openmymemo assistant set --kind key --protocol anthropic --model claude-haiku-5-5 --key   # your own API key
+openmymemo assistant test                                        # one tiny request: which model, how fast
+openmymemo assistant status | off
+```
+
+With it on, imports are split into memories by the model (the preview flags any line it left out), and "Sort into topics" gets the model's suggestions. Each feature has its own switch and a fallback to the rules, and there are monthly limits. A model on this computer keeps everything on the computer; with your own key, the memories a feature uses go to that provider, never private topics. Every request is in the activity log, without its text.
+
 ## What happens when an AI writes
 
 ![The Changes page: an AI's change to a memory you wrote and an addition to a private topic wait for you, with Accept, Edit and accept, and Reject](https://raw.githubusercontent.com/MyMemoAI/openmymemo/main/docs/images/panel-changes.png)
@@ -160,7 +173,7 @@ Found a vulnerability? Please report it privately as described in [SECURITY.md](
 
 ## Privacy Policy
 
-Your memory stays on your computer: MyMemo doesn't receive it, and OpenMyMemo has no account, telemetry, analytics or update check. AI apps you connect read the topics you allow (never `health` or `finance` unless you say so) and send what they read to their own model provider under their own policies. OpenMyMemo goes online only to download Python and its libraries when it is installed or first started, and for MyMemo Cloud, which is off until you turn it on and link this computer; then the memories web apps read pass through the MyMemo service in transit. The full policy, including what is stored where: [PRIVACY.md](https://github.com/MyMemoAI/openmymemo/blob/main/PRIVACY.md).
+Your memory stays on your computer: MyMemo doesn't receive it, and OpenMyMemo has no account, telemetry, analytics or update check. AI apps you connect read the topics you allow (never `health` or `finance` unless you say so) and send what they read to their own model provider under their own policies. OpenMyMemo goes online only to download Python and its libraries when it is installed or first started, and for MyMemo Cloud, which is off until you turn it on and link this computer; then the memories web apps read pass through the MyMemo service in transit. The optional OpenMyMemo Assistant sends memory text to the model you choose, and only when you turn it on: a model on your own computer keeps it there. The full policy, including what is stored where: [PRIVACY.md](https://github.com/MyMemoAI/openmymemo/blob/main/PRIVACY.md).
 
 ## Development
 

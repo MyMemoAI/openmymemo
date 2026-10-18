@@ -4,6 +4,12 @@ What changed in each release, for people who use OpenMyMemo. Every release is al
 
 ## Unreleased
 
+- **OpenMyMemo Assistant (optional, off by default).** Settings → Assistant (in a browser, at the bottom of the Connectors page) or `openmymemo assistant set` lets OpenMyMemo use a model: one on this computer (Ollama, LM Studio, llama.cpp, vLLM or any other OpenAI-compatible server), or your own API key for Anthropic or any OpenAI-compatible service. "Test" sends one tiny request and shows the model and how long it took. MyMemo's hosted model is listed as coming soon. Everything keeps working without it.
+  - **Imports:** pasted lists, Markdown and other apps' memory files are split into memories by the model, which also drops instructions meant for tools and suggests a topic. The preview says "Split by OpenMyMemo Assistant" and shows, unticked, any line it left out that the rules would have kept.
+  - **Sorting:** topic suggestions for imported memories come from the model.
+  - Each feature has its own switch, and there are monthly limits on calls and tokens; at a limit, OpenMyMemo goes back to its rules.
+  - Private topics are never sent to a remote model; a model on this computer reads only the private topics you pick. The key is kept on this computer only, in the Keychain on a Mac, never in your memory folder.
+  - The Assistant is listed on the Connectors page as "OpenMyMemo Assistant", with its own read scope, writing mode and blocked topics, and every request it makes is in the activity log (feature, model, where, tokens), never the text.
 - An archived memory no longer stays in what AI apps read until OpenMyMemo restarts. After you archived a memory, the same running server kept serving it in the memory context and wrote it back into `MEMORY.md`; a restored or moved memory could also be missing or listed under its old topic.
 
 ## 0.2.6 — 2026-10-16

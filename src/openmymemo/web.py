@@ -29,6 +29,8 @@ from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel
 
 from . import __version__, clients, memfiles, transfer
+from .assistant import Assistant, SettingsError, ensure_connector, save_settings
+from .assistant import features as assistant_features
 from .cloud import CALLBACK_HEADERS, Cloud, CloudError, SettingLocked, callback_page
 from .connectors import Connector, Connectors
 from .context import compile_context
@@ -162,6 +164,25 @@ class SettingsPatch(BaseModel):
 class CloudSettingsPatch(BaseModel):
     show: bool | None = None
     service: str | None = None  # "" goes back to MyMemo's own
+
+
+class AssistantCaps(BaseModel):
+    calls: int | None = None
+    tokens: int | None = None
+
+
+class AssistantPatch(BaseModel):
+    """Settings → Assistant. ``api_key`` is write-only: it is never returned; ``""`` removes it."""
+    enabled: bool | None = None
+    kind: str | None = None
+    protocol: str | None = None
+    base_url: str | None = None
+    model: str | None = None
+    api_key: str | None = None
+    features: dict[str, bool] | None = None
+    private_topics: list[str] | None = None
+    caps: AssistantCaps | None = None
+    timeout: float | None = None
 
 
 class TopicPatch(BaseModel):
@@ -371,8 +392,11 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
         env = clients.Env.current()
         known = {c.id: c for c in connectors.list()}
         ids = {c.id for c in clients.CLIENTS if c.id != clients.OTHER}  # "other" is a button, not an app
+        assistant = known.get("assistant")
         return {"system": env.system, "apps": [app_dict(r, known) for r in clients.catalog(vault, env)],
-                "custom": [connector_dict(c) for c in known.values() if c.id not in ids and c.kind != "cloud"]}
+                "custom": [connector_dict(c) for c in known.values()
+                           if c.id not in ids and c.kind not in ("cloud", "assistant")],
+                "assistant": connector_dict(assistant) if assistant and assistant.kind == "assistant" else None}
 
     def client_action(app_id: str, action) -> dict:
         env = clients.Env.current()
@@ -452,6 +476,32 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
         outcome = cloud.callback(dict(request.query_params))
         return HTMLResponse(callback_page(outcome), status_code=outcome.status, headers=CALLBACK_HEADERS)
 
+    # ---- OpenMyMemo Assistant (product-design.md §17) --------------------------------------------------------
+
+    @api.get("/api/assistant")
+    def get_assistant() -> dict:
+        return Assistant.from_settings(vault).status()
+
+    @api.patch("/api/assistant")
+    def patch_assistant(body: AssistantPatch) -> dict:
+        changes = body.model_dump(exclude_unset=True)
+        if body.kind == "mymemo":  # its sign-in comes with MyMemo's hosted model (§17.8)
+            raise HTTPException(400, "MyMemo's hosted model isn't available yet.")
+        if "caps" in changes:
+            changes["caps"] = body.caps.model_dump(exclude_unset=True) if body.caps else {}
+        try:
+            settings = save_settings(**changes)
+        except SettingsError as e:
+            raise HTTPException(400, str(e)) from None
+        if settings.enabled:
+            # Registered when first turned on; turning it on again here is the explicit re-grant after a removal.
+            ensure_connector(vault, regrant=bool(changes.get("enabled")))
+        return Assistant(vault, settings).status()
+
+    @api.post("/api/assistant/test")
+    def test_assistant() -> dict:
+        return Assistant.from_settings(vault).test()
+
     # ---- what AI sees, activity ----------------------------------------------------------------
 
     @api.get("/api/context")
@@ -468,10 +518,10 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
     @api.post("/api/import/preview")
     def import_preview(body: ImportPreviewIn) -> list[dict]:
         try:
-            items = transfer.parse(body.source, body.text)
+            items = assistant_features.import_preview(vault, body.source, body.text)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
-        return [i.to_dict() for i in transfer.plan(vault, items)]
+        return [i.to_dict() for i in items]
 
     # The panel reads other apps' memory files only in the home folder, so a request can't point it at the rest
     # of the disk: each route resolves the path (`~`, `..`, symlinks) and checks the prefix itself, inline, which
@@ -528,10 +578,10 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
         else:
             raise HTTPException(400, "Give a path, or a file's name and text.")
         try:
-            items = transfer.parse(source, text)
+            items = assistant_features.import_preview(vault, source, text)
         except ValueError as e:
             raise HTTPException(400, f"{name}: {e}") from None
-        return {"source": source, "name": name, "items": [i.to_dict() for i in transfer.plan(vault, items)]}
+        return {"source": source, "name": name, "items": [i.to_dict() for i in items]}
 
     @api.post("/api/import/commit")
     def import_commit(body: ImportCommitIn) -> dict:
@@ -544,7 +594,7 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
 
     @api.get("/api/sort")
     def sort_preview(topic: str | None = None) -> list[dict]:
-        return transfer.sort_plan(vault, topic or None)
+        return assistant_features.sort_plan(vault, topic or None)
 
     @api.post("/api/sort")
     def sort_apply(body: SortIn) -> dict:

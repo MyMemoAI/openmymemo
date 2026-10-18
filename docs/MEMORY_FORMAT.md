@@ -177,7 +177,7 @@ format: 1
 connectors:
   - id: claude-code
     name: Claude Code
-    kind: stdio                 # stdio | http | cloud
+    kind: stdio                 # stdio | http | cloud | assistant
     read:
       topics: all               # all, or a list of slugs
       include_private: false
@@ -192,6 +192,7 @@ connectors:
 - `write`: `none` is read only; `propose` follows the folder's `require_approval` setting and the protected-memory rule (§6.1); `auto` applies every change except in private topics.
 - Tokens are never stored; only the SHA-256 and a short preview are.
 - `kind: cloud` is a web app reaching the folder through MyMemo Cloud (product-design.md §16). Its id is `cloud-<slug>` (`cloud-chatgpt`, `cloud-claude`, …), it has no token, and it is created on first use like a stdio app. Ids starting with `cloud-` are kept for this kind: OpenMyMemo gives another app whose name would make such an id `app-cloud-…` instead, and never lets a web app act as a connector of another kind that has one.
+- `kind: assistant` is the OpenMyMemo Assistant, OpenMyMemo's own optional model help (product-design.md §17). There is at most one, with the id `assistant` and the name "OpenMyMemo Assistant". It is added the first time the person turns the Assistant on in Settings, has no token, and its writes are proposals like any app's. The id is kept for this kind: another app named "assistant" gets `app-assistant`. Its `include_private` is always `false`: private topics reach the Assistant only when its model runs on this computer and the person picked those topics in its settings, which are kept per computer, outside the folder. Removing it stops the Assistant using this folder until the person turns it on again in Settings, which re-grants access.
 - A connector with `revoked_at` refuses every call. Adding the same id again is an explicit re-grant.
 
 ## 6. `.openmymemo/`
@@ -300,7 +301,13 @@ Append-only, one JSON object per line: what each connector did.
 {"at": "2026-10-08T09:15:00+00:00", "connector": "claude-code", "action": "context", "memory_ids": ["m7f3a", "k2p9d"], "chars": 1840, "via": "hook"}
 ```
 
-`action` is `context`, `search`, `get`, `propose`, `import` or `link`; other fields depend on it (`query`, `memory_ids`, `proposal_id`, `queue_id`, `result`, `op`, `chars`, `via`, `source`, `account`, `email_masked`). A queued MyMemo Cloud write turned down when it is filed is a `propose` with `result: "rejected"` and its `queue_id`. `link` is written when this computer is linked to MyMemo Cloud, with `connector` `mymemo-cloud` and the account it was linked to: its display name and MyMemo's masked email (`s***@example.com`). Reads never rewrite `connectors.yaml`; "last seen" is derived from here.
+`action` is `context`, `search`, `get`, `propose`, `import`, `link` or `call`; other fields depend on it (`query`, `memory_ids`, `proposal_id`, `queue_id`, `result`, `op`, `chars`, `via`, `source`, `account`, `email_masked`, `feature`, `model`, `endpoint`, `kind`, `tokens_in`, `tokens_out`, `ms`, `error`). A queued MyMemo Cloud write turned down when it is filed is a `propose` with `result: "rejected"` and its `queue_id`. `link` is written when this computer is linked to MyMemo Cloud, with `connector` `mymemo-cloud` and the account it was linked to: its display name and MyMemo's masked email (`s***@example.com`). `call` is one request the OpenMyMemo Assistant made to its model, with `connector` `assistant`: the `feature` it was for (`import`, `sort`, `recall`, `check`, `session`, `tidy`, or `test`), the `model`, the endpoint's host name (`endpoint`), its `kind` (`local`, `key` or `mymemo`), the tokens the endpoint reported, the time in milliseconds, the ids of the memories it was sent, and its `result`: `ok`, or why it produced nothing (`invalid`, `timeout`, `unreachable`, `http`, `rate_limited`, `quota`, `plan`, `refused`, `redirect`, `cap`, `refused_private`, `error`). The text sent and received is never recorded.
+
+```json
+{"at": "2026-10-18T09:15:00+00:00", "connector": "assistant", "action": "call", "feature": "import", "model": "llama3.2", "endpoint": "127.0.0.1", "kind": "local", "result": "ok", "tokens_in": 812, "tokens_out": 230, "ms": 2140}
+```
+
+Reads never rewrite `connectors.yaml`; "last seen" is derived from here.
 
 ### 6.6 `proposals/<id>.json`
 
