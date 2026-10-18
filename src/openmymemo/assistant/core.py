@@ -37,6 +37,7 @@ from ..textutil import classify_topic
 from ..topics import IMPORTED_GROUP
 from ..vault import Memory, NotFound, Vault, VaultError, now_iso
 from . import client as endpoint
+from . import mymemo
 from .guard import Guard
 from .schema import Invalid, clean, extract_json, wire_schema
 from .settings import FEATURES, Settings, load_settings, record_usage, reserve_call
@@ -135,6 +136,10 @@ class Assistant:
             return problem
         if self.connector() is None:
             return "The Assistant's access was removed on the Connectors page. Turn it on again in Settings."
+        if s.kind == "mymemo":  # no plan, allowance used up, or busy: rules until the service says otherwise
+            held = mymemo.hold(s)
+            if held:
+                return mymemo.hold_message(held)
         usage = s.month_usage()
         if s.caps.get("calls") is not None and usage["calls"] >= s.caps["calls"]:
             return "This month's limit on calls is reached."
@@ -155,7 +160,8 @@ class Assistant:
             "timeout": s.timeout, "from_env": list(s.from_env), "local": s.local, "problem": s.problem(),
             "ready": s.enabled and self.unavailable_reason() is None, "reason": self.unavailable_reason(),
             "where": where_text_goes(s), "connector_id": CONNECTOR_ID if c else None, "revoked": revoked,
-            "kinds": {"local": True, "key": True, "mymemo": False},  # MyMemo's hosted model: coming (§17.8)
+            "kinds": {"local": True, "key": True, "mymemo": True},
+            "mymemo": mymemo.public_status(s) if s.kind == "mymemo" else None,
         }
 
     def available(self, feature: str) -> bool:
@@ -309,6 +315,9 @@ class Assistant:
         problem = s.problem()
         if problem:
             return {"ok": False, "model": s.model or None, "ms": None, "error": problem}
+        held = mymemo.hold(s) if s.kind == "mymemo" else None
+        if held and held.get("code") in ("rate_limited", "unavailable"):  # Retry-After holds for tests too
+            return {"ok": False, "model": s.model or None, "ms": None, "error": mymemo.hold_message(held)}
         capped = reserve_call(s.caps)
         if capped:
             return {"ok": False, "model": s.model or None, "ms": None,

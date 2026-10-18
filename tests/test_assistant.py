@@ -422,7 +422,7 @@ def test_panel_routes(vault, fake):
     api = TestClient(create_api(vault, 8787), base_url="http://127.0.0.1:8787")
     assert api.get("/api/assistant").status_code == 403  # the guard covers it
     s = api.get("/api/assistant", headers=H).json()
-    assert not s["enabled"] and s["kinds"]["mymemo"] is False and "nowhere" in s["where"]
+    assert not s["enabled"] and s["kinds"]["mymemo"] is True and "nowhere" in s["where"] and s["mymemo"] is None
     assert api.get("/api/clients", headers=H).json()["assistant"] is None
     s = api.patch("/api/assistant", headers=H, json={"enabled": True, "kind": "key", "protocol": "anthropic",
                                                      "model": "claude-haiku-5-5", "api_key": "sk-secret",
@@ -434,7 +434,9 @@ def test_panel_routes(vault, fake):
     assert catalog["assistant"]["id"] == "assistant" and all(c["id"] != "assistant" for c in catalog["custom"])
     r = api.post("/api/assistant/test", headers=H).json()
     assert r["ok"] and r["model"] == "claude-haiku-5-5"
-    assert api.patch("/api/assistant", headers=H, json={"kind": "mymemo"}).status_code == 400
+    s = api.patch("/api/assistant", headers=H, json={"kind": "mymemo"}).json()  # chosen; needs a sign-in
+    assert s["kind"] == "mymemo" and not s["ready"] and s["problem"] == "Sign in to MyMemo to use its hosted model."
+    assert s["mymemo"]["signed_in"] is False and not s["has_key"]
     assert api.patch("/api/assistant", headers=H, json={"base_url": "ftp://x"}).status_code == 400
     assert api.patch("/api/connectors/assistant", headers=H, json={"include_private": True}).status_code == 400
     assert api.delete("/api/connectors/assistant", headers=H).status_code == 200
@@ -459,7 +461,7 @@ def test_cli(vault, fake):
     assert r.exit_code == 0 and "gpt-x answered in" in r.stdout
     assert fake.requests[0].headers["authorization"] == "Bearer sk-cli"
     r = runner.invoke(app, [*v, "assistant", "set", "--kind", "mymemo"])
-    assert r.exit_code == 2
+    assert r.exit_code == 1 and "Signed in: no" in r.stdout and "Sign in to MyMemo" in r.stdout
     r = runner.invoke(app, [*v, "assistant", "off"])
     assert r.exit_code == 0 and not load_settings().enabled
 

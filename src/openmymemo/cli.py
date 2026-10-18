@@ -962,14 +962,30 @@ def setup_codex(ctx: typer.Context,
 
 
 def _assistant_status(vault: Vault) -> None:
+    from . import cloud
     from .assistant import Assistant
 
     s = Assistant.from_settings(vault).status()
     typer.echo(f"OpenMyMemo Assistant: {'on' if s['enabled'] else 'off'}")
-    kind = {"local": "a model on this computer", "key": "your own API key", "mymemo": "MyMemo (coming soon)"}[s["kind"]]
-    typer.echo(f"  Model:     {s['model'] or '(none)'} via {kind}, {s['protocol']} API")
-    typer.echo(f"  Endpoint:  {s['endpoint'] or '(none)'}")
-    if s["kind"] != "local":
+    kind = {"local": "a model on this computer", "key": "your own API key", "mymemo": "MyMemo"}[s["kind"]]
+    if s["kind"] == "mymemo":
+        m = s["mymemo"]
+        typer.echo("  Model:     MyMemo's hosted model (see `openmymemo assistant plan`)")
+        typer.echo(f"  Endpoint:  {s['endpoint']}")
+        if m["signed_in"]:
+            how = " with this computer's MyMemo Cloud link" if m["via"] == "cloud" else ""
+            who = cloud.account_label(m["account"]) if m["account"] else "a MyMemo account"
+            typer.echo(f"  Signed in: {who}{how}")
+        else:
+            typer.echo("  Signed in: no (`openmymemo assistant signin`)")
+        if m["hold"]:
+            typer.echo(f"  Paused:    {m['hold']['message']}")
+            if m["hold"]["plan_url"]:
+                typer.echo(f"             {m['hold']['plan_url']}")
+    else:
+        typer.echo(f"  Model:     {s['model'] or '(none)'} via {kind}, {s['protocol']} API")
+        typer.echo(f"  Endpoint:  {s['endpoint'] or '(none)'}")
+    if s["kind"] == "key":
         where = {"keychain": " (in the Keychain)", "file": " (in assistant.json)", "env": " (from the environment)"}
         typer.echo(f"  Key:       {'set' + where.get(s['key_store'] or '', '') if s['has_key'] else 'not set'}")
     typer.echo("  Features:  " + ", ".join(f"{k} {'on' if v else 'off'}" for k, v in s["features"].items()))
@@ -996,7 +1012,9 @@ def assistant_status(ctx: typer.Context) -> None:
 @assistant_app.command("set")
 def assistant_set(
     ctx: typer.Context,
-    kind: Annotated[str | None, typer.Option(help="local (a model on this computer) or key (your own API key).")] = None,
+    kind: Annotated[str | None, typer.Option(
+        help="local (a model on this computer), key (your own API key) or mymemo (MyMemo's hosted model; then run "
+             "`openmymemo assistant signin`).")] = None,
     protocol: Annotated[str | None, typer.Option(help="openai (OpenAI-compatible) or anthropic.")] = None,
     base_url: Annotated[str | None, typer.Option(help="The endpoint's base URL; empty for the default.")] = None,
     model: Annotated[str | None, typer.Option(help="The model's name, e.g. llama3.2 or claude-haiku-5-5.")] = None,
@@ -1014,11 +1032,8 @@ def assistant_set(
     from .assistant import KINDS, SettingsError, ensure_connector, save_settings
 
     vault = _vault(ctx)
-    if kind == "mymemo":
-        typer.secho("MyMemo's hosted model isn't available yet.", fg="red", err=True)
-        raise typer.Exit(2)
     if kind is not None and kind not in KINDS:
-        typer.secho("kind must be local or key", fg="red", err=True)
+        typer.secho("kind must be local, key or mymemo", fg="red", err=True)
         raise typer.Exit(2)
     secret = None
     if key_stdin:
@@ -1047,6 +1062,87 @@ def assistant_set(
     _assistant_status(vault)
     if settings.problem():
         raise typer.Exit(1)
+
+
+@assistant_app.command("signin")
+def assistant_signin(
+    ctx: typer.Context,
+    browser: Annotated[bool, typer.Option("--browser", help="Sign in with the browser even when this computer is "
+                                                           "linked to MyMemo Cloud.")] = False,
+    open_browser: Annotated[bool, typer.Option("--open/--no-open", help="Open the browser.")] = True,
+) -> None:
+    """Sign in to MyMemo to use its hosted model, and choose it for the Assistant. A computer linked to MyMemo Cloud
+    needs no browser."""
+    import webbrowser
+
+    from . import cloud
+    from .assistant import ensure_connector, mymemo, save_settings
+
+    vault = _vault(ctx)
+    link = None if browser else cloud.load_link()
+    done = mymemo.exchange(link) if link is not None else "use_browser"
+    if done not in ("signed_in", "use_browser"):
+        typer.secho(mymemo.EXCHANGE_MESSAGES[done], fg="red", err=True)
+        raise typer.Exit(1)
+    if done == "use_browser":
+        if link is not None:
+            typer.echo(mymemo.EXCHANGE_MESSAGES["use_browser"])
+
+        def show(url: str) -> None:
+            typer.echo("Sign in to MyMemo in your browser.")
+            if open_browser and webbrowser.open(url):
+                typer.echo(f"If your browser didn't open, go to:\n  {url}")
+            else:
+                typer.echo(f"Open this link:\n  {url}")
+
+        outcome = mymemo.sign_in_with_browser(show)
+        if not outcome.ok:
+            typer.secho(f"Not signed in: {outcome.title}. {outcome.message}", fg="red", err=True)
+            raise typer.Exit(1)
+    save_settings(enabled=True, kind="mymemo")
+    ensure_connector(vault, regrant=True)
+    typer.secho("Signed in to MyMemo. The Assistant now uses MyMemo's hosted model.", fg="green")
+    _assistant_status(vault)
+
+
+@assistant_app.command("signout")
+def assistant_signout() -> None:
+    """Sign out of MyMemo: the sign-in is revoked at MyMemo and forgotten here; the Assistant uses its rules."""
+    from .assistant import mymemo
+
+    typer.echo(mymemo.sign_out())
+
+
+@assistant_app.command("plan")
+def assistant_plan(ctx: typer.Context) -> None:
+    """Show MyMemo's hosted model, your OpenMyMemo Assistant plan and this period's usage, as MyMemo reports them."""
+    from .assistant import load_settings, mymemo
+
+    s = load_settings()
+    if s.kind != "mymemo":
+        typer.echo("The Assistant doesn't use MyMemo's hosted model. Choose it with `openmymemo assistant signin`.")
+        raise typer.Exit(1)
+    a = mymemo.account(s)
+    if not a["ok"]:
+        typer.secho(a["error"], fg="yellow", err=True)
+        raise typer.Exit(1)
+    name = a["display_name"] or a["model"] or "unknown"
+    typer.echo(f"Model:  {name}" + (f" by {a['provider']}" if a["provider"] else ""))
+    plan = a["plan"]
+    state = plan["status"] or ("active" if plan["active"] else "none")
+    typer.echo(f"Plan:   {state}" + (", cancels at the end of the period" if plan["cancel_at_period_end"] else ""))
+    when = plan["resets_at"] or plan["period_end"]
+    if when:
+        typer.echo(f"        this period ends {when}")
+    u = a["usage"]
+    if any(v is not None for v in u.values()):
+        def part(used: int | None, included: int | None, what: str) -> str:
+            return f"{used or 0:,}" + (f" of {included:,}" if included is not None else "") + f" {what}"
+        typer.echo("Usage:  " + ", ".join([part(u["input_tokens"], u["input_tokens_included"], "input tokens"),
+                                           part(u["output_tokens"], u["output_tokens_included"], "output tokens"),
+                                           f"{u['requests'] or 0:,} requests"]))
+    if plan["plan_url"]:
+        typer.echo(f"{'Manage' if plan['active'] else 'Get'} the plan: {plan['plan_url']}")
 
 
 @assistant_app.command("test")

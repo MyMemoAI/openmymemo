@@ -9,6 +9,10 @@ API, over ``httpx2`` (product-design.md §17.2). No vendor SDK.
   endpoint is never reached through a proxy, and must still be on loopback when the request is made.
 * **Failures** are returned, not raised: a ``Failure`` with a message for the person and a short code for the
   activity log. Its message never contains the key or the text sent.
+* **MyMemo's hosted model** (kind ``mymemo``, §17.8) is the OpenAI-compatible shape with its access token as the
+  bearer and the feature in ``X-OpenMyMemo-Feature``. The token is refreshed before it expires and once on a 401
+  (then the request is sent again); a 402, 429 or 503 becomes a pause (``mymemo.note_failure``) during which the
+  Assistant makes no requests and features use their rules.
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ from typing import Any
 import httpx2
 
 from .. import __version__
+from . import mymemo as _mymemo
 from .settings import Settings, is_loopback, url_problem
 
 ANTHROPIC_VERSION = "2023-06-01"
@@ -64,7 +69,7 @@ def _status_message(status: int, payload: Any) -> Failure:
         if status == 402:
             kind = "quota" if code == "quota_exceeded" else "plan"
             text = ("This month's allowance is used up." if kind == "quota"
-                    else "This account doesn't include the Assistant.")
+                    else "Needs the OpenMyMemo Assistant plan.")
             return Failure(text, kind, status)
     detail = " ".join(detail.split())[:200]
     texts = {
@@ -87,9 +92,10 @@ def _client(settings: Settings, timeout: float) -> httpx2.Client:
                          follow_redirects=False, trust_env=not local)
 
 
-def _post(client: httpx2.Client, url: str, headers: dict, body: dict) -> tuple[int, Any] | Failure:
+def _post(client: httpx2.Client, url: str, headers: dict, body: dict | None,
+          method: str = "POST") -> tuple[int, Any, dict[str, str]] | Failure:
     try:
-        r = client.post(url, json=body, headers=headers)
+        r = client.request(method, url, json=body, headers=headers)
     except httpx2.TimeoutException:
         return Failure("The endpoint took too long to answer.", "timeout")
     except httpx2.HTTPError:
@@ -101,7 +107,7 @@ def _post(client: httpx2.Client, url: str, headers: dict, body: dict) -> tuple[i
         payload = None
     if 300 <= r.status_code < 400:
         return Failure("The endpoint redirected elsewhere; enter its final address.", "redirect", r.status_code)
-    return r.status_code, payload
+    return r.status_code, payload, {k.lower(): v for k, v in r.headers.items()}
 
 
 def _format_refused(status: int) -> bool:
@@ -134,7 +140,7 @@ def chat(settings: Settings, system: str, user: str, *, max_tokens: int, schema:
                 sent = _post(client, url, headers, body)
             if isinstance(sent, Failure):
                 return sent
-            status, payload = sent
+            status, payload, _ = sent
             if status != 200 or not isinstance(payload, dict):
                 return _status_message(status, payload)
             if payload.get("stop_reason") == "refusal":
@@ -145,25 +151,45 @@ def chat(settings: Settings, system: str, user: str, *, max_tokens: int, schema:
             tokens_in, tokens_out = usage.get("input_tokens"), usage.get("output_tokens")
         else:
             url = base + "/chat/completions"
-            secret = settings.secret
+            mymemo = settings.kind == "mymemo"
+            secret = _mymemo.access_token(settings) if mymemo else settings.secret
             if secret:
                 headers["Authorization"] = f"Bearer {secret}"
-            if settings.kind == "mymemo" and feature:
+            if mymemo and feature:
                 headers["X-OpenMyMemo-Feature"] = feature
             body = {"model": settings.model or "default", "max_tokens": max_tokens,
                     "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
             if schema:
                 body["response_format"] = {"type": "json_schema",
                                            "json_schema": {"name": "result", "schema": schema, "strict": False}}
-            sent = _post(client, url, headers, body)
-            if schema and not isinstance(sent, Failure) and _format_refused(sent[0]):
-                body.pop("response_format")
+
+            def send() -> tuple[int, Any, dict[str, str]] | Failure:
                 sent = _post(client, url, headers, body)
+                if schema and not isinstance(sent, Failure) and _format_refused(sent[0]):
+                    body.pop("response_format", None)
+                    sent = _post(client, url, headers, body)
+                return sent
+
+            sent = send()
+            if mymemo and not isinstance(sent, Failure) and sent[0] == 401:
+                fresh = _mymemo.refresh(settings)
+                if not fresh:
+                    return Failure(_mymemo.SIGNED_OUT, "signed_out", 401)
+                headers["Authorization"] = f"Bearer {fresh}"
+                sent = send()
             if isinstance(sent, Failure):
                 return sent
-            status, payload = sent
+            status, payload, response_headers = sent
+            if mymemo and status == 401:
+                return Failure(_mymemo.SIGNED_OUT, "signed_out", 401)
+            if mymemo and status != 200:
+                held = _mymemo.note_failure(settings, status, payload, response_headers)
+                if held:
+                    return Failure(_mymemo.hold_message(held), held["code"], status)
             if status != 200 or not isinstance(payload, dict):
                 return _status_message(status, payload)
+            if mymemo:
+                _mymemo.clear_hold(settings)
             choices = payload.get("choices") if isinstance(payload.get("choices"), list) else []
             message = choices[0].get("message") if choices and isinstance(choices[0], dict) else None
             text = message.get("content") if isinstance(message, dict) else None
@@ -178,3 +204,24 @@ def chat(settings: Settings, system: str, user: str, *, max_tokens: int, schema:
     as_int = lambda v: v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else None  # noqa: E731
     return Reply(text=text, model=model or settings.model, input_tokens=as_int(tokens_in),
                  output_tokens=as_int(tokens_out), ms=ms)
+
+
+def get_json(settings: Settings, path: str, *, timeout: float = 20.0) -> tuple[int, Any, dict[str, str]] | Failure:
+    """GET ``endpoint + path`` with MyMemo's token (refreshed once on 401), for ``GET /models``. Same rules as
+    ``chat``: the address is checked, redirects aren't followed."""
+    bad = url_problem(settings.endpoint, settings.kind)
+    if bad:
+        return Failure(bad, "bad_address")
+    headers = {"User-Agent": f"OpenMyMemo/{__version__}", "Accept": "application/json",
+               "Authorization": f"Bearer {_mymemo.access_token(settings)}"}
+    with _client(settings, timeout) as client:
+        got = _post(client, settings.endpoint + path, headers, None, method="GET")
+        if not isinstance(got, Failure) and got[0] == 401:
+            fresh = _mymemo.refresh(settings)
+            if not fresh:
+                return Failure(_mymemo.SIGNED_OUT, "signed_out", 401)
+            headers["Authorization"] = f"Bearer {fresh}"
+            got = _post(client, settings.endpoint + path, headers, None, method="GET")
+        if not isinstance(got, Failure) and got[0] == 401:
+            return Failure(_mymemo.SIGNED_OUT, "signed_out", 401)
+        return got

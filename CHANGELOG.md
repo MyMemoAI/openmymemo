@@ -4,11 +4,12 @@ What changed in each release, for people who use OpenMyMemo. Every release is al
 
 ## Unreleased
 
-- **OpenMyMemo Assistant (optional, off by default).** Settings → Assistant (in a browser, at the bottom of the Connectors page) or `openmymemo assistant set` lets OpenMyMemo use a model: one on this computer (Ollama, LM Studio, llama.cpp, vLLM or any other OpenAI-compatible server), or your own API key for Anthropic or any OpenAI-compatible service. "Test" sends one tiny request and shows the model and how long it took. MyMemo's hosted model is listed as coming soon. Everything keeps working without it.
+- **OpenMyMemo Assistant (optional, off by default).** Settings → Assistant (in a browser, at the bottom of the Connectors page) or `openmymemo assistant set` lets OpenMyMemo use a model: one on this computer (Ollama, LM Studio, llama.cpp, vLLM or any other OpenAI-compatible server), or your own API key for Anthropic or any OpenAI-compatible service. "Test" sends one tiny request and shows the model and how long it took. Everything keeps working without it.
   - **Imports:** pasted lists, Markdown and other apps' memory files are split into memories by the model, which also drops instructions meant for tools and suggests a topic. The preview says "Split by OpenMyMemo Assistant" and shows, unticked, any line it left out that the rules would have kept.
   - **Sorting:** topic suggestions for imported memories come from the model.
   - Each feature has its own switch, and there are monthly limits on calls and tokens; at a limit, OpenMyMemo goes back to its rules.
   - Private topics are never sent to a remote model; a model on this computer reads only the private topics you pick. The key is kept on this computer only, in the Keychain on a Mac, never in your memory folder.
+  - **MyMemo's hosted model:** choose "MyMemo" and sign in with your MyMemo account (`openmymemo assistant signin`). A computer linked to MyMemo Cloud needs no browser. Settings → Assistant shows the account, the model, your OpenMyMemo Assistant plan and this period's usage as MyMemo reports them, with "Get the plan" or "Manage" opening the plan page; `openmymemo assistant plan` prints them. Without the plan, or once the month's allowance is used up, the Assistant quietly uses the rules until it can be used again; when MyMemo asks it to slow down, it waits as long as asked. Sign out in the panel or with `openmymemo assistant signout`. See PRIVACY.md for what MyMemo receives.
   - The Assistant is listed on the Connectors page as "OpenMyMemo Assistant", with its own read scope, writing mode and blocked topics, and every request it makes is in the activity log (feature, model, where, tokens), never the text.
 
 ## 0.2.6 — 2026-10-16

@@ -1,14 +1,20 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
-import { api, type AssistantFeature, type AssistantKind, type AssistantPatch, type AssistantStatus, type AssistantTest } from "../api";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import {
+  api, type AssistantAccount, type AssistantFeature, type AssistantKind, type AssistantPatch, type AssistantStatus,
+  type AssistantTest,
+} from "../api";
+import { desktop } from "../desktop";
 import { t } from "../i18n";
 import { store, toast } from "../store";
 import AppIcon from "./AppIcon.vue";
 
 /**
  * Settings → Assistant (product-design.md §17.2): off, a model on this computer, your own API key, or MyMemo's hosted
- * model (coming soon); its endpoint, model and key (write-only), a Test button, a switch per feature, the private
- * topics a model on this computer may read, monthly limits and this month's usage, and where memory text goes.
+ * model; its endpoint, model and key (write-only), a Test button, a switch per feature, the private topics a model on
+ * this computer may read, monthly limits and this month's usage, and where memory text goes. For MyMemo (§17.8):
+ * sign-in (no browser when this computer is linked to MyMemo Cloud), the account, and the model, plan and usage as
+ * MyMemo reports them, with its plan page opened in the browser; nothing about the plan is known here.
  */
 type Choice = "off" | AssistantKind;
 const CHOICES: Choice[] = ["off", "local", "key", "mymemo"];
@@ -32,7 +38,136 @@ onMounted(async () => {
     take(await api.assistant());
   } catch {
     status.value = null; // an older server without the Assistant: nothing to set
+    return;
   }
+  void loadAccount();
+});
+
+// ---- MyMemo's hosted model -------------------------------------------------------------------------------------
+const mm = computed(() => (status.value?.enabled && status.value.kind === "mymemo" ? status.value.mymemo ?? null : null));
+const account = ref<AssistantAccount | null>(null);
+const loadingAccount = ref(false);
+const signingIn = ref(false);
+const signInUrl = ref<string | null>(null);
+let poll = 0;
+
+async function loadAccount() {
+  if (!mm.value?.signed_in) {
+    account.value = null;
+    return;
+  }
+  loadingAccount.value = true;
+  try {
+    const r = await api.assistantAccount();
+    account.value = r.account;
+    take(r.assistant); // seeing an active plan lifts a pause
+  } catch {
+    account.value = null;
+  } finally {
+    loadingAccount.value = false;
+  }
+}
+
+function openExternal(url: string) {
+  if (desktop) window.location.assign(url);
+  else window.open(url, "_blank", "noopener");
+}
+
+function stopPoll() {
+  window.clearInterval(poll);
+  poll = 0;
+}
+onBeforeUnmount(stopPoll);
+
+function waitForBrowser() {
+  stopPoll();
+  const until = Date.now() + 10 * 60 * 1000;
+  poll = window.setInterval(async () => {
+    try {
+      take(await api.assistant());
+    } catch {
+      return;
+    }
+    const m = status.value?.mymemo;
+    if (m?.signed_in) {
+      stopPoll();
+      signInUrl.value = null;
+      toast(t("ast.mm.signedIn"));
+      void loadAccount();
+    } else if (!m?.pending || Date.now() > until) {
+      stopPoll();
+      signInUrl.value = null;
+    }
+  }, 2000);
+}
+
+async function signIn(browser = false) {
+  if (signingIn.value) return;
+  signingIn.value = true;
+  try {
+    const r = await api.assistantSignIn(browser);
+    take(r.assistant);
+    if (r.signed_in) {
+      toast(t("ast.mm.signedIn"));
+      await loadAccount();
+    } else if (r.url) {
+      signInUrl.value = r.url;
+      openExternal(r.url);
+      waitForBrowser();
+    }
+  } catch (e) {
+    toast(e instanceof Error ? e.message : String(e), "error");
+  } finally {
+    signingIn.value = false;
+  }
+}
+
+async function signOut() {
+  if (busy.value) return;
+  busy.value = true;
+  try {
+    const r = await api.assistantSignOut();
+    take(r.assistant);
+    account.value = null;
+    toast(r.message);
+  } catch (e) {
+    toast(e instanceof Error ? e.message : String(e), "error");
+  } finally {
+    busy.value = false;
+  }
+}
+
+const accountLine = computed(() => {
+  const m = mm.value;
+  if (!m) return "";
+  const a = m.account;
+  const who = a?.display_name && a?.email_masked ? `${a.display_name} (${a.email_masked})` : a?.display_name || a?.email_masked;
+  const line = who ? t("ast.mm.account", { who }) : t("ast.mm.accountUnknown", { host: hostOf(m.service) });
+  return m.via === "cloud" ? `${line} ${t("ast.mm.viaLink")}` : line;
+});
+const hostOf = (url: string) => {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+};
+const day = (iso: string | null | undefined) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" });
+};
+const ok = computed(() => (account.value?.ok ? account.value : null));
+const planUrl = computed(() => ok.value?.plan.plan_url ?? mm.value?.hold?.plan_url ?? null);
+const usageText = computed(() => {
+  const u = ok.value?.usage;
+  if (!u || Object.values(u).every((v) => v == null)) return "";
+  const of = (used: number | null, included: number | null) =>
+    included == null ? fmt(used ?? 0) : t("ast.mm.usageOf", { used: fmt(used ?? 0), included: fmt(included) });
+  return t("ast.mm.usage", {
+    input: of(u.input_tokens, u.input_tokens_included), output: of(u.output_tokens, u.output_tokens_included),
+    requests: fmt(u.requests ?? 0),
+  });
 });
 
 const choice = computed<Choice>(() => (status.value?.enabled ? status.value.kind : "off"));
@@ -61,8 +196,8 @@ async function change(body: AssistantPatch, done?: string) {
 }
 
 function pick(c: Choice) {
-  if (c === "mymemo" || c === choice.value) return;
-  void change(c === "off" ? { enabled: false } : { enabled: true, kind: c });
+  if (c === choice.value) return;
+  void change(c === "off" ? { enabled: false } : { enabled: true, kind: c }).then(() => loadAccount());
 }
 
 function save() {
@@ -136,7 +271,73 @@ const fmt = (n: number) => n.toLocaleString("en-US");
         <button type="button" class="btn btn-sm" :disabled="busy" @click="allowAgain">{{ t("ast.allowAgain") }}</button>
       </div>
 
-      <form v-if="status.enabled" class="space-y-3 px-4.5 py-3.5" @submit.prevent="save">
+      <div v-if="mm" class="space-y-3 px-4.5 py-3.5" data-test="mymemo">
+        <div class="font-semibold">{{ t("ast.mm.title") }}</div>
+        <template v-if="mm.signed_in">
+          <p class="text-[13px]" data-test="mm-account">{{ accountLine }}</p>
+          <p v-if="loadingAccount && !account" class="text-[13px] text-muted">{{ t("ast.mm.loading") }}</p>
+          <template v-if="ok">
+            <p v-if="ok.display_name || ok.model" class="text-[13px]" data-test="mm-model">
+              {{ ok.provider ? t("ast.mm.modelBy", { model: ok.display_name ?? ok.model ?? "", provider: ok.provider })
+                : t("ast.mm.model", { model: ok.display_name ?? ok.model ?? "" }) }}
+            </p>
+            <p class="text-[13px]" data-test="mm-plan">
+              {{ !ok.plan.active ? t("ast.mm.planNone")
+                : ok.plan.cancel_at_period_end && ok.plan.period_end ? t("ast.mm.planEnds", { date: day(ok.plan.period_end) })
+                : t("ast.mm.planActive") }}
+            </p>
+            <p v-if="usageText" class="text-[13px] text-muted" data-test="mm-usage">
+              {{ usageText }}
+              <template v-if="ok.plan.active && (ok.plan.resets_at || ok.plan.period_end)">
+                {{ t("ast.mm.resets", { date: day(ok.plan.resets_at ?? ok.plan.period_end) }) }}
+              </template>
+            </p>
+          </template>
+          <p v-else-if="account && !account.ok" class="text-[13px] text-muted">{{ account.error }}</p>
+          <p v-if="mm.hold" class="notice flex-wrap gap-2 text-[13px]" data-test="mm-hold">
+            <AppIcon name="info" :size="14" class="shrink-0" />
+            <span>{{ mm.hold.message }}</span>
+          </p>
+          <div class="flex flex-wrap items-center gap-2 pt-1">
+            <a
+              v-if="planUrl"
+              :href="planUrl"
+              target="_blank"
+              rel="noopener"
+              class="btn btn-sm"
+              data-test="mm-plan-link"
+              @click.prevent="openExternal(planUrl)"
+            >{{ ok?.plan.active ? t("ast.mm.manage") : t("ast.mm.getPlan") }}</a>
+            <button type="button" class="btn btn-sm" :disabled="busy || testing || !!status.problem" @click="test">
+              {{ testing ? t("ast.testing") : t("ast.test") }}
+            </button>
+            <button type="button" class="btn btn-ghost btn-sm" :disabled="busy" @click="signOut">{{ t("ast.mm.signOut") }}</button>
+          </div>
+          <p v-if="tested" class="text-[13px]" :class="tested.ok ? 'text-fresh' : 'text-muted'" data-test="tested">
+            {{ tested.ok ? t("ast.testOk", { model: tested.model ?? "", ms: tested.ms ?? 0 }) : tested.error }}
+          </p>
+        </template>
+        <template v-else>
+          <p class="text-[13px] text-muted">{{ mm.signed_out === "expired" ? t("ast.mm.expired") : t("ast.mm.signInHelp") }}</p>
+          <p v-if="mm.cloud_linked" class="text-[13px] text-muted">{{ t("ast.mm.viaCloud") }}</p>
+          <div class="flex flex-wrap items-center gap-2">
+            <button type="button" class="btn btn-sm" :disabled="signingIn" @click="signIn()">
+              {{ signingIn ? t("ast.mm.signingIn") : t("ast.mm.signIn") }}
+            </button>
+            <button v-if="mm.cloud_linked" type="button" class="btn btn-ghost btn-sm" :disabled="signingIn" @click="signIn(true)">
+              {{ t("ast.mm.signInBrowser") }}
+            </button>
+          </div>
+          <p v-if="signInUrl && mm.pending" class="text-[13px] text-muted" data-test="mm-waiting">
+            {{ t("ast.mm.waiting") }}
+            <a :href="signInUrl" target="_blank" rel="noopener" class="btn btn-link btn-sm">{{ t("ast.mm.openAgain") }}</a>
+          </p>
+          <p v-if="mm.signin_error" class="text-[13px] text-wait-ink">{{ mm.signin_error }}</p>
+        </template>
+        <p class="text-xs text-muted">{{ t("ast.mm.noEmbeddings") }}</p>
+      </div>
+
+      <form v-if="status.enabled && status.kind !== 'mymemo'" class="space-y-3 px-4.5 py-3.5" @submit.prevent="save">
         <div v-if="status.kind === 'key'" class="space-y-1.5">
           <span class="text-[13px] font-semibold">{{ t("ast.protocol") }}</span>
           <div class="seg" role="radiogroup" :aria-label="t('ast.protocol')">
