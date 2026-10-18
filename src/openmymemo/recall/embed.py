@@ -212,11 +212,32 @@ class EndpointEmbedder:
         self.remote = not s.local
         self.id = f"endpoint/{s.host}/{s.embeddings_model}"
         self.min_similarity = ENDPOINT_MIN_SIMILARITY
-        self._private = assistant.vault.private_topics()
-        self._connector = assistant.connector()
+        self._guard = assistant.guard()  # the Assistant's send rules (assistant/guard.py), fixed for this embedder
+        self._withheld: list[str] | None = None
+
+    def _withheld_texts(self) -> list[str]:
+        if self._withheld is None:
+            self._withheld = self._guard.withheld()[2] if self._guard is not None else []
+        return self._withheld
 
     def may_embed(self, memory: Memory) -> bool:
-        return self._connector is not None and self.assistant.may_send(memory, self._private, self._connector)
+        """What the Assistant may send: active, in its read scope, not private (a model on this computer gets the
+        private topics the person opted in), and not containing text it may not send."""
+        from ..assistant.guard import contains_any
+
+        g = self._guard
+        return (g is not None and memory.status == "active" and g.memory_ok(memory)
+                and not contains_any(memory.content, self._withheld_texts()))
+
+    def _refused(self, texts: Sequence[str], memory_ids: Sequence[str]) -> bool:
+        """The Assistant's own check of everything going out (as ``json_call`` does), as a last line."""
+        from ..assistant import Data
+
+        if self._guard is None:
+            return True
+        blocks = [Data(t, memory_ids=(mid,)) for t, mid in zip(texts, memory_ids, strict=False)]
+        blocks += [Data(t) for t in texts[len(blocks):]]
+        return self._guard.refusal(blocks) is not None
 
     def embed(self, texts: Sequence[str], kind: str, memory_ids: Sequence[str] = ()) -> list[list[float]]:
         out: list[list[float]] = []
@@ -237,6 +258,14 @@ class EndpointEmbedder:
             raise EmbedError(a.unavailable_reason("recall") or "No embeddings model.")
         if s.kind == "local" and not is_loopback(s.endpoint):
             raise EmbedError("A model on this computer must have a local address.")
+        if self._refused(texts, memory_ids):
+            try:
+                a.vault.log_activity(CONNECTOR_ID, "call", feature="recall", model=s.embeddings_model,
+                                     endpoint=s.host or None, kind=s.kind, result="refused_private",
+                                     memory_ids=sorted(set(memory_ids)) or None, embeddings=len(texts))
+            except OSError:
+                pass
+            raise EmbedError("That includes text that may not be sent to this model.")
         capped = reserve_call(s.caps)
         if capped:
             raise EmbedError(f"This month's limit on {capped} is reached.")

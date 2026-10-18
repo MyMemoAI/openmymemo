@@ -190,14 +190,13 @@ def rerank(vault: Vault, query: str, ranked: Sequence[Memory], assistant=None) -
     if a is None:
         return None
     top = list(ranked[:RERANK_TOP])
-    connector = a.connector()
-    private = vault.private_topics()
-    sendable = [m for m in top if a.may_send(m, private, connector)]
+    # Memory blocks only through memory_data: it leaves out whatever the Assistant may not send.
+    memory_blocks = a.memory_data(top, render=lambda m: f"[{m.id}] {m.content}")
+    sent_ids = {mid for b in memory_blocks for mid in b.memory_ids}
+    sendable = [m for m in top if m.id in sent_ids]
     if len(sendable) < 2:
         return None
-    blocks = [Data(text=query, label="query")]
-    blocks += [Data(text=f"[{m.id}] {m.content}", label="memory", topic=m.topic, memory_ids=(m.id,))
-               for m in sendable]
+    blocks = [Data(text=query, label="query"), *memory_blocks]
     result = a.json_call("recall", RERANK_INSTRUCTIONS, blocks, RERANK_SCHEMA, max_tokens=800,
                          timeout=min(a.settings.timeout, MODEL_TIMEOUT))
     if not result:

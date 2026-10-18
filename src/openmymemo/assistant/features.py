@@ -17,7 +17,6 @@ from collections.abc import Sequence
 
 from .. import transfer
 from ..textutil import KINDS, similarity
-from ..topics import IMPORTED_GROUP
 from ..vault import Vault
 from .core import Assistant, Data
 
@@ -97,11 +96,6 @@ def _topic_list(topics: Sequence[dict]) -> str:
                      for t in topics)
 
 
-def _targets(vault: Vault) -> list[dict]:
-    """Topics the model may suggest: the regular ones that aren't private."""
-    return [t for t in vault.topics() if t["group"] != IMPORTED_GROUP and not t["private"]]
-
-
 def _chunks(lines: list[str]) -> list[tuple[int, int]]:
     """[start, end) line ranges of about CHUNK_CHARS each."""
     out, start, size = [], 0, 0
@@ -135,11 +129,15 @@ def import_preview(vault: Vault, source: str, text: str, assistant: Assistant | 
     assistant = assistant or Assistant.from_settings(vault)
     if not assistant.available("import"):
         return transfer.plan(vault, rules)
+    if not assistant.screen("import", text):  # the whole text as given, before chunks and line numbers
+        for it in rules:
+            it.by = "rules"
+        return transfer.plan(vault, rules)
 
     lines = text.replace("\r\n", "\n").split("\n")
     norm_lines = [_norm(x) for x in lines]
     located = [(it, _line_of(it, norm_lines)) for it in rules]
-    targets = _targets(vault)
+    targets = assistant.topic_choices()  # in its read scope and not private: nothing else is named
     slugs = {t["slug"] for t in targets}
     out: list[transfer.ImportItem] = []
     for start, end in _chunks(lines):
@@ -199,27 +197,21 @@ def sort_plan(vault: Vault, topic: str | None = None, assistant: Assistant | Non
         return rows
     for r in rows:
         r["by"] = "rules"
-    targets = _targets(vault)
+    targets = assistant.topic_choices()  # in its read scope and not private: nothing else is named or suggested
     slugs = {t["slug"] for t in targets}
-    private = vault.private_topics()
-    connector = assistant.connector()
-    memories = {m.id: m for m in vault.memories()}
-    sendable = [r for r in rows if r["memory_id"] in memories
-                and assistant.may_send(memories[r["memory_id"]], private, connector)]
     by_id = {r["memory_id"]: r for r in rows}
-    for i in range(0, len(sendable), SORT_BATCH):
-        batch = sendable[i:i + SORT_BATCH]
-        answer = assistant.json_call(
-            "sort", SORT_INSTRUCTIONS,
-            [Data(_topic_list(targets), label="topics")]
-            + [Data(f"{r['memory_id']}: {r['content']}", label="memory", topic=r["from_topic"],
-                    memory_ids=(r["memory_id"],)) for r in batch],
-            SORT_SCHEMA, max_tokens=4096)
+    wanted = [m for m in vault.memories() if m.id in by_id]
+    blocks = assistant.memory_data(wanted)  # only the memories it may send, each declared
+    for i in range(0, len(blocks), SORT_BATCH):
+        batch = blocks[i:i + SORT_BATCH]
+        ids = {mid for b in batch for mid in b.memory_ids}
+        answer = assistant.json_call("sort", SORT_INSTRUCTIONS, [Data(_topic_list(targets), label="topics"), *batch],
+                                     SORT_SCHEMA, max_tokens=4096)
         if answer is None:
             continue
         for s in answer["suggestions"]:
             row = by_id.get(s["id"])
-            if row is None or row not in batch or s["topic"] not in slugs:
+            if row is None or s["id"] not in ids or s["topic"] not in slugs:
                 continue
             row["topic"], row["confidence"], row["by"] = s["topic"], round(float(s["confidence"]), 2), "assistant"
     return rows
