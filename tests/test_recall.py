@@ -617,6 +617,7 @@ def test_assistant_embeddings_model_setting(demo):
 
 
 def test_semantic_cli(demo, monkeypatch, tmp_path):
+    monkeypatch.setattr(local, "PINS_PATH", tmp_path / "none.json")  # unpinned, whatever model_pins.json ships
     runner = CliRunner()
     r = runner.invoke(app, ["--vault", str(demo.root), "semantic", "status"])
     assert r.exit_code == 0 and "off" in r.output and "multilingual-e5-small" in r.output
@@ -629,3 +630,15 @@ def test_semantic_cli(demo, monkeypatch, tmp_path):
     assert r.exit_code == 1 and "No embedding model" in r.output
     r = runner.invoke(app, ["--vault", str(demo.root), "semantic", "off"])
     assert r.exit_code == 0 and "off" in r.output
+
+
+def test_the_shipped_pins_are_complete():
+    """Every model in model_pins.json names a 40-character revision and pins exactly the model's files."""
+    shipped = local.load_pins()
+    ids = {m.id for m in local.MODELS}
+    assert set(shipped) <= ids
+    for m in local.MODELS:
+        if m.id in shipped:
+            pin = local.pin_of(m, shipped)
+            assert pin is not None and len(pin["revision"]) == 40
+            assert set(pin["files"]) == {f.path for f in m.files}
