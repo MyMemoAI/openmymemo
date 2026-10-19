@@ -2,6 +2,7 @@
 remote embeddings endpoint's privacy rule, local model downloads (fake HTTP, never the network), the switch's CLI
 and panel routes. Real models never run here: ``ConceptEmbedder`` (tests/recall) stands in for one."""
 
+import collections
 import hashlib
 import json
 import sys
@@ -510,17 +511,48 @@ def test_runtime_install_uses_uv_into_its_own_folder_or_names_the_command(monkey
     assert e.value.code == "runtime" and "pip install" in str(e.value) and "--target" in str(e.value)
 
 
-def test_an_intel_mac_is_told_before_anything_is_installed_or_downloaded(demo, monkeypatch, tmp_path):
-    """ONNX Runtime has no packages for Intel Macs: say so instead of failing an install or downloading a model."""
+def test_an_intel_mac_gets_the_runtime_from_macos_13_and_is_told_before_that(demo, monkeypatch, tmp_path):
+    """ONNX Runtime 1.23, its last release for Intel Macs, needs macOS 13 and Python 3.13 or earlier: there the
+    install goes ahead (the installer picks 1.23); before that, say so instead of failing it or downloading a model."""
+    py = collections.namedtuple("version_info", "major minor micro")
     monkeypatch.setattr(local.sys, "platform", "darwin")
     monkeypatch.setattr(local.platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr(local.sys, "version_info", py(3, 12, 9))
+    for version, unsupported in (("13.0", False), ("15.6.1", False), ("12.7.6", True), ("", False)):
+        monkeypatch.setattr(local.platform, "mac_ver", lambda v=version: (v, ("", "", ""), "x86_64"))
+        assert local.runtime_unsupported() is unsupported, version
+    monkeypatch.setattr(local.platform, "mac_ver", lambda: ("14.5", ("", "", ""), "x86_64"))
+    monkeypatch.setattr(local.sys, "version_info", py(3, 14, 0))
+    assert local.runtime_unsupported()
+    monkeypatch.setattr(local.sys, "version_info", py(3, 12, 9))
+    monkeypatch.setattr(local.platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(local.platform, "mac_ver", lambda: ("12.7", ("", "", ""), "arm64"))
+    assert not local.runtime_unsupported()
+
+    # macOS 13 on Intel: the installer runs.
+    monkeypatch.setattr(local.platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr(local.platform, "mac_ver", lambda: ("13.6", ("", "", ""), "x86_64"))
+    ran = []
+    monkeypatch.setattr(local, "runtime_available", lambda: bool(ran))
+    monkeypatch.setattr(local, "install_command", lambda display=False: ["uv", "pip", "install"])
+
+    class Done:
+        returncode = 0
+        stderr = ""
+
+    monkeypatch.setattr(local, "_run", lambda cmd, **kw: ran.append(cmd) or Done())
+    local.install_runtime()
+    assert ran
+
+    # macOS 12 on Intel: told before anything is installed or downloaded.
+    monkeypatch.setattr(local.platform, "mac_ver", lambda: ("12.7.6", ("", "", ""), "x86_64"))
     monkeypatch.setattr(local, "runtime_available", lambda: False)
     monkeypatch.setattr(local, "_run", lambda *a, **kw: pytest.fail("nothing is installed"))
     monkeypatch.setattr(local, "ensure_downloaded", lambda *a, **kw: pytest.fail("nothing is downloaded"))
     _pin(monkeypatch, tmp_path, FILES)
     with pytest.raises(local.SemanticError) as e:
         local.turn_on()
-    assert e.value.code == "runtime" and "Intel Macs" in str(e.value)
+    assert e.value.code == "runtime" and "Intel Mac" in str(e.value) and "macOS 13" in str(e.value)
     assert not local.load_semantic().enabled
 
 

@@ -4,7 +4,7 @@ What changed in each release, for people who use OpenMyMemo. Every release is al
 
 ## Unreleased
 
-- **The Mac app on Intel Macs.** Each release now has a disk image for Intel Macs, `OpenMyMemo-<version>-x86_64.dmg`, next to the one for Apple silicon (`-arm64.dmg`). Everything works the same, except search by meaning on this computer: ONNX Runtime, which runs its model, doesn't support Intel Macs, so turning it on there says so instead of failing partway through an install. An embeddings model at the Assistant's endpoint works instead.
+- **The Mac app on Intel Macs.** Each release now has a disk image for Intel Macs, `OpenMyMemo-<version>-x86_64.dmg`, next to the one for Apple silicon (`-arm64.dmg`). Everything works the same. Search by meaning on this computer needs macOS 13 or later on an Intel Mac and uses ONNX Runtime 1.23, its last release for Intel Macs; on macOS 12, turning it on says so instead of failing partway through an install, and an embeddings model at the Assistant's endpoint works instead.
 
 ## 0.2.7 — 2026-10-18
 

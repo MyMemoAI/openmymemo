@@ -50,6 +50,13 @@ jobs:
         with:
           python-version: "3.12"
       - run: uv run --frozen pytest
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/openmymemo-models
+          key: models-${{ hashFiles('src/openmymemo/recall/model_pins.json') }}
+      - name: The local embedding models with ONNX Runtime 1.23, the last for Intel Macs
+        run: |
+          uv run --frozen --with onnxruntime --with tokenizers python scripts/check_local_models.py ~/.cache/openmymemo-models
       - run: python3 scripts/stage_desktop.py
       - run: cargo test --locked
         working-directory: desktop/src-tauri
