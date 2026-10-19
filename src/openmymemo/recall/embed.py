@@ -144,6 +144,10 @@ class OnnxEmbedder:
                 feeds[inp.name] = np.zeros_like(ids)
             elif inp.name == "position_ids":
                 feeds[inp.name] = np.clip(np.cumsum(mask, axis=1) - 1, 0, None).astype(np.int64)
+            elif inp.name.startswith("past_key_values."):
+                # A decoder exported with its key/value cache (Qwen3): there is no past, so each one is empty.
+                feeds[inp.name] = np.zeros(empty_past(inp.shape, len(ids)),
+                                           dtype=np.float16 if inp.type == "tensor(float16)" else np.float32)
             else:
                 raise EmbedError(f"{m.name} needs an input this version doesn't provide ({inp.name}).")
         outputs = self._session.get_outputs()
@@ -158,6 +162,12 @@ class OnnxEmbedder:
         norms = np.linalg.norm(vecs, axis=1, keepdims=True)
         vecs = vecs / np.where(norms > 0, norms, 1.0)
         return [[float(x) for x in row] for row in vecs]
+
+
+def empty_past(shape: Sequence[Any], batch: int) -> list[int]:
+    """The shape of an empty key/value cache input, [batch, heads, past tokens, head dims]: the first named
+    dimension is the batch, any other named one (the past tokens) is 0, and fixed ones stay."""
+    return [d if isinstance(d, int) else (batch if i == 0 else 0) for i, d in enumerate(shape)]
 
 
 def pool(hidden, mask, how: str):
