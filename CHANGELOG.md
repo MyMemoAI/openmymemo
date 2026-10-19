@@ -2,7 +2,7 @@
 
 What changed in each release, for people who use OpenMyMemo. Every release is also on [GitHub](https://github.com/MyMemoAI/openmymemo/releases).
 
-## Unreleased
+## 0.2.7 — 2026-10-18
 
 - **OpenMyMemo Assistant (optional, off by default).** Settings → Assistant (in a browser, at the bottom of the Connectors page) or `openmymemo assistant set` lets OpenMyMemo use a model: one on this computer (Ollama, LM Studio, llama.cpp, vLLM or any other OpenAI-compatible server), or your own API key for Anthropic or any OpenAI-compatible service. "Test" sends one tiny request and shows the model and how long it took. Everything keeps working without it.
   - **Imports:** pasted lists, Markdown and other apps' memory files are split into memories by the model, which also drops instructions meant for tools and suggests a topic. The preview says "Split by OpenMyMemo Assistant" and shows, unticked, any line it left out that the rules would have kept.
@@ -17,11 +17,12 @@ What changed in each release, for people who use OpenMyMemo. Every release is al
   - The Assistant is listed on the Connectors page as "OpenMyMemo Assistant", with its own read scope, writing mode and blocked topics, and every request it makes is in the activity log (feature, model, where, tokens), never the text.
   - **Search:** with the Assistant on, AI apps' searches (`memory_search`) and `openmymemo recall` let the model add related words and translations to the search and put the best matches first. "What do I like to drink?" now finds "Prefers tea over coffee". What AI apps read at the start of a conversation (`memory_context`) is unchanged.
   - An embeddings model at the same endpoint (Ollama's `nomic-embed-text`, OpenAI's `text-embedding-3-small`, …) can be set for search by meaning; private topics are never sent to one outside this computer.
-- **Search by meaning on this computer (optional, off by default).** Settings → Assistant → "Search by meaning on this computer", or `openmymemo semantic on`, downloads a small embedding model so search finds memories by what they mean, in English, Chinese and about 100 other languages, with nothing leaving the computer. Pick a model from the list (download size, languages and license shown): `multilingual-e5-small` is recommended; `Qwen3-Embedding-0.6B` is the best quality and a larger download; EmbeddingGemma asks you to accept Google's Gemma Terms of Use first. It works with or without the Assistant. Turning it off deletes the model and the index. Models become available in a release once their downloads are pinned by checksum.
+- **Search by meaning on this computer (optional, off by default).** Settings → Assistant → "Search by meaning on this computer", or `openmymemo semantic on`, downloads a small embedding model so search finds memories by what they mean, in English, Chinese and about 100 other languages, with nothing leaving the computer. Pick a model from the list (download size, languages and license shown): `multilingual-e5-small` is recommended; `Qwen3-Embedding-0.6B` is the best quality and a larger download; EmbeddingGemma asks you to accept Google's Gemma Terms of Use first. It works with or without the Assistant. Turning it off deletes the model and the index. Each download is pinned to a checksum; Granite Embedding is listed but can't be downloaded yet.
   - Search uses it everywhere: AI apps' `memory_search`, `openmymemo search`, and the panel's search box. Exact names and ids still come first, and without it search works exactly as before.
   - The index is a cache in `.openmymemo/index/` that keeps itself out of git and is rebuilt from your memory files; it follows edits made in any editor.
 - **`openmymemo recall "<question>"`** prints the memories most relevant to a question, ranked and cut to `--max-chars`, ready to paste into a prompt or use in a hook; `--connector <id>` limits it to what that app may read.
 - An archived memory no longer stays in what AI apps read until OpenMyMemo restarts. After you archived a memory, the same running server kept serving it in the memory context and wrote it back into `MEMORY.md`; a restored or moved memory could also be missing or listed under its old topic.
+- On a phone, the What AI sees page no longer scrolls sideways, and the folder field on the Import page's Files tab is wide enough to see and type in again.
 
 ## 0.2.6 — 2026-10-16
 
