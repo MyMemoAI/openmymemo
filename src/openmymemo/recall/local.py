@@ -319,11 +319,22 @@ def manual_command() -> str:
     return " ".join(f'"{a}"' if any(c in a for c in " <>=") else a for a in install_command(display=True) or [])
 
 
+INTEL_MAC = ("Search by meaning on this computer needs ONNX Runtime, which doesn't support Intel Macs. With the "
+             "Assistant on a server on this computer or your own key, you can set an embeddings model instead.")
+
+
+def runtime_unsupported() -> bool:
+    """Whether ONNX Runtime can't be installed here: it publishes no packages for Intel Macs."""
+    return sys.platform == "darwin" and platform.machine().lower() == "x86_64"
+
+
 def install_runtime() -> None:
     """Install ``onnxruntime`` and ``tokenizers`` into the runtime folder; raises SemanticError (code ``runtime``
     with the command to run, when there is no uv or pip, or the install failed)."""
     if runtime_available():
         return
+    if runtime_unsupported():
+        raise SemanticError(INTEL_MAC, "runtime")
     cmd = install_command()
     if cmd is None:
         raise SemanticError("Search by meaning needs ONNX Runtime and tokenizers. Install them with: "

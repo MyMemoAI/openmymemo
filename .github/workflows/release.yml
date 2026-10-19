@@ -15,9 +15,12 @@ permissions:
 
 jobs:
   mac:
-    name: Mac app
-    # Builds OpenMyMemo-<version>-arm64.dmg. With these repository secrets the app is signed with a Developer
-    # ID and notarized; without them (a fork) it is signed ad hoc, and macOS asks once to open it (README).
+    name: Mac app (${{ matrix.arch }})
+    # Builds OpenMyMemo-<version>-arm64.dmg for Apple silicon and OpenMyMemo-<version>-x86_64.dmg for Intel, each
+    # natively on a runner of that architecture, so the uv that stage_desktop.py bundles is the right one too.
+    # GitHub's Intel macOS runner (macos-15-intel) is supported until fall 2027.
+    # With these repository secrets the app is signed with a Developer ID and notarized; without them (a fork) it
+    # is signed ad hoc, and macOS asks once to open it (README).
     #   APPLE_CERTIFICATE           the "Developer ID Application" certificate and its key as a .p12, base64
     #   APPLE_CERTIFICATE_PASSWORD  the .p12's password
     #   APPLE_SIGNING_IDENTITY      the certificate's name: "Developer ID Application: <Company> (<Team ID>)"
@@ -30,7 +33,12 @@ jobs:
     # Tauri reads the APPLE_* variables itself (tauri-apps/tauri, crates/tauri-bundler/src/bundle/macos/sign.rs):
     # it imports the certificate into a temporary keychain, and APPLE_SIGNING_IDENTITY overrides the ad hoc
     # "signingIdentity": "-" in tauri.conf.json (crates/tauri-cli/src/interface/rust.rs).
-    runs-on: macos-latest
+    strategy:
+      matrix:
+        include:
+          - { arch: arm64, runner: macos-latest }
+          - { arch: x86_64, runner: macos-15-intel }
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
     steps:
@@ -91,17 +99,33 @@ jobs:
           fi
           unset APPLE_API_PRIVATE_KEY
           pnpm tauri build --bundles app,dmg
-      - name: Check the signature and name the disk image
+      - name: Check the signature and architecture, and name the disk image
+        env:
+          ARCH: ${{ matrix.arch }}
         run: |
           bundle=desktop/src-tauri/target/release/bundle
-          codesign --verify --deep --strict --verbose=2 "$bundle/macos/OpenMyMemo.app"
-          codesign -dv "$bundle/macos/OpenMyMemo.app" 2>&1 | grep -E '^(Authority|Signature|TeamIdentifier)=' || true
+          app="$bundle/macos/OpenMyMemo.app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign -dv "$app" 2>&1 | grep -E '^(Authority|Signature|TeamIdentifier)=' || true
+          # The app and the uv it runs must both be built for this disk image's architecture, and only for it.
+          for bin in "$app"/Contents/MacOS/*; do
+            archs=$(lipo -archs "$bin")
+            if [ "$archs" != "$ARCH" ]; then
+              echo "::error::$bin is built for '$archs', not $ARCH."
+              exit 1
+            fi
+          done
+          dmgs=("$bundle"/dmg/OpenMyMemo_"${VERSION}"_*.dmg)
+          if [ "${#dmgs[@]}" -ne 1 ] || [ ! -f "${dmgs[0]}" ]; then
+            echo "::error::Expected one disk image, found: ${dmgs[*]}"
+            exit 1
+          fi
           mkdir -p dist
-          cp "$bundle/dmg/OpenMyMemo_${VERSION}_aarch64.dmg" "dist/OpenMyMemo-${VERSION}-arm64.dmg"
-          hdiutil verify "dist/OpenMyMemo-${VERSION}-arm64.dmg"
+          cp "${dmgs[0]}" "dist/OpenMyMemo-${VERSION}-${ARCH}.dmg"
+          hdiutil verify "dist/OpenMyMemo-${VERSION}-${ARCH}.dmg"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
-          name: openmymemo-dmg
+          name: openmymemo-dmg-${{ matrix.arch }}
           path: dist/*.dmg
           if-no-files-found: error
 
@@ -131,7 +155,8 @@ jobs:
       - run: uv build
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7
         with:
-          name: openmymemo-dmg
+          pattern: openmymemo-dmg-*
+          merge-multiple: true
           path: dist
       - name: Publish the release
         env:

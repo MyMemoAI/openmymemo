@@ -483,6 +483,7 @@ def test_terms_must_be_accepted_before_embeddinggemma_downloads(monkeypatch, tmp
 def test_runtime_install_uses_uv_into_its_own_folder_or_names_the_command(monkeypatch, tmp_path):
     ran = []
     monkeypatch.setattr(local, "runtime_available", lambda: bool(ran))
+    monkeypatch.setattr(local, "runtime_unsupported", lambda: False)
     uv = tmp_path / "uv"
     uv.write_text("#!/bin/sh\n")
     uv.chmod(0o755)
@@ -507,6 +508,20 @@ def test_runtime_install_uses_uv_into_its_own_folder_or_names_the_command(monkey
     with pytest.raises(local.SemanticError) as e:
         local.install_runtime()
     assert e.value.code == "runtime" and "pip install" in str(e.value) and "--target" in str(e.value)
+
+
+def test_an_intel_mac_is_told_before_anything_is_installed_or_downloaded(demo, monkeypatch, tmp_path):
+    """ONNX Runtime has no packages for Intel Macs: say so instead of failing an install or downloading a model."""
+    monkeypatch.setattr(local.sys, "platform", "darwin")
+    monkeypatch.setattr(local.platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr(local, "runtime_available", lambda: False)
+    monkeypatch.setattr(local, "_run", lambda *a, **kw: pytest.fail("nothing is installed"))
+    monkeypatch.setattr(local, "ensure_downloaded", lambda *a, **kw: pytest.fail("nothing is downloaded"))
+    _pin(monkeypatch, tmp_path, FILES)
+    with pytest.raises(local.SemanticError) as e:
+        local.turn_on()
+    assert e.value.code == "runtime" and "Intel Macs" in str(e.value)
+    assert not local.load_semantic().enabled
 
 
 def test_turning_off_deletes_the_model_and_the_index_and_keeps_the_choice(demo, monkeypatch, tmp_path):

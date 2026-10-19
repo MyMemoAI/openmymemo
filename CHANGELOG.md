@@ -2,6 +2,10 @@
 
 What changed in each release, for people who use OpenMyMemo. Every release is also on [GitHub](https://github.com/MyMemoAI/openmymemo/releases).
 
+## Unreleased
+
+- **The Mac app on Intel Macs.** Each release now has a disk image for Intel Macs, `OpenMyMemo-<version>-x86_64.dmg`, next to the one for Apple silicon (`-arm64.dmg`). Everything works the same, except search by meaning on this computer: ONNX Runtime, which runs its model, doesn't support Intel Macs, so turning it on there says so instead of failing partway through an install. An embeddings model at the Assistant's endpoint works instead.
+
 ## 0.2.7 — 2026-10-18
 
 - **OpenMyMemo Assistant (optional, off by default).** Settings → Assistant (in a browser, at the bottom of the Connectors page) or `openmymemo assistant set` lets OpenMyMemo use a model: one on this computer (Ollama, LM Studio, llama.cpp, vLLM or any other OpenAI-compatible server), or your own API key for Anthropic or any OpenAI-compatible service. "Test" sends one tiny request and shows the model and how long it took. Everything keeps working without it.

@@ -29,7 +29,10 @@ dependencies = [
     "typer>=0.27",
     "pyyaml>=6.0",
     "websockets>=15",
-    "cryptography>=48",
+    # cryptography 49 and later have no Intel Mac wheels, so an Intel Mac keeps 48.0.1, the last with them (it would
+    # otherwise build from source, which needs Rust). The 50.0 security fix is in PKCS7 decryption, which isn't used.
+    "cryptography>=48; sys_platform != 'darwin' or platform_machine != 'x86_64'",
+    "cryptography>=48,<49; sys_platform == 'darwin' and platform_machine == 'x86_64'",
     "httpx2>=2.13",
 ]
 

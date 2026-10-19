@@ -40,6 +40,20 @@ jobs:
       - run: cargo test --locked
         working-directory: desktop/src-tauri
 
+  macos-intel:
+    # The Intel disk image's core (cryptography 48 there, no ONNX Runtime) and the app, on GitHub's Intel runner.
+    name: Intel Mac tests and Mac app (Python 3.12)
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+      - run: uv run --frozen pytest
+      - run: python3 scripts/stage_desktop.py
+      - run: cargo test --locked
+        working-directory: desktop/src-tauri
+
   panel:
     name: Panel build and extension
     runs-on: ubuntu-latest
