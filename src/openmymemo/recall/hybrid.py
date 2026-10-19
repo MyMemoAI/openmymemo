@@ -152,15 +152,25 @@ def _query_vector(embedder: Embedder, query: str) -> list[float]:
     return vec
 
 
-def _languages(mems: Sequence[Memory]) -> str:
+LANGUAGE_HINTS = {
+    ("en", "zh"): "The notes are in English and Chinese, so give keywords in both.",
+    ("zh",): "The notes are in Chinese, so give the keywords in Chinese (and English for names).",
+    ("en",): "The notes are in English, so give the keywords in English.",
+}
+
+
+def _language_codes(mems: Sequence[Memory]) -> tuple[str, ...]:
+    """The notes' languages as MyMemo's ``recall.expand`` task takes them (``inputs.languages``)."""
     sample = " ".join(m.content for m in mems[:300])
     cjk = bool(re.search(r"[一-鿿]", sample))
     latin = bool(re.search(r"[A-Za-z]{3}", sample))
     if cjk and latin:
-        return "The notes are in English and Chinese, so give keywords in both."
-    if cjk:
-        return "The notes are in Chinese, so give the keywords in Chinese (and English for names)."
-    return "The notes are in English, so give the keywords in English."
+        return ("en", "zh")
+    return ("zh",) if cjk else ("en",)
+
+
+def _languages(mems: Sequence[Memory]) -> str:
+    return LANGUAGE_HINTS[_language_codes(mems)]
 
 
 def _assistant(vault: Vault):
@@ -182,7 +192,8 @@ def expand(vault: Vault, query: str, mems: Sequence[Memory], assistant=None) -> 
         return []
     result = a.json_call("recall", EXPAND_INSTRUCTIONS.format(languages=_languages(mems)),
                          [Data(text=query, label="query")], EXPAND_SCHEMA, max_tokens=400,
-                         timeout=min(a.settings.timeout, MODEL_TIMEOUT))
+                         timeout=min(a.settings.timeout, MODEL_TIMEOUT), task="recall.expand",
+                         inputs={"languages": list(_language_codes(mems))})
     if not result:
         return []
     q = normalize(query)
@@ -213,7 +224,7 @@ def rerank(vault: Vault, query: str, ranked: Sequence[Memory], assistant=None) -
         return None
     blocks = [Data(text=query, label="query"), *memory_blocks]
     result = a.json_call("recall", RERANK_INSTRUCTIONS, blocks, RERANK_SCHEMA, max_tokens=800,
-                         timeout=min(a.settings.timeout, MODEL_TIMEOUT))
+                         timeout=min(a.settings.timeout, MODEL_TIMEOUT), task="recall.rerank")
     if not result:
         return None
     by_id = {m.id: m for m in sendable}

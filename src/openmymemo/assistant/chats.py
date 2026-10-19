@@ -562,7 +562,8 @@ def extract(assistant: Assistant, feature: str, chunk: Chunk, topic_list: Sequen
     topics_text = "\n".join(f"- {t['slug']}: {t['title']}" for t in topic_list)
     answer = assistant.json_call(feature, EXTRACT_INSTRUCTIONS,
                                  [Data(topics_text, label="topics"), *extra, Data(chunk.text, label="conversations")],
-                                 EXTRACT_SCHEMA, max_tokens=4096)
+                                 EXTRACT_SCHEMA, max_tokens=4096,
+                                 task="session.extract" if feature == "session" else "import.chats")
     if answer is None:
         return None
     out = []

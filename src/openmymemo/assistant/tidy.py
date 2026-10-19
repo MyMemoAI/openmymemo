@@ -547,7 +547,7 @@ def _work(vault: Vault, assistant: Assistant, result: Result, chunks: list[list[
         if not shown:
             _save_done(vault, add={memory_hash(m) for m in chunk})
             continue
-        answer = assistant.json_call("tidy", INSTRUCTIONS, blocks, SCHEMA, max_tokens=MAX_TOKENS)
+        answer = assistant.json_call("tidy", INSTRUCTIONS, blocks, SCHEMA, max_tokens=MAX_TOKENS, task="tidy")
         result.calls += 1
         if answer is None:
             why = assistant.last_error or "The model didn't answer."
