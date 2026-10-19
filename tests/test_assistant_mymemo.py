@@ -36,6 +36,12 @@ H = {"X-OpenMyMemo": "1"}
 SECRET = "Takes sumatriptan for cluster headaches every Thursday morning"
 
 
+@pytest.fixture(autouse=True)
+def _offered(monkeypatch):
+    """MyMemo's hosted model is hidden until its plan opens (§17.8); these tests are about using it."""
+    monkeypatch.setenv("OPENMYMEMO_ASSISTANT_MYMEMO", "1")
+
+
 @pytest.fixture
 def fake(monkeypatch):
     service = FakeAssistantService().start()

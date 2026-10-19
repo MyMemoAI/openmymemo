@@ -30,7 +30,16 @@ from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel
 
 from . import __version__, clients, memfiles, transfer
-from .assistant import Assistant, SettingsError, ensure_connector, save_settings, tidy
+from .assistant import (
+    MYMEMO_HIDDEN,
+    Assistant,
+    SettingsError,
+    ensure_connector,
+    load_settings,
+    mymemo_offered,
+    save_settings,
+    tidy,
+)
 from .assistant import features as assistant_features
 from .assistant import mymemo as assistant_mymemo
 from .cloud import CALLBACK_HEADERS, Cloud, CloudError, SettingLocked, callback_page
@@ -579,6 +588,8 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
     def assistant_signin(body: AssistantSignInIn | None = None) -> dict:
         """Sign in to MyMemo for its hosted model (§17.8): with this computer's MyMemo Cloud link when there is one
         (no browser), else ``{"url"}`` for the panel to open; the browser comes back to /cloud/callback."""
+        if not mymemo_offered(load_settings().kind):
+            raise HTTPException(409, MYMEMO_HIDDEN)
         link = None if body and body.browser else cloud_link()
         if link is not None:
             done = assistant_mymemo.exchange(link)
