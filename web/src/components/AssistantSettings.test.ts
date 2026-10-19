@@ -50,6 +50,12 @@ describe("AssistantSettings", () => {
     expect(w.find("form").exists()).toBe(false);
   });
 
+  it("leaves MyMemo out while the server doesn't offer it", async () => {
+    api.assistant.mockResolvedValue(status({ kinds: { local: true, key: true, mymemo: false } }));
+    const w = await mountIt();
+    expect(w.findAll('[role="radio"]').map((b) => b.text())).toEqual(["Off", "On this computer", "Your own API key"]);
+  });
+
   it("turns on with a key, never shows the key, and tests the model", async () => {
     api.assistant.mockResolvedValue(status());
     const on = status({ enabled: true, kind: "key", protocol: "anthropic", endpoint: "https://api.anthropic.com",

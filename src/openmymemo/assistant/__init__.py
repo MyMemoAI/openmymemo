@@ -24,10 +24,20 @@ from .core import (
     ensure_connector,
     where_text_goes,
 )
-from .settings import FEATURES, KINDS, PROTOCOLS, Settings, SettingsError, load_settings, save_settings
+from .settings import (
+    FEATURES,
+    KINDS,
+    MYMEMO_HIDDEN,
+    PROTOCOLS,
+    Settings,
+    SettingsError,
+    load_settings,
+    mymemo_offered,
+    save_settings,
+)
 
 __all__ = [
-    "CONNECTOR_ID", "CONNECTOR_KIND", "CONNECTOR_NAME", "FEATURES", "KINDS", "PROTOCOLS", "Assistant", "Data",
-    "Failure", "Settings", "SettingsError", "ensure_connector", "load_settings", "save_settings",
-    "where_text_goes",
+    "CONNECTOR_ID", "CONNECTOR_KIND", "CONNECTOR_NAME", "FEATURES", "KINDS", "MYMEMO_HIDDEN", "PROTOCOLS",
+    "Assistant", "Data", "Failure", "Settings", "SettingsError", "ensure_connector", "load_settings",
+    "mymemo_offered", "save_settings", "where_text_goes",
 ]

@@ -22,6 +22,8 @@ import SemanticSettings from "./SemanticSettings.vue";
  */
 type Choice = "off" | AssistantKind;
 const CHOICES: Choice[] = ["off", "local", "key", "mymemo"];
+// A kind the server doesn't offer isn't shown: MyMemo's hosted model stays hidden until its plan opens (§17.8).
+const choices = computed(() => CHOICES.filter((c) => c === "off" || status.value?.kinds[c]));
 const FEATURES: AssistantFeature[] = ["import", "sort", "recall", "check", "session", "tidy"];
 
 const status = ref<AssistantStatus | null>(null);
@@ -253,14 +255,14 @@ const fmt = (n: number) => n.toLocaleString("en-US");
         <p class="text-[13px] text-muted">{{ t("ast.intro") }}</p>
         <div class="seg flex-wrap" role="radiogroup" :aria-label="t('ast.title')">
           <button
-            v-for="c in CHOICES"
+            v-for="c in choices"
             :key="c"
             type="button"
             class="seg-item disabled:opacity-50"
             :class="{ 'is-on': choice === c }"
             role="radio"
             :aria-checked="choice === c"
-            :disabled="busy || (c !== 'off' && !status.kinds[c]) || locked('enabled') || (c !== 'off' && locked('kind') && status.kind !== c)"
+            :disabled="busy || locked('enabled') || (c !== 'off' && locked('kind') && status.kind !== c)"
             @click="pick(c)"
           >{{ t(`ast.choice.${c}`) }}</button>
         </div>

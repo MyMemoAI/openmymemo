@@ -753,7 +753,7 @@ As built (2026-10-18, writes; `assistant/checks.py`, `assistant/session.py`):
 
 ### 17.8 MyMemo's hosted model
 
-For people who want the Assistant without managing keys or running a model:
+For people who want the Assistant without managing keys or running a model. **Hidden until MyMemo opens the plan:** Settings → Assistant doesn't list "MyMemo", `assistant set --kind mymemo` and `assistant signin` refuse it, and `signin`, `signout` and `plan` are left out of the CLI's help. `OPENMYMEMO_ASSISTANT_MYMEMO=1` shows it (for testing against the service), and settings that already use it keep it.
 
 - **How to turn it on.** Choose "MyMemo" in Settings → Assistant and sign in with a MyMemo account: the same PKCE loopback sign-in as §16.4, or the existing link if this computer is already linked to MyMemo Cloud. The Assistant gets a token scoped to the model endpoint only.
 - **One endpoint, Claude only.** The service exposes one chat endpoint, in the OpenAI-compatible shape of §17.2. OpenMyMemo treats it like any other endpoint. Behind it, the service calls only Anthropic's Claude models, starting with a small, fast one. The model can change without an OpenMyMemo release.

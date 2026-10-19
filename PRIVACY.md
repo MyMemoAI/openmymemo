@@ -102,7 +102,7 @@ The OpenMyMemo Assistant uses a model to help with imports, sorting and search, 
 
 ### MyMemo's hosted model
 
-You can choose MyMemo's hosted model in Settings → Assistant, or with `openmymemo assistant signin`. It is a MyMemo service with its own monthly plan, the OpenMyMemo Assistant plan. Nothing is sent until you choose it and sign in.
+MyMemo's hosted model isn't offered yet: Settings → Assistant doesn't list it. Once MyMemo opens its plan, you will be able to choose it in Settings → Assistant, or with `openmymemo assistant signin`. It is a MyMemo service with its own monthly plan, the OpenMyMemo Assistant plan. Nothing is sent until you choose it and sign in.
 
 - **Signing in.** If this computer is linked to MyMemo Cloud, OpenMyMemo trades the link's device token for a sign-in that can only reach the model, with no browser. Otherwise your browser opens MyMemo's sign-in page with this computer's name. The service returns an access token and a refresh token. They are kept on your computer like an API key (in the Keychain on a Mac, otherwise in `assistant.json`), never in your memory folder, and sent only to that service.
 - **For each request,** OpenMyMemo sends the service the text a feature works on (as above) and the feature's name, such as "import" or "sort". The service passes the text to Anthropic's Claude models to answer and returns the answer. Private topics are never sent, as for any model outside your computer.
