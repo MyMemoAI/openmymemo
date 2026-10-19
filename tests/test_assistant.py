@@ -461,6 +461,17 @@ def test_panel_routes(vault, fake, monkeypatch):
     assert not api.patch("/api/assistant", headers=H, json={"enabled": False}).json()["enabled"]
 
 
+def test_an_environment_choice_of_mymemo_can_be_turned_on_again(vault, fake, monkeypatch):
+    """OPENMYMEMO_ASSISTANT_KIND=mymemo shows MyMemo without the offer flag, so the panel may turn it on (§17.8)."""
+    monkeypatch.delenv("OPENMYMEMO_ASSISTANT_MYMEMO", raising=False)
+    save_settings(enabled=False, kind="key")
+    monkeypatch.setenv("OPENMYMEMO_ASSISTANT_KIND", "mymemo")
+    api = TestClient(create_api(vault, 8787), base_url="http://127.0.0.1:8787")
+    assert api.get("/api/assistant", headers=H).json()["kinds"]["mymemo"] is True
+    s = api.patch("/api/assistant", headers=H, json={"enabled": True, "kind": "mymemo"}).json()
+    assert s["enabled"] and s["kind"] == "mymemo"
+
+
 def test_cli(vault, fake, monkeypatch):
     runner = CliRunner()
     v = ["--vault", str(vault.root)]

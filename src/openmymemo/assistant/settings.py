@@ -285,6 +285,13 @@ def mymemo_offered(kind: str = "", environ: Mapping[str, str] | None = None) -> 
     return kind == "mymemo" or _truthy(env.get(ENV + "MYMEMO", ""))
 
 
+def _env_kind() -> str:
+    """The kind ``OPENMYMEMO_ASSISTANT_KIND`` chooses, which ``load_settings`` (and so the panel) goes by."""
+    effective = Settings()
+    _apply_env(effective, os.environ)
+    return effective.kind if "kind" in effective.from_env else ""
+
+
 def _truthy(text: str) -> bool:
     return text.strip().lower() in ("1", "true", "yes", "on")
 
@@ -426,7 +433,7 @@ def save_settings(*, enabled: bool | None = None, kind: str | None = None, proto
         new_kind = kind if kind is not None else current.kind
         if new_kind not in KINDS:
             raise SettingsError(f"kind must be one of {', '.join(KINDS)}")
-        if not mymemo_offered(current.kind) and new_kind == "mymemo":
+        if new_kind == "mymemo" and not (mymemo_offered(current.kind) or mymemo_offered(_env_kind())):
             raise SettingsError(MYMEMO_HIDDEN)
         if protocol is not None and protocol not in PROTOCOLS:
             raise SettingsError(f"protocol must be one of {', '.join(PROTOCOLS)}")
