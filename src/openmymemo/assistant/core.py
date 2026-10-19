@@ -40,7 +40,15 @@ from . import client as endpoint
 from . import mymemo
 from .guard import Guard
 from .schema import Invalid, clean, extract_json, wire_schema
-from .settings import FEATURES, SESSION_APPS, Settings, load_settings, record_usage, reserve_call
+from .settings import (
+    FEATURES,
+    SESSION_APPS,
+    Settings,
+    load_settings,
+    mymemo_offered,
+    record_usage,
+    reserve_call,
+)
 
 log = logging.getLogger("openmymemo.assistant")
 
@@ -162,7 +170,7 @@ class Assistant:
             "session_apps": {app: s.session_apps.get(app) for app in SESSION_APPS}, "from_env": list(s.from_env), "local": s.local, "problem": s.problem(),
             "ready": s.enabled and self.unavailable_reason() is None, "reason": self.unavailable_reason(),
             "where": where_text_goes(s), "connector_id": CONNECTOR_ID if c else None, "revoked": revoked,
-            "kinds": {"local": True, "key": True, "mymemo": True},
+            "kinds": {"local": True, "key": True, "mymemo": mymemo_offered(s.kind)},  # hidden until its plan opens
             "mymemo": mymemo.public_status(s) if s.kind == "mymemo" else None,
         }
 

@@ -1277,8 +1277,7 @@ def assistant_status(ctx: typer.Context) -> None:
 def assistant_set(
     ctx: typer.Context,
     kind: Annotated[str | None, typer.Option(
-        help="local (a model on this computer), key (your own API key) or mymemo (MyMemo's hosted model; then run "
-             "`openmymemo assistant signin`).")] = None,
+        help="local (a model on this computer) or key (your own API key).")] = None,
     protocol: Annotated[str | None, typer.Option(help="openai (OpenAI-compatible) or anthropic.")] = None,
     base_url: Annotated[str | None, typer.Option(help="The endpoint's base URL; empty for the default.")] = None,
     model: Annotated[str | None, typer.Option(help="The model's name, e.g. llama3.2 or claude-haiku-5-5.")] = None,
@@ -1333,7 +1332,8 @@ def assistant_set(
         raise typer.Exit(1)
 
 
-@assistant_app.command("signin")
+# MyMemo's hosted model is hidden until its plan opens (product-design.md §17.8), so are its commands.
+@assistant_app.command("signin", hidden=True)
 def assistant_signin(
     ctx: typer.Context,
     browser: Annotated[bool, typer.Option("--browser", help="Sign in with the browser even when this computer is "
@@ -1345,9 +1345,19 @@ def assistant_signin(
     import webbrowser
 
     from . import cloud
-    from .assistant import ensure_connector, mymemo, save_settings
+    from .assistant import (
+        MYMEMO_HIDDEN,
+        ensure_connector,
+        load_settings,
+        mymemo,
+        mymemo_offered,
+        save_settings,
+    )
 
     vault = _vault(ctx)
+    if not mymemo_offered(load_settings().kind):
+        typer.secho(MYMEMO_HIDDEN, fg="red", err=True)
+        raise typer.Exit(1)
     link = None if browser else cloud.load_link()
     done = mymemo.exchange(link) if link is not None else "use_browser"
     if done not in ("signed_in", "use_browser"):
@@ -1374,7 +1384,7 @@ def assistant_signin(
     _assistant_status(vault)
 
 
-@assistant_app.command("signout")
+@assistant_app.command("signout", hidden=True)
 def assistant_signout() -> None:
     """Sign out of MyMemo: the sign-in is revoked at MyMemo and forgotten here; the Assistant uses its rules."""
     from .assistant import mymemo
@@ -1382,7 +1392,7 @@ def assistant_signout() -> None:
     typer.echo(mymemo.sign_out())
 
 
-@assistant_app.command("plan")
+@assistant_app.command("plan", hidden=True)
 def assistant_plan(ctx: typer.Context) -> None:
     """Show MyMemo's hosted model, your OpenMyMemo Assistant plan and this period's usage, as MyMemo reports them."""
     from .assistant import load_settings, mymemo

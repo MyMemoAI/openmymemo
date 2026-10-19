@@ -133,9 +133,8 @@ OpenMyMemo needs no model. If you want help with the work rules do badly, turn o
 ```bash
 openmymemo assistant set --kind local --model llama3.2          # Ollama or another server on this computer
 openmymemo assistant set --kind key --protocol anthropic --model claude-haiku-5-5 --key   # your own API key
-openmymemo assistant signin                                      # MyMemo's hosted model, with your MyMemo account
 openmymemo assistant test                                        # one tiny request: which model, how fast
-openmymemo assistant status | plan | signout | off
+openmymemo assistant status | off
 ```
 
 With it on, imports are split into memories by the model (the preview flags any line it left out), and "Sort into topics" gets the model's suggestions. AI apps' searches and `openmymemo recall` get related words and translations added and the best matches put first. It also:
@@ -159,7 +158,7 @@ openmymemo tidy [--topic work]     # run it ("Tidy up" on the Changes page does 
 openmymemo tidy --schedule weekly  # off (the default), daily, weekly or monthly
 ```
 
-One run makes at most 20 calls; on a large folder the next run continues where it stopped. A schedule runs on this computer while OpenMyMemo's panel is running (the Mac app, `openmymemo serve`, or an AI app's plugin); nothing runs when none of them is. Each feature has its own switch and a fallback to the rules, and there are monthly limits. A model on this computer keeps everything on the computer; with your own key, the memories a feature uses go to that provider, never private topics. MyMemo's hosted model is a Claude model on its own monthly plan, the OpenMyMemo Assistant plan: sign in with your MyMemo account (a computer linked to MyMemo Cloud needs no browser), and Settings → Assistant shows the plan and this month's usage as MyMemo reports them. When the plan is missing or the month's allowance is used up, OpenMyMemo quietly uses its rules. Every request is in the activity log, without its text.
+One run makes at most 20 calls; on a large folder the next run continues where it stopped. A schedule runs on this computer while OpenMyMemo's panel is running (the Mac app, `openmymemo serve`, or an AI app's plugin); nothing runs when none of them is. Each feature has its own switch and a fallback to the rules, and there are monthly limits. A model on this computer keeps everything on the computer; with your own key, the memories a feature uses go to that provider, never private topics. Every request is in the activity log, without its text.
 
 ### Search by meaning
 

@@ -54,6 +54,7 @@ KEYCHAIN_SERVICE = "OpenMyMemo Assistant"
 SECRETS = {"api_key": "api-key", "mymemo_token": "mymemo-token", "mymemo_refresh": "mymemo-refresh"}  # → Keychain
 _SAFE_SECRET = re.compile(r"[A-Za-z0-9._~+/=:-]{1,512}")
 ENV = "OPENMYMEMO_ASSISTANT_"
+MYMEMO_HIDDEN = "MyMemo's hosted model isn't available yet. Use a model on this computer or your own API key."
 
 
 class SettingsError(Exception):
@@ -277,6 +278,13 @@ def _budget(value: float) -> float:
     return min(max(float(value), CHECK_BUDGET_RANGE[0]), CHECK_BUDGET_RANGE[1])
 
 
+def mymemo_offered(kind: str = "", environ: Mapping[str, str] | None = None) -> bool:
+    """Whether MyMemo's hosted model is offered (§17.8). It stays hidden until MyMemo opens its plan:
+    ``OPENMYMEMO_ASSISTANT_MYMEMO=1`` shows it, and settings that already use it (``kind``) keep it."""
+    env = os.environ if environ is None else environ
+    return kind == "mymemo" or _truthy(env.get(ENV + "MYMEMO", ""))
+
+
 def _truthy(text: str) -> bool:
     return text.strip().lower() in ("1", "true", "yes", "on")
 
@@ -418,6 +426,8 @@ def save_settings(*, enabled: bool | None = None, kind: str | None = None, proto
         new_kind = kind if kind is not None else current.kind
         if new_kind not in KINDS:
             raise SettingsError(f"kind must be one of {', '.join(KINDS)}")
+        if not mymemo_offered(current.kind) and new_kind == "mymemo":
+            raise SettingsError(MYMEMO_HIDDEN)
         if protocol is not None and protocol not in PROTOCOLS:
             raise SettingsError(f"protocol must be one of {', '.join(PROTOCOLS)}")
         if kind is not None:
