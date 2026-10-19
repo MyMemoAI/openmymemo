@@ -13,29 +13,40 @@ import sys
 import tempfile
 
 
+def report(level: str, text: str) -> None:
+    """Print a line, as a GitHub annotation when running in GitHub Actions (so it shows without the log)."""
+    print(f"::{level}::{text}" if os.environ.get("GITHUB_ACTIONS") else text, flush=True)
+
+
 def main() -> None:
     os.environ["OPENMYMEMO_CLOUD_DIR"] = sys.argv[1] if len(sys.argv) > 1 else tempfile.mkdtemp()
     import onnxruntime
 
     from openmymemo.recall import embed, local
 
-    print(f"ONNX Runtime {onnxruntime.__version__}")
+    report("notice", f"ONNX Runtime {onnxruntime.__version__}, Python {sys.version.split()[0]}")
     failed = []
     for model in local.MODELS:
         if local.pin_of(model) is None:
-            print(f"{model.id}: not pinned, skipped")
+            report("notice", f"{model.id}: not pinned, skipped")
             continue
-        local.ensure_downloaded(model)
-        embedder = embed.OnnxEmbedder(model)
-        [query] = embedder.embed(["What do I like to drink?"], "query")
-        tea, city = embedder.embed(["Prefers tea over coffee", "Lives in Berlin"], "document")
+        try:
+            local.ensure_downloaded(model)
+            embedder = embed.OnnxEmbedder(model)
+            [query] = embedder.embed(["What do I like to drink?"], "query")
+            tea, city = embedder.embed(["Prefers tea over coffee", "Lives in Berlin"], "document")
+        except Exception as e:  # noqa: BLE001 - every model is checked and reported
+            report("error", f"{model.id}: {type(e).__name__}: {str(e)[:300]}")
+            failed.append(model.id)
+            continue
         score = [sum(a * b for a, b in zip(query, doc, strict=True)) for doc in (tea, city)]
         ok = score[0] > score[1]
-        print(f"{model.id}: {len(query)} dimensions, tea {score[0]:.3f} vs Berlin {score[1]:.3f}: {'ok' if ok else 'WRONG'}")
+        report("notice" if ok else "error",
+               f"{model.id}: {len(query)} dimensions, tea {score[0]:.3f} vs Berlin {score[1]:.3f}")
         if not ok:
             failed.append(model.id)
     if failed:
-        sys.exit(f"Ranked wrong: {', '.join(failed)}")
+        sys.exit(f"Failed: {', '.join(failed)}")
 
 
 if __name__ == "__main__":
