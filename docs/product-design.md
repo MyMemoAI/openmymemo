@@ -134,7 +134,7 @@ A single CLI on PyPI: `uv tool install openmymemo`, or `uvx openmymemo` without 
 | Command | What it does |
 | --- | --- |
 | `openmymemo init` | Create the memory folder with the default topics |
-| `openmymemo import chatgpt\|claude\|gemini\|text\|markdown\|json [file]` | Import from a file, stdin or the clipboard into a `from-<source>` topic; preview before anything is saved |
+| `openmymemo import chatgpt\|claude\|gemini\|text\|markdown\|json [file]` | Import from a file, stdin or the clipboard into a `from-<source>` topic; preview before anything is saved. `import auto <file>` reads another AI app's memory file (CLAUDE.md, AGENTS.md, rules, …; §5.6) |
 | `openmymemo sort [--topic from-chatgpt]` | Suggest a topic for each unsorted memory, preview, move the ones you tick |
 | `openmymemo export --format markdown\|claude\|chatgpt\|json` | Export |
 | `openmymemo mcp --connector <id>` | **stdio MCP server** for local clients: Claude Desktop, Claude Code, Cursor, Codex, Gemini CLI … |
@@ -145,6 +145,11 @@ A single CLI on PyPI: `uv tool install openmymemo`, or `uvx openmymemo` without 
 | `openmymemo connector add\|list\|config\|rotate\|remove` | Manage connectors; prints MCP config for each client using absolute paths |
 | `openmymemo context [--connector id]` | Print exactly what a connector sees right now |
 | `openmymemo add <topic> <text>` / `search <query>` | Add a memory yourself / search |
+| `openmymemo apps` / `connect <app>` / `disconnect <app>` | The AI apps on this computer and their status; connect or disconnect one in a single step (§15.1) |
+| `openmymemo setup codex` | Install the Codex session hook (§5.4.1) |
+| `openmymemo doctor` | Check the setup (folder, uv, panel, each app's config and folder, MyMemo Cloud) and say what to fix; prints no memories and writes nothing |
+| `openmymemo cloud link\|status\|unlink\|settings` | MyMemo Cloud (§16) |
+| `openmymemo assistant status\|set\|test\|off` / `tidy` | OpenMyMemo Assistant, off by default, and its tidy-up (§17) |
 
 The server only listens on 127.0.0.1. The Mac app (§14) runs the same server for people who don't use a terminal.
 
