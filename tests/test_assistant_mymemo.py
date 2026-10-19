@@ -71,6 +71,11 @@ def signed_in(vault, fake) -> Assistant:
     return Assistant.from_settings(vault)
 
 
+def ask(a: Assistant, text: str = "m1: t") -> dict | None:
+    """A ``sort`` call as the feature makes it: one memory block, MyMemo's ``sort`` task."""
+    return a.json_call("sort", "x", [Data(text, label="memory")], SCHEMA, task="sort")
+
+
 def callback_path(url: str) -> str:
     parts = urlsplit(url)
     assert parts.netloc == "127.0.0.1:8787" and parts.path == "/cloud/callback"
@@ -159,12 +164,14 @@ def test_the_assistant_api_keeps_the_panel_guard(api):
 # ---- calls, tokens and refresh -------------------------------------------------------------------------------------
 
 
-def test_calls_carry_the_token_and_the_feature(vault, fake):
+def test_calls_carry_the_token_and_only_the_task_and_its_material(vault, fake):
     a = signed_in(vault, fake)
-    assert a.json_call("sort", "x", ["some text"], SCHEMA) == {"items": [{"text": "ok"}]}
-    sent = fake.chats[-1]
+    assert ask(a, "some text") == {"items": [{"text": "ok"}]}
+    sent = fake.tasks[-1]
     assert sent["headers"]["authorization"] == f"Bearer {raw()['mymemo_token']}"
-    assert sent["headers"]["x-openmymemo-feature"] == "sort" and sent["body"]["messages"][-1]["role"] == "user"
+    # No instructions, schema, model or token budget: the service writes the prompt.
+    assert sent["body"] == {"task": "sort", "blocks": [{"label": "memory", "text": "some text"}], "inputs": {}}
+    assert "x-openmymemo-feature" not in sent["headers"]
     call = [x for x in vault.activity("assistant") if x["action"] == "call"][-1]
     assert call["result"] == "ok" and call["kind"] == "mymemo" and call["model"] == MODELS["response"]["model"]
 
@@ -173,8 +180,8 @@ def test_a_401_refreshes_once_rotates_and_retries(vault, fake):
     a = signed_in(vault, fake)
     old_access, old_refresh = raw()["mymemo_token"], raw()["mymemo_refresh"]
     fake.expire_access()
-    assert a.json_call("sort", "x", ["some text"], SCHEMA) is not None
-    assert fake.chat_auth == [f"Bearer {old_access}", f"Bearer {raw()['mymemo_token']}"]
+    assert ask(a, "some text") is not None
+    assert fake.task_auth == [f"Bearer {old_access}", f"Bearer {raw()['mymemo_token']}"]
     assert fake.token_forms[-1] == {**TOKEN["refresh_token"], "refresh_token": old_refresh}
     assert raw()["mymemo_refresh"] == fake.refresh != old_refresh  # rotated, and the new one kept
     assert a.settings.mymemo_token == raw()["mymemo_token"]
@@ -186,17 +193,17 @@ def test_a_token_about_to_expire_is_refreshed_before_the_call(vault, fake):
     stored["mymemo"]["expires_at"] = "2020-01-01T00:00:00+00:00"
     settings_mod._write(stored)
     a = Assistant.from_settings(vault)
-    assert a.json_call("sort", "x", ["some text"], SCHEMA) is not None
-    assert fake.token_forms[-1]["grant_type"] == "refresh_token" and len(fake.chat_auth) == 1
+    assert ask(a, "some text") is not None
+    assert fake.token_forms[-1]["grant_type"] == "refresh_token" and len(fake.task_auth) == 1
 
 
 def test_another_process_refreshing_first_is_reused_not_refreshed_again(vault, fake):
     a = signed_in(vault, fake)
     b = Assistant.from_settings(vault)
     fake.expire_access()
-    assert a.json_call("sort", "x", ["one"], SCHEMA) is not None
+    assert ask(a, "one") is not None
     refreshes = sum(f["grant_type"] == "refresh_token" for f in fake.token_forms)
-    assert b.json_call("sort", "x", ["two"], SCHEMA) is not None  # its old token gets a 401: takes a's new one
+    assert ask(b, "two") is not None  # its old token gets a 401: takes a's new one
     assert sum(f["grant_type"] == "refresh_token" for f in fake.token_forms) == refreshes
     assert not fake.spent & {raw()["mymemo_refresh"]}
 
@@ -205,14 +212,14 @@ def test_a_refused_refresh_signs_out_and_features_use_their_rules(vault, fake, a
     a = signed_in(vault, fake)
     fake.expire_access()
     fake.refresh = None  # MyMemo revoked the grant (e.g. removed in the account settings)
-    assert a.json_call("sort", "x", ["some text"], SCHEMA) is None
-    assert a.last_error == mymemo.SIGNED_OUT and len(fake.chat_auth) == 1
+    assert ask(a, "some text") is None
+    assert a.last_error == mymemo.SIGNED_OUT and len(fake.task_auth) == 1
     stored = raw()
     assert "mymemo_token" not in stored and "mymemo_refresh" not in stored
     s = api.get("/api/assistant", headers=H).json()
     assert not s["mymemo"]["signed_in"] and s["mymemo"]["signed_out"] == "expired" and not s["ready"]
     items = features.import_preview(vault, "markdown", PASTE)
-    assert items and len(fake.chat_auth) == 1  # rules, no request
+    assert items and len(fake.task_auth) == 1  # rules, no request
 
 
 # ---- what the service says about the plan --------------------------------------------------------------------------
@@ -223,15 +230,15 @@ def test_no_plan_pauses_quietly_until_the_plan_is_active(vault, fake, api):
     fake.fail("plan_required")
     fake.answer = split_answer
     items = features.import_preview(vault, "markdown", PASTE)
-    assert all(it.by == "rules" for it in items) and len(fake.chats) == 1
+    assert all(it.by == "rules" for it in items) and len(fake.tasks) == 1
     s = api.get("/api/assistant", headers=H).json()
     hold = s["mymemo"]["hold"]
     assert hold["code"] == "plan_required" and hold["message"].startswith("Needs the OpenMyMemo Assistant plan")
     assert hold["plan_url"] == f"{fake.base}/openmymemo/assistant" and not s["ready"]
     # No more requests while paused: every feature takes its rule path.
     a = Assistant.from_settings(vault)
-    assert not a.available("sort") and a.json_call("sort", "x", ["t"], SCHEMA) is None
-    assert features.import_preview(vault, "markdown", PASTE) and len(fake.chats) == 1
+    assert not a.available("sort") and ask(a, "t") is None
+    assert features.import_preview(vault, "markdown", PASTE) and len(fake.tasks) == 1
     # Opening the plan view sees the plan active (bought meanwhile): the pause is lifted.
     acct = api.get("/api/assistant/mymemo", headers=H).json()
     assert acct["account"]["ok"] and acct["account"]["plan"]["active"]
@@ -241,11 +248,11 @@ def test_no_plan_pauses_quietly_until_the_plan_is_active(vault, fake, api):
 def test_a_used_up_allowance_pauses_until_it_resets(vault, fake):
     a = signed_in(vault, fake)
     fake.fail("quota_exceeded")
-    assert a.json_call("sort", "x", ["t"], SCHEMA) is None
+    assert ask(a, "t") is None
     assert a.last_error.startswith("This month's allowance is used up, resets November 1")
     a = Assistant.from_settings(vault)
     assert a.unavailable_reason("sort").startswith("This month's allowance is used up, resets November 1")
-    assert a.json_call("sort", "x", ["t"], SCHEMA) is None and len(fake.chats) == 1
+    assert ask(a, "t") is None and len(fake.tasks) == 1
     h = mymemo.hold(a.settings)
     assert h["code"] == "quota_exceeded" and h["resets_at"] == "2026-11-01T00:00:00+00:00"
     call = [x for x in vault.activity("assistant") if x["action"] == "call"][-1]
@@ -257,17 +264,17 @@ def test_busy_answers_respect_retry_after(name, vault, fake, monkeypatch):
     a = signed_in(vault, fake)
     fake.fail(name)
     start = mymemo._now()
-    assert a.json_call("sort", "x", ["t"], SCHEMA) is None
+    assert ask(a, "t") is None
     seconds = int(ERRORS[name]["retry_after"])
     h = mymemo.hold(a.settings)
     assert h["code"] == ("rate_limited" if name == "rate_limit_exceeded" else "unavailable")
     until = mymemo._parse(h["until"])
     assert start + timedelta(seconds=seconds - 2) <= until <= start + timedelta(seconds=seconds + 2)
     a = Assistant.from_settings(vault)
-    assert a.json_call("sort", "x", ["t"], SCHEMA) is None and not a.test()["ok"] and len(fake.chats) == 1
+    assert ask(a, "t") is None and not a.test()["ok"] and len(fake.tasks) == 1
     monkeypatch.setattr(mymemo, "_now", lambda: start + timedelta(seconds=seconds + 3))
     a = Assistant.from_settings(vault)
-    assert a.json_call("sort", "x", ["t"], SCHEMA) is not None and len(fake.chats) == 2
+    assert ask(a, "t") is not None and len(fake.tasks) == 2
     assert mymemo.hold(a.settings) is None and "hold" not in raw()["mymemo"]
 
 
@@ -356,11 +363,11 @@ def test_private_memories_never_reach_mymemo(vault, fake):
     a = signed_in(vault, fake)
     assert a.remote
     blocks = a.memory_data(vault.memories())
-    assert a.json_call("sort", "x", blocks, SCHEMA) is not None
-    assert a.json_call("import", "x", [f"notes: {SECRET.lower()}"], SCHEMA) is None
-    assert a.json_call("import", "x", [Data("y", topic="health")], SCHEMA) is None
-    sent = json.dumps([c["body"] for c in fake.chats], ensure_ascii=False)
-    assert len(fake.chats) == 1 and "sumatriptan" not in sent and "180k" not in sent
+    assert a.json_call("sort", "x", blocks, SCHEMA, task="sort") is not None
+    assert a.json_call("import", "x", [f"notes: {SECRET.lower()}"], SCHEMA, task="import.split") is None
+    assert a.json_call("import", "x", [Data("y", topic="health")], SCHEMA, task="import.split") is None
+    sent = json.dumps([c["body"] for c in fake.tasks], ensure_ascii=False)
+    assert len(fake.tasks) == 1 and "sumatriptan" not in sent and "180k" not in sent
     assert "Leads the platform team" in sent
 
 
@@ -388,18 +395,18 @@ def test_signing_out_and_in_as_another_account_mid_request_stops_that_request(va
         bob.update(tokens)
         return "invalid_token"  # the request's own (revoked) token is refused
 
-    fake.on_chat = switch
+    fake.on_task = switch
     refreshes = grants(fake)
-    assert a.json_call("sort", "x", ["some text"], SCHEMA) is None
+    assert ask(a, "some text") is None
     assert a.last_error == mymemo.CHANGED
     # The request never retried with Bob's token, nor spent anyone's refresh token.
-    assert fake.chat_auth == [f"Bearer {old}"] and grants(fake) == refreshes
+    assert fake.task_auth == [f"Bearer {old}"] and grants(fake) == refreshes
     stored = raw()  # Bob's sign-in is intact
     assert stored["mymemo_token"] == bob["access"] and stored["mymemo_refresh"] == bob["refresh"]
     assert stored["mymemo"]["account"] == {"display_name": "Bob"} and "signed_out" not in stored["mymemo"]
     assert a.settings.mymemo_token == old  # the stopped request's settings didn't take Bob's token either
     fresh = Assistant.from_settings(vault)
-    assert fresh.json_call("sort", "x", ["t"], SCHEMA) is not None and fake.chat_auth[-1] == f"Bearer {bob['access']}"
+    assert ask(fresh, "t") is not None and fake.task_auth[-1] == f"Bearer {bob['access']}"
 
 
 def test_an_old_sign_ins_answer_never_pauses_a_newer_one(vault, fake):
@@ -409,8 +416,8 @@ def test_an_old_sign_ins_answer_never_pauses_a_newer_one(vault, fake):
         mymemo.keep(fake.base, fake.tokens_for_keep(), via="browser")
         return "quota_exceeded"
 
-    fake.on_chat = switch
-    assert a.json_call("sort", "x", ["t"], SCHEMA) is None
+    fake.on_task = switch
+    assert ask(a, "t") is None
     assert "hold" not in raw()["mymemo"] and Assistant.from_settings(vault).available("sort")
 
 
@@ -431,10 +438,10 @@ def test_a_service_change_mid_request_never_sends_tokens_across_services(how, va
                 settings_mod._write(stored)
             return None
 
-        fake.on_chat = switch
-        assert a.json_call("sort", "x", ["t"], SCHEMA) is None and a.last_error == mymemo.CHANGED
-        assert fake.chat_auth == [f"Bearer {old}"] and grants(fake) == 0  # no refresh at either service
-        assert other.chat_auth == [] and other.model_calls == [] and grants(other) == 0
+        fake.on_task = switch
+        assert ask(a, "t") is None and a.last_error == mymemo.CHANGED
+        assert fake.task_auth == [f"Bearer {old}"] and grants(fake) == 0  # no refresh at either service
+        assert other.task_auth == [] and other.model_calls == [] and grants(other) == 0
         assert all(f.get("refresh_token") != raw().get("mymemo_refresh") for f in fake.token_forms)
     finally:
         other.stop()
@@ -456,10 +463,10 @@ def test_a_refresh_by_a_second_process_mid_request_is_reused_once(vault, fake):
         assert out.stdout.strip() == "ok", out.stderr
         return None
 
-    fake.on_chat = other_process
-    assert a.json_call("sort", "x", ["t"], SCHEMA) is not None
+    fake.on_task = other_process
+    assert ask(a, "t") is not None
     assert grants(fake) == 1  # the in-flight request reused the second process's token instead of refreshing
-    assert fake.chat_auth[-1] == f"Bearer {raw()['mymemo_token']}" and raw()["mymemo_refresh"] == fake.refresh
+    assert fake.task_auth[-1] == f"Bearer {raw()['mymemo_token']}" and raw()["mymemo_refresh"] == fake.refresh
     assert raw()["mymemo_refresh"] not in fake.spent
 
 
@@ -482,7 +489,7 @@ def test_a_token_that_doesnt_match_the_stored_sign_in_is_never_sent(vault, fake)
     a = signed_in(vault, fake)
     a.settings.mymemo_token = "oma_TEST_ONLY_from_elsewhere"  # e.g. read from the Keychain mid-change
     assert mymemo.session(a.settings) is None
-    assert a.json_call("sort", "x", ["t"], SCHEMA) is None and fake.chat_auth == []
+    assert ask(a, "t") is None and fake.task_auth == []
 
 
 def test_signing_out_never_forgets_a_sign_in_made_meanwhile(vault, fake, monkeypatch):
@@ -548,30 +555,30 @@ def env_token(vault, fake, monkeypatch) -> str:
 def test_an_environment_token_keeps_its_pause_across_fresh_settings(name, vault, fake, monkeypatch):
     env_token(vault, fake, monkeypatch)
     fake.fail(name)
-    assert Assistant.from_settings(vault).json_call("sort", "x", ["t"], SCHEMA) is None
+    assert ask(Assistant.from_settings(vault), "t") is None
     fresh = Assistant.from_settings(vault)  # the next feature, settings loaded again
-    assert not fresh.available("sort") and fresh.json_call("sort", "x", ["t"], SCHEMA) is None
-    assert features.import_preview(vault, "markdown", PASTE) and len(fake.chats) == 1
+    assert not fresh.available("sort") and ask(fresh, "t") is None
+    assert features.import_preview(vault, "markdown", PASTE) and len(fake.tasks) == 1
     if name in ("rate_limit_exceeded", "model_unavailable"):  # the Test button respects Retry-After too
-        assert not Assistant.from_settings(vault).test()["ok"] and len(fake.chats) == 1
+        assert not Assistant.from_settings(vault).test()["ok"] and len(fake.tasks) == 1
 
 
 def test_another_environment_token_or_service_isnt_paused_by_the_first(vault, fake, monkeypatch):
     env_token(vault, fake, monkeypatch)
     fake.fail("rate_limit_exceeded")
-    assert Assistant.from_settings(vault).json_call("sort", "x", ["t"], SCHEMA) is None
+    assert ask(Assistant.from_settings(vault), "t") is None
     monkeypatch.setenv("OPENMYMEMO_ASSISTANT_API_KEY", fake.tokens_for_keep()["access"])  # another token
-    assert Assistant.from_settings(vault).json_call("sort", "x", ["t"], SCHEMA) is not None
+    assert ask(Assistant.from_settings(vault), "t") is not None
     fake.fail("rate_limit_exceeded")
-    assert Assistant.from_settings(vault).json_call("sort", "x", ["t"], SCHEMA) is None
+    assert ask(Assistant.from_settings(vault), "t") is None
     other = FakeAssistantService().start()
     try:  # the same token's identity at another service is another identity
         token = other.tokens_for_keep()["access"]
         monkeypatch.setenv("OPENMYMEMO_CLOUD_URL", other.base)
         monkeypatch.setenv("OPENMYMEMO_ASSISTANT_API_KEY", token)
         a = Assistant.from_settings(vault)
-        assert a.available("sort") and a.json_call("sort", "x", ["t"], SCHEMA) is not None
-        assert other.chat_auth == [f"Bearer {token}"]
+        assert a.available("sort") and ask(a, "t") is not None
+        assert other.task_auth == [f"Bearer {token}"]
     finally:
         other.stop()
 
@@ -581,18 +588,18 @@ def test_environment_failures_never_touch_a_stored_sign_in_and_vice_versa(vault,
     before = raw()["mymemo"]
     env_token(vault, fake, monkeypatch)
     fake.fail("plan_required")
-    assert Assistant.from_settings(vault).json_call("sort", "x", ["t"], SCHEMA) is None
+    assert ask(Assistant.from_settings(vault), "t") is None
     assert raw()["mymemo"] == before  # no pause, account or tokens changed for the stored sign-in
     monkeypatch.delenv("OPENMYMEMO_ASSISTANT_API_KEY")
     stored = Assistant.from_settings(vault)
-    assert stored.available("sort") and stored.json_call("sort", "x", ["t"], SCHEMA) is not None
+    assert stored.available("sort") and ask(stored, "t") is not None
     fake.fail("quota_exceeded")  # the stored sign-in's pause ...
-    assert Assistant.from_settings(vault).json_call("sort", "x", ["t"], SCHEMA) is None
+    assert ask(Assistant.from_settings(vault), "t") is None
     assert raw()["mymemo"]["hold"]["code"] == "quota_exceeded"
     paused_env = raw().get("mymemo_env")
     env_token(vault, fake, monkeypatch)  # ... doesn't pause the environment's token, nor change its slot
     assert Assistant.from_settings(vault).available("sort")
-    assert Assistant.from_settings(vault).json_call("sort", "x", ["t"], SCHEMA) is not None
+    assert ask(Assistant.from_settings(vault), "t") is not None
     assert raw()["mymemo"]["hold"]["code"] == "quota_exceeded" and raw().get("mymemo_env") == paused_env
 
 
@@ -609,24 +616,24 @@ def test_each_environment_token_keeps_its_own_pause(vault, fake, monkeypatch):
     a = env_token(vault, fake, monkeypatch)
     b = fake.tokens_for_keep()["access"]
     fake.fail("rate_limit_exceeded")
-    assert Assistant.from_settings(vault).json_call("sort", "x", ["t"], SCHEMA) is None  # A paused
+    assert ask(Assistant.from_settings(vault), "t") is None  # A paused
     use_env(monkeypatch, b)
     fake.fail("rate_limit_exceeded")
-    assert Assistant.from_settings(vault).json_call("sort", "x", ["t"], SCHEMA) is None  # B paused
+    assert ask(Assistant.from_settings(vault), "t") is None  # B paused
     use_env(monkeypatch, a)
     fresh = Assistant.from_settings(vault)
-    assert not fresh.available("sort") and fresh.json_call("sort", "x", ["t"], SCHEMA) is None  # A still paused
-    assert len(fake.chats) == 2 and len(raw()["mymemo_env"]["holds"]) == 2
+    assert not fresh.available("sort") and ask(fresh, "t") is None  # A still paused
+    assert len(fake.tasks) == 2 and len(raw()["mymemo_env"]["holds"]) == 2
 
 
 def test_lifting_one_tokens_pause_leaves_the_others(vault, fake, monkeypatch):
     a = env_token(vault, fake, monkeypatch)
     b = fake.tokens_for_keep()["access"]
     fake.fail("rate_limit_exceeded")
-    assert Assistant.from_settings(vault).json_call("sort", "x", ["t"], SCHEMA) is None
+    assert ask(Assistant.from_settings(vault), "t") is None
     use_env(monkeypatch, b)
     fake.fail("plan_required")
-    assert Assistant.from_settings(vault).json_call("sort", "x", ["t"], SCHEMA) is None
+    assert ask(Assistant.from_settings(vault), "t") is None
     assert mymemo.account(load_settings())["ok"]  # B's plan is active: B's pause is lifted
     assert Assistant.from_settings(vault).available("sort")
     use_env(monkeypatch, a)
@@ -642,7 +649,7 @@ def test_expired_pauses_are_dropped_and_the_map_is_capped(vault, fake, monkeypat
     stored["mymemo_env"] = {"holds": {**stale, **many}}
     settings_mod._write(stored)
     fake.fail("rate_limit_exceeded")  # A's pause ends in 20 s: sooner than all the others, and still kept
-    assert Assistant.from_settings(vault).json_call("sort", "x", ["t"], SCHEMA) is None
+    assert ask(Assistant.from_settings(vault), "t") is None
     holds = raw()["mymemo_env"]["holds"]
     me = mymemo._env_identity(a, fake.base)
     assert len(holds) == mymemo.ENV_HOLDS_MAX and me in holds and not set(stale) & set(holds)
@@ -659,7 +666,7 @@ def test_a_pause_in_the_single_slot_of_earlier_builds_is_still_honoured(vault, f
     assert not Assistant.from_settings(vault).available("sort")
     use_env(monkeypatch, fake.tokens_for_keep()["access"])  # another token's pause: written beside it, as a map
     fake.fail("model_unavailable")
-    assert Assistant.from_settings(vault).json_call("sort", "x", ["t"], SCHEMA) is None
+    assert ask(Assistant.from_settings(vault), "t") is None
     assert raw()["mymemo_env"]["holds"][identity] == h and len(raw()["mymemo_env"]["holds"]) == 2
     use_env(monkeypatch, a)
     assert not Assistant.from_settings(vault).available("sort")
@@ -688,8 +695,11 @@ def test_mymemo_offers_no_embeddings_and_recall_never_asks_it_for_any(vault, fak
 
     found = search(vault, None, "what do I like to drink", limit=5, model=True)
     assert found.mode != "hybrid"  # no vectors from MyMemo
-    assert not any(p.endswith("/embeddings") for p in fake.paths)  # query expansion may use chat; embeddings never
-    assert all(c["headers"]["x-openmymemo-feature"] == "recall" for c in fake.chats)
+    assert not any(p.endswith("/embeddings") for p in fake.paths)  # query expansion may use a task; embeddings never
+    assert fake.tasks and all(c["body"]["task"].startswith("recall.") for c in fake.tasks)
+    expand = next(c["body"] for c in fake.tasks if c["body"]["task"] == "recall.expand")
+    assert expand == {"task": "recall.expand", "blocks": [{"label": "query", "text": "what do I like to drink"}],
+                      "inputs": {"languages": ["en"]}}
 
 
 @pytest.mark.parametrize("name", ["rate_limit_exceeded", "plan_required", "quota_exceeded", "model_unavailable"])
@@ -705,8 +715,8 @@ def test_a_mymemo_pause_stops_checks_chat_import_session_reading_and_recall(name
     save_settings(features={"check": True, "session": True, "import": True, "recall": True},
                   session_apps={"claude-code": "allowed"})
     fake.fail(name)
-    assert Assistant.from_settings(vault).json_call("sort", "x", ["t"], SCHEMA) is None  # MyMemo says: pause
-    assert len(fake.chats) == 1 and mymemo.hold(load_settings())
+    assert ask(Assistant.from_settings(vault), "t") is None  # MyMemo says: pause
+    assert len(fake.tasks) == 1 and mymemo.hold(load_settings())
 
     con = app_connector(vault)
     assert check_proposal(vault, con, "add", content="Prefers pnpm over npm", memory_id=None, topic=None) is None
@@ -719,4 +729,49 @@ def test_a_mymemo_pause_stops_checks_chat_import_session_reading_and_recall(name
     assert sessions.work(vault, "claude-code", path, "s-1")["result"] in ("off", "limit")
     vault.add("interests", "Prefers tea over coffee")
     search(vault, None, "tea", limit=5, model=True)
-    assert len(fake.chats) == 1  # nothing more went to MyMemo while paused
+    assert len(fake.tasks) == 1  # nothing more went to MyMemo while paused
+
+
+def test_every_feature_sends_mymemo_a_task_it_takes(vault, fake, monkeypatch):
+    """Each feature's request, as the strict fake checks it against tasks.json (the task, its labels and counts, its
+    inputs, nothing else): MyMemo answers every one instead of refusing it as a bad request."""
+    from test_assistant_writes import FIXTURES, app_connector, place_transcript
+
+    from openmymemo.assistant import chats, tidy
+    from openmymemo.assistant import session as sessions
+    from openmymemo.assistant.checks import check_proposal
+    from openmymemo.recall import search
+
+    signed_in(vault, fake)
+    save_settings(features={"import": True, "sort": True, "recall": True, "check": True, "session": True,
+                            "tidy": True}, session_apps={"claude-code": "allowed"})
+    for text in ("Prefers tea over coffee", "Prefers green tea", "Lives in Berlin", "喜欢喝茶"):
+        vault.add("interests", text)
+    features.import_preview(vault, "markdown", PASTE)
+    ask(Assistant.from_settings(vault))  # sort_plan only asks about imported memories; the request is the same
+    check_proposal(vault, app_connector(vault), "add", content="Prefers pnpm over npm", memory_id=None, topic=None)
+    search(vault, None, "what do I like to drink", limit=5, model=True)
+    tidy.run(vault, max_calls=1)
+    convs = chats.parse_export("claude-export", (FIXTURES / "claude_conversations.json").read_text())
+    chats.ChatImport(vault, "claude-export", convs).run()
+    sessions.work(vault, "claude-code", place_transcript(), "s-1")
+    Assistant.from_settings(vault).test()
+    sent = {c["body"]["task"] for c in fake.tasks}
+    assert {"import.split", "sort", "check", "recall.expand", "tidy", "import.chats", "session.extract",
+            "test"} <= sent, sent
+    assert len(fake.task_auth) == len(fake.tasks)  # none was refused as a bad request
+
+
+def test_the_tasks_fixture_pins_the_schemas_this_app_checks_answers_with():
+    """MyMemo asks the model for the schema in tasks.json; the app cleans the answer with its own. They must agree."""
+    from openmymemo.assistant import chats, checks, tidy
+    from openmymemo.recall import hybrid
+
+    tasks = fixture("assistant/tasks.json")["tasks"]
+    local = {"import.split": features.SPLIT_SCHEMA, "sort": features.SORT_SCHEMA, "check": checks.CHECK_SCHEMA,
+             "import.chats": chats.EXTRACT_SCHEMA, "session.extract": chats.EXTRACT_SCHEMA, "tidy": tidy.SCHEMA,
+             "recall.expand": hybrid.EXPAND_SCHEMA, "recall.rerank": hybrid.RERANK_SCHEMA}
+    for name, schema in local.items():
+        assert json.loads(json.dumps(schema)) == tasks[name]["schema"], name
+    assert tasks["recall.expand"]["inputs"] == ["languages"]
+    assert set(tasks) == {*local, "test"}

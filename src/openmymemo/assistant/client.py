@@ -9,18 +9,22 @@ API, over ``httpx2`` (product-design.md §17.2). No vendor SDK.
   endpoint is never reached through a proxy, and must still be on loopback when the request is made.
 * **Failures** are returned, not raised: a ``Failure`` with a message for the person and a short code for the
   activity log. Its message never contains the key or the text sent.
-* **MyMemo's hosted model** (kind ``mymemo``, §17.8) is the OpenAI-compatible shape with its access token as the
-  bearer and the feature in ``X-OpenMyMemo-Feature``. The token is refreshed before it expires and once on a 401
-  (then the request is sent again); a 402, 429 or 503 becomes a pause (``mymemo.note_failure``) during which the
-  Assistant makes no requests and features use their rules. Each request is bound to the sign-in it started with
-  (``mymemo.Session``): if another sign-in, a sign-out or another service replaced it meanwhile, the request stops
-  instead of borrowing the new sign-in's token or sending its own elsewhere.
+* **MyMemo's hosted model** (kind ``mymemo``, §17.8) takes no prompts: ``task`` names one of the service's fixed
+  tasks and sends only the material (labelled blocks) and the task's structured inputs to ``/tasks``; the service
+  holds the instructions and the schema (``tests/fixtures/cloud/assistant/tasks.json``). ``chat`` refuses this kind.
+  The access token is the bearer. It is refreshed before it expires and once on a 401 (then the request is sent
+  again); a 402, 429 or 503 becomes a pause (``mymemo.note_failure``) during which the Assistant makes no requests
+  and features use their rules. Each request is bound to the sign-in it started with (``mymemo.Session``): if another
+  sign-in, a sign-out or another service replaced it meanwhile, the request stops instead of borrowing the new
+  sign-in's token or sending its own elsewhere.
 """
 
 from __future__ import annotations
 
 import dataclasses
+import json
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -130,24 +134,14 @@ def _format_refused(status: int) -> bool:
 def chat(settings: Settings, system: str, user: str, *, max_tokens: int, schema: dict | None = None,
          feature: str | None = None, timeout: float | None = None) -> Reply | Failure:
     """One request: the reply, or a Failure. ``schema`` (already the wire form) asks for structured output."""
+    if settings.kind == "mymemo":  # the hosted model takes fixed tasks, never a prompt: see ``task``
+        return Failure("MyMemo's hosted model doesn't take this request.", "unsupported")
     bad = url_problem(settings.endpoint, settings.kind)  # environment overrides aren't checked when saved
     if bad:
         return Failure(bad, "bad_address")
     if settings.kind == "local" and not is_loopback(settings.endpoint):
         return Failure("A model on this computer must have a local address.", "not_local")
     base = settings.endpoint
-    sess: _mymemo.Session | None = None
-    if settings.kind == "mymemo":  # bound to the sign-in this request starts with, its service included
-        sess = _mymemo.session(settings)
-        if sess is None:
-            return _signin_failure("changed")
-        sess, why = _mymemo.access_token(settings, sess)
-        if sess is None:
-            return _signin_failure(why)
-        base = _mymemo.endpoint_for(settings, sess)
-        bad = url_problem(base, settings.kind)
-        if bad:
-            return Failure(bad, "bad_address")
     timeout = timeout or settings.timeout
     headers = {"User-Agent": f"OpenMyMemo/{__version__}", "Accept": "application/json"}
     started = time.monotonic()
@@ -176,12 +170,8 @@ def chat(settings: Settings, system: str, user: str, *, max_tokens: int, schema:
             tokens_in, tokens_out = usage.get("input_tokens"), usage.get("output_tokens")
         else:
             url = base + "/chat/completions"
-            mymemo = sess is not None
-            secret = sess.token if sess is not None else settings.secret
-            if secret:
-                headers["Authorization"] = f"Bearer {secret}"
-            if mymemo and feature:
-                headers["X-OpenMyMemo-Feature"] = feature
+            if settings.secret:
+                headers["Authorization"] = f"Bearer {settings.secret}"
             body = {"model": settings.model or "default", "max_tokens": max_tokens,
                     "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
             if schema:
@@ -196,26 +186,11 @@ def chat(settings: Settings, system: str, user: str, *, max_tokens: int, schema:
                 return sent
 
             sent = send()
-            if sess is not None and not isinstance(sent, Failure) and sent[0] == 401:
-                fresh, why = _mymemo.refresh(settings, sess)  # only this request's sign-in, at its service
-                if not fresh:
-                    return _signin_failure(why)
-                sess = dataclasses.replace(sess, token=fresh)
-                headers["Authorization"] = f"Bearer {fresh}"
-                sent = send()
             if isinstance(sent, Failure):
                 return sent
-            status, payload, response_headers = sent
-            if mymemo and status == 401:
-                return Failure(_mymemo.SIGNED_OUT, "signed_out", 401)
-            if sess is not None and status != 200:
-                held = _mymemo.note_failure(settings, sess, status, payload, response_headers)
-                if held:
-                    return Failure(_mymemo.hold_message(held), held["code"], status)
+            status, payload, _ = sent
             if status != 200 or not isinstance(payload, dict):
                 return _status_message(status, payload)
-            if sess is not None:
-                _mymemo.clear_hold(settings, sess)
             choices = payload.get("choices") if isinstance(payload.get("choices"), list) else []
             message = choices[0].get("message") if choices and isinstance(choices[0], dict) else None
             text = message.get("content") if isinstance(message, dict) else None
@@ -230,6 +205,64 @@ def chat(settings: Settings, system: str, user: str, *, max_tokens: int, schema:
     as_int = lambda v: v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else None  # noqa: E731
     return Reply(text=text, model=model or settings.model, input_tokens=as_int(tokens_in),
                  output_tokens=as_int(tokens_out), ms=ms)
+
+
+def task(settings: Settings, name: str, blocks: Sequence[tuple[str, str]], *, inputs: dict | None = None,
+         timeout: float | None = None) -> Reply | Failure:
+    """One of MyMemo's fixed tasks (kind ``mymemo``): the reply (its ``text`` is the task's result as JSON), or a
+    Failure. Sends ``{"task", "blocks": [{"label", "text"}], "inputs"}`` and nothing else: the service writes the
+    instructions and asks the model for the task's schema."""
+    if settings.kind != "mymemo":
+        return Failure("Tasks are only for MyMemo's hosted model.", "unsupported")
+    sess = _mymemo.session(settings)  # bound to the sign-in this request starts with, its service included
+    if sess is None:
+        return _signin_failure("changed")
+    sess, why = _mymemo.access_token(settings, sess)
+    if sess is None:
+        return _signin_failure(why)
+    base = _mymemo.endpoint_for(settings, sess)
+    bad = url_problem(base, settings.kind)
+    if bad:
+        return Failure(bad, "bad_address")
+    headers = {"User-Agent": f"OpenMyMemo/{__version__}", "Accept": "application/json",
+               "Authorization": f"Bearer {sess.token}"}
+    body = {"task": name, "blocks": [{"label": label, "text": text} for label, text in blocks],
+            "inputs": dict(inputs or {})}
+    started = time.monotonic()
+    with _client(settings, timeout or settings.timeout) as client:
+        sent = _post(client, base + "/tasks", headers, body)
+        if not isinstance(sent, Failure) and sent[0] == 401:
+            fresh, why = _mymemo.refresh(settings, sess)  # only this request's sign-in, at its service
+            if not fresh:
+                return _signin_failure(why)
+            sess = dataclasses.replace(sess, token=fresh)
+            headers["Authorization"] = f"Bearer {fresh}"
+            sent = _post(client, base + "/tasks", headers, body)
+        if isinstance(sent, Failure):
+            return sent
+        status, payload, response_headers = sent
+        if status == 401:
+            return Failure(_mymemo.SIGNED_OUT, "signed_out", 401)
+        if status != 200:
+            held = _mymemo.note_failure(settings, sess, status, payload, response_headers)
+            if held:
+                return Failure(_mymemo.hold_message(held), held["code"], status)
+            return _status_message(status, payload)
+        if not isinstance(payload, dict):
+            return _status_message(status, payload)
+        _mymemo.clear_hold(settings, sess)
+    ms = int((time.monotonic() - started) * 1000)
+    if payload.get("finish") == "refusal":
+        return Failure("The model declined to answer.", "refused")
+    result = payload.get("result")
+    if payload.get("finish") != "stop" or not isinstance(result, dict):
+        return Failure("The endpoint's answer had no result.", "invalid")
+    usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
+    as_int = lambda v: v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else None  # noqa: E731
+    model = payload.get("model") if isinstance(payload.get("model"), str) else settings.model
+    return Reply(text=json.dumps(result, ensure_ascii=False), model=model or settings.model,
+                 input_tokens=as_int(usage.get("input_tokens")), output_tokens=as_int(usage.get("output_tokens")),
+                 ms=ms)
 
 
 def get_json(settings: Settings, sess: _mymemo.Session, path: str, *, timeout: float = 20.0

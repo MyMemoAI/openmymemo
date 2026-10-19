@@ -148,7 +148,7 @@ def import_preview(vault: Vault, source: str, text: str, assistant: Assistant | 
         answer = assistant.json_call(
             "import", SPLIT_INSTRUCTIONS,
             [Data(_topic_list(targets), label="topics"), Data(numbered, label="text to split")],
-            SPLIT_SCHEMA, max_tokens=8192)
+            SPLIT_SCHEMA, max_tokens=8192, task="import.split")
         if answer is None:
             for it, _ in in_chunk:
                 it.by = "rules"
@@ -206,7 +206,7 @@ def sort_plan(vault: Vault, topic: str | None = None, assistant: Assistant | Non
         batch = blocks[i:i + SORT_BATCH]
         ids = {mid for b in batch for mid in b.memory_ids}
         answer = assistant.json_call("sort", SORT_INSTRUCTIONS, [Data(_topic_list(targets), label="topics"), *batch],
-                                     SORT_SCHEMA, max_tokens=4096)
+                                     SORT_SCHEMA, max_tokens=4096, task="sort")
         if answer is None:
             continue
         for s in answer["suggestions"]:

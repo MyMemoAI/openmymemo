@@ -110,7 +110,7 @@ def _ask(assistant: Assistant, blocks: list[Data], budget: float) -> dict | None
     def work() -> None:
         try:
             box["answer"] = assistant.json_call("check", CHECK_INSTRUCTIONS, blocks, CHECK_SCHEMA, max_tokens=400,
-                                                timeout=budget)
+                                                timeout=budget, task="check")
         except Exception:  # noqa: BLE001 - json_call doesn't raise, but a check must never break a proposal
             box["answer"] = None
 

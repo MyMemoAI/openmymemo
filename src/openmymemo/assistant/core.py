@@ -13,7 +13,8 @@ Rules enforced here, not left to callers:
   archived memories, earlier versions and proposals), however it is reformatted. Build memory blocks with
   ``memory_data`` and topic lists with ``topic_choices``, which leave out what may not be sent.
 * **Data is data.** Instructions go in the system prompt; files, pastes and memories go in data blocks delimited by
-  a random tag the material can't guess, with a fixed rule that their content is never instructions.
+  a random tag the material can't guess, with a fixed rule that their content is never instructions. MyMemo's hosted
+  model gets only the blocks and the name of one of its fixed tasks (``task=``): the service writes the prompt.
 * **Output is checked.** The answer must be JSON matching the caller's schema (``schema.clean``); otherwise it is
   dropped and the call returns None.
 * **Logged, never the text.** Every call is a line in ``activity.jsonl`` for connector ``assistant``: feature, model,
@@ -258,13 +259,17 @@ class Assistant:
         return True
 
     def json_call(self, feature: str, instructions: str, data: Sequence[Data | str], schema: dict, *,
-                  max_tokens: int = 2048, timeout: float | None = None) -> dict | None:
+                  max_tokens: int = 2048, timeout: float | None = None, task: str | None = None,
+                  inputs: dict | None = None) -> dict | None:
         """Ask the model for JSON matching ``schema`` (an object schema; see ``schema.py`` for the keywords).
 
         ``instructions`` is the task, written by OpenMyMemo; ``data`` is the material (``Data`` blocks, or plain
-        strings for text that isn't memories). Returns the cleaned answer, or None on any failure — off, not
-        configured, limit reached, private data, endpoint error, timeout, invalid answer — with the reason in
-        ``last_error``. Never raises: callers fall back to their rule-based path."""
+        strings for text that isn't memories). With MyMemo's hosted model, ``task`` names the service's fixed task
+        that matches (``tests/fixtures/cloud/assistant/tasks.json``) and ``inputs`` its structured inputs; the
+        service has its own copy of the instructions and schema, so only the blocks are sent. Returns the cleaned
+        answer, or None on any failure — off, not configured, limit reached, private data, endpoint error, timeout,
+        invalid answer, no hosted task for this call — with the reason in ``last_error``. Never raises: callers fall
+        back to their rule-based path."""
         self.last_error = None
         blocks = [Data(text=d) if isinstance(d, str) else d for d in data]
         memory_ids = [mid for b in blocks for mid in b.memory_ids]
@@ -283,17 +288,26 @@ class Assistant:
                                    else "That includes memories the Assistant may not read.")
                 self._log(feature, "refused_private", model=self.settings.model, memory_ids=memory_ids)
                 return None
+            hosted = self.settings.kind == "mymemo"
+            if hosted and not task:
+                self.last_error = "MyMemo's hosted model doesn't do this."
+                self._log(feature, "unsupported", model=self.settings.model)
+                return None
             capped = reserve_call(self.settings.caps)
             if capped:
                 self.last_error = f"This month's limit on {capped} is reached."
                 self._log(feature, "cap", model=self.settings.model)
                 return None
-            tag = "data-" + secrets.token_hex(4)
-            system = (f"{instructions.strip()}\n\n{DATA_RULES.format(tag=tag)}\n\nAnswer with one JSON object only, "
-                      f"matching this JSON schema:\n{json.dumps(wire_schema(schema), ensure_ascii=False)}")
-            user = self._render(blocks, tag) or f"<{tag} n=\"1\" label=\"empty\">\n</{tag}>"
-            reply = endpoint.chat(self.settings, system, user, max_tokens=max_tokens, schema=wire_schema(schema),
-                                  feature=feature, timeout=timeout)
+            if hosted:
+                reply = endpoint.task(self.settings, task, [(b.label, b.text) for b in blocks], inputs=inputs,
+                                      timeout=timeout)
+            else:
+                tag = "data-" + secrets.token_hex(4)
+                system = (f"{instructions.strip()}\n\n{DATA_RULES.format(tag=tag)}\n\nAnswer with one JSON object "
+                          f"only, matching this JSON schema:\n{json.dumps(wire_schema(schema), ensure_ascii=False)}")
+                user = self._render(blocks, tag) or f"<{tag} n=\"1\" label=\"empty\">\n</{tag}>"
+                reply = endpoint.chat(self.settings, system, user, max_tokens=max_tokens,
+                                      schema=wire_schema(schema), feature=feature, timeout=timeout)
             if isinstance(reply, endpoint.Failure):
                 self.last_error = reply.message
                 self._log(feature, reply.code, model=self.settings.model, memory_ids=memory_ids)
@@ -333,8 +347,11 @@ class Assistant:
             return {"ok": False, "model": s.model or None, "ms": None,
                     "error": f"This month's limit on {capped} is reached."}
         try:
-            reply = endpoint.chat(s, "Reply with the single word OK.", "Test from OpenMyMemo.", max_tokens=256,
-                                  feature="test")
+            if s.kind == "mymemo":  # the service's own tiny task: no prompt goes to the hosted model
+                reply = endpoint.task(s, "test", [])
+            else:
+                reply = endpoint.chat(s, "Reply with the single word OK.", "Test from OpenMyMemo.", max_tokens=256,
+                                      feature="test")
         except Exception as e:  # noqa: BLE001
             log.warning("Assistant: test failed (%s)", type(e).__name__)
             return {"ok": False, "model": s.model or None, "ms": None, "error": "Something went wrong."}

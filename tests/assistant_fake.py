@@ -2,8 +2,10 @@
 tests/fixtures/cloud/assistant/ on top of the MyMemo Cloud fake (its consent page, device link and device token).
 
 It adds the OAuth token and revoke endpoints for client ``openmymemo-desktop`` (authorization code with PKCE, token
-exchange of the device token, rotating refresh tokens with reuse detection) and the endpoint itself: chat
-completions and ``/models``. Tests queue error answers from errors.json with ``fail(...)``.
+exchange of the device token, rotating refresh tokens with reuse detection) and the endpoint itself: ``/tasks``
+(checked against tasks.json: the task, its block labels and counts, its inputs, and no other field) and ``/models``.
+There is no chat-completions route, as on the real service. Tests queue error answers from errors.json with
+``fail(...)``.
 """
 
 from __future__ import annotations
@@ -22,6 +24,32 @@ from openmymemo.cloud import pkce_challenge
 TOKEN = fixture("assistant/token.json")
 MODELS = fixture("assistant/models.json")
 ERRORS = fixture("assistant/errors.json")
+TASKS = fixture("assistant/tasks.json")
+
+
+def task_problem(body) -> tuple[str, str | None] | None:
+    """Why the service would refuse this task request (an error code and param), or None."""
+    if not isinstance(body, dict):
+        return "invalid_json", None
+    extra = sorted(set(body) - {"task", "blocks", "inputs"})
+    if extra:
+        return "unsupported_parameter", extra[0]
+    spec = TASKS["tasks"].get(body.get("task"))
+    if spec is None:
+        return "unknown_task", "task"
+    counts: dict[str, int] = {}
+    for block in body.get("blocks") or []:
+        if not isinstance(block, dict) or set(block) - {"label", "text"} or not isinstance(block.get("text"), str):
+            return "invalid_blocks", "blocks"
+        if block.get("label") not in spec["blocks"]:
+            return "invalid_blocks", "blocks"
+        counts[block["label"]] = counts.get(block["label"], 0) + 1
+    for label, rule in spec["blocks"].items():
+        if not rule["min"] <= counts.get(label, 0) <= rule["max"]:
+            return "invalid_blocks", "blocks"
+    if set(body.get("inputs") or {}) - set(spec["inputs"]):
+        return "invalid_inputs", "inputs"
+    return None
 PATH = "/openmymemo/assistant/v1"
 
 
@@ -32,17 +60,18 @@ class FakeAssistantService(FakeService):
         self.spent: set[str] = set()  # refresh tokens already rotated (presenting one again revokes everything)
         self.token_forms: list[dict] = []
         self.revoked: list[dict] = []
-        self.chats: list[dict] = []  # {"headers", "body"} of each chat request that got past auth
-        self.chat_auth: list[str | None] = []  # the Authorization header of every chat request
+        self.tasks: list[dict] = []  # {"headers", "body"} of each task request that got past auth
+        self.task_auth: list[str | None] = []  # the Authorization header of every task request
         self.model_calls: list[str | None] = []
         self.failures: list[str] = []  # names in errors.json, answered in order before the normal answer
-        self.answer = lambda body: json.dumps({"items": [{"text": "ok"}]})
+        self.answer = lambda body: json.dumps({"items": [{"text": "ok"}]})  # the task's result, as JSON text
+        self.finish = "stop"
         self.models = json.loads(json.dumps(MODELS["response"]))
         self.expires_in = TOKEN["response"]["expires_in"]
         self.member: dict | None = None  # the optional masked `member` in /models (models.json), when set
-        # Runs inside a chat request before it is answered (off the event loop, so it may call this service):
+        # Runs inside a task request before it is answered (off the event loop, so it may call this service):
         # tests use it to change the sign-in while a request is in flight. Returns an errors.json name or None.
-        self.on_chat = None
+        self.on_task = None
         self.paths: list[str] = []  # every request's path, in order
         super().__init__()
 
@@ -132,10 +161,10 @@ class FakeAssistantService(FakeService):
             auth = request.headers.get("authorization") or ""
             return auth.startswith("Bearer ") and auth[7:] in self.access
 
-        @app.post(f"{PATH}/chat/completions")
-        async def chat(request: Request):
-            self.chat_auth.append(request.headers.get("authorization"))
-            hook, self.on_chat = self.on_chat, None  # once
+        @app.post(f"{PATH}/tasks")
+        async def task(request: Request):
+            self.task_auth.append(request.headers.get("authorization"))
+            hook, self.on_task = self.on_task, None  # once
             if hook is not None:
                 forced = await asyncio.to_thread(hook)
                 if forced:
@@ -143,15 +172,21 @@ class FakeAssistantService(FakeService):
             if not authorized(request):
                 return self._error("invalid_token")
             body = await request.json()
-            self.chats.append({"headers": {k.lower(): v for k, v in request.headers.items()}, "body": body})
+            problem = task_problem(body)
+            if problem:
+                code, param = problem
+                return JSONResponse({"error": {"message": code, "type": "invalid_request_error", "param": param,
+                                               "code": code}}, status_code=400)
+            self.tasks.append({"headers": {k.lower(): v for k, v in request.headers.items()}, "body": body})
             if self.failures:
                 return self._error(self.failures.pop(0))
+            stopped = self.finish == "stop"
             return JSONResponse({
-                "id": "chatcmpl-test", "object": "chat.completion", "created": 0, "model": self.models["model"],
-                "choices": [{"index": 0, "finish_reason": "stop",
-                             "message": {"role": "assistant", "content": self.answer(body)}}],
-                "usage": {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120,
-                          "prompt_tokens_details": {"cached_tokens": 0}}})
+                "id": "task_test", "object": "assistant.task", "created": 0, "task": body["task"],
+                "model": self.models["model"], "finish": self.finish,
+                "result": json.loads(self.answer(body)) if stopped else None,
+                "refusal": "No." if self.finish == "refusal" else None,
+                "usage": {"input_tokens": 100, "output_tokens": 20, "cached_input_tokens": 0}})
 
         @app.get(f"{PATH}/models")
         async def models(request: Request):
