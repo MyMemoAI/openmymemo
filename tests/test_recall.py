@@ -571,6 +571,41 @@ def test_onnx_embedder_prefixes_pools_and_normalizes():
     assert seen["input_ids"].tolist() == [[2, 6, 3, 4], [2, 6, 3, 0]] and seen["attention_mask"].tolist()[1] == [1, 1, 1, 0]
 
 
+def test_onnx_embedder_gives_a_decoder_an_empty_key_value_cache():
+    """Qwen3's export also takes past_key_values.N.key/value; with no past, each is an empty [batch, heads, 0, dims]."""
+    np = pytest.importorskip("numpy")
+    pytest.importorskip("tokenizers")
+    from tokenizers import Tokenizer, models, pre_tokenizers
+
+    tok = Tokenizer(models.WordLevel({"<|endoftext|>": 0, "tea": 1, "[UNK]": 2}, unk_token="[UNK]"))
+    tok.pre_tokenizer = pre_tokenizers.Whitespace()
+    seen = {}
+
+    class Input:
+        def __init__(self, name, shape=(), type="tensor(int64)"):
+            self.name, self.shape, self.type = name, list(shape), type
+
+    class Session:
+        def get_inputs(self):
+            return [Input("input_ids"), Input("attention_mask"), Input("position_ids"),
+                    Input("past_key_values.0.key", ("batch_size", 8, "past_sequence_length", 128), "tensor(float)"),
+                    Input("past_key_values.0.value", ("batch_size", 8, "past_sequence_length", 128), "tensor(float16)")]
+
+        def get_outputs(self):
+            return [Input("last_hidden_state"), Input("present.0.key")]
+
+        def run(self, names, feeds):
+            seen.update(feeds)
+            ids = feeds["input_ids"]
+            return [np.stack([ids + 1, ids * 0 + 1], axis=-1).astype(np.float32)]
+
+    e = embed.OnnxEmbedder(local.BY_ID["qwen3-embedding-0.6b"], session=Session(), tokenizer=tok)
+    assert len(e.embed(["tea", "tea tea"], "passage")) == 2
+    assert seen["past_key_values.0.key"].shape == (2, 8, 0, 128) and seen["past_key_values.0.key"].dtype == np.float32
+    assert seen["past_key_values.0.value"].dtype == np.float16
+    assert embed.empty_past(("batch_size", 8, "past_sequence_length", 128), 3) == [3, 8, 0, 128]
+
+
 # ---- panel routes and CLI ----------------------------------------------------------------------------------
 
 

@@ -2,6 +2,10 @@
 
 What changed in each release, for people who use OpenMyMemo. Every release is also on [GitHub](https://github.com/MyMemoAI/openmymemo/releases).
 
+## Unreleased
+
+- Search by meaning with Qwen3-Embedding 0.6B works. Its model expects an empty key/value cache alongside the text, which OpenMyMemo didn't pass, so it couldn't embed anything and search fell back to keywords.
+
 ## 0.2.7 — 2026-10-18
 
 - **OpenMyMemo Assistant (optional, off by default).** Settings → Assistant (in a browser, at the bottom of the Connectors page) or `openmymemo assistant set` lets OpenMyMemo use a model: one on this computer (Ollama, LM Studio, llama.cpp, vLLM or any other OpenAI-compatible server), or your own API key for Anthropic or any OpenAI-compatible service. "Test" sends one tiny request and shows the model and how long it took. Everything keeps working without it.
