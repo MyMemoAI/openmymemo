@@ -207,7 +207,7 @@ const strings: Record<string, string> = {
   "sem.on": "Search by meaning is on.",
   "ast.featureHelp.check": "A quick second look at what AI apps propose: duplicates and contradictions, a topic when they give none, and anything that looks sensitive waits for you. At most 2 seconds; otherwise the usual rules.",
   "ast.featureHelp.session": "When a Claude Code or Codex session ends, saves what it taught about you that the app didn't. Asked per app.",
-  "ast.featureHelp.tidy": "Coming in a later release: suggests merges and updates to keep memory tidy.",
+  "ast.featureHelp.tidy": "Looks through your memories and files one batch of changes: merges near-duplicates, replaces contradicted memories, adds review dates and shortens long ones. Changes to memories you wrote wait for you; the rest can be undone. Run it with Tidy up on the Changes page.",
   "ast.private": "Private topics",
   "ast.privateLocal": "Private topics are never sent unless you pick them here. Only a model on this computer can read them.",
   "ast.privateRemote": "Private topics are never sent to a model outside this computer.",
