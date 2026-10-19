@@ -2,7 +2,9 @@
 
 ``assistant.json`` (mode 0600) sits next to MyMemo Cloud's ``cloud.json`` in ``cloud.cloud_dir()``, so
 ``OPENMYMEMO_CLOUD_DIR`` moves both. On macOS the API key (and the MyMemo token) go in the login Keychain when the
-``security`` tool is there and the key is plain ASCII; otherwise they stay in the 0600 file. ``OPENMYMEMO_ASSISTANT_*``
+``security`` tool is there and the key is plain ASCII; otherwise they stay in the 0600 file. MyMemo's hosted model
+(§17.8) keeps its access and refresh tokens the same way, and the rest of its sign-in (service, expiry, account, any
+pause the service asked for) under ``mymemo`` in the file; ``mymemo.py`` manages them. ``OPENMYMEMO_ASSISTANT_*``
 environment variables override the file for scripts, and the panel shows those fields as set from outside.
 
 Keys this version doesn't know are kept when the file is rewritten, so a newer OpenMyMemo's settings survive an
@@ -49,7 +51,7 @@ DEFAULT_URLS = {
 }
 MYMEMO_PATH = "/openmymemo/assistant/v1"
 KEYCHAIN_SERVICE = "OpenMyMemo Assistant"
-SECRETS = {"api_key": "api-key", "mymemo_token": "mymemo-token"}  # field → Keychain account
+SECRETS = {"api_key": "api-key", "mymemo_token": "mymemo-token", "mymemo_refresh": "mymemo-refresh"}  # → Keychain
 _SAFE_SECRET = re.compile(r"[A-Za-z0-9._~+/=:-]{1,512}")
 ENV = "OPENMYMEMO_ASSISTANT_"
 
@@ -79,7 +81,9 @@ class Settings:
     # empty: none. Not for Anthropic's API or MyMemo's hosted model, which have no embeddings.
     embeddings_model: str = ""
     api_key: str = field(default="", repr=False)
-    mymemo_token: str = field(default="", repr=False)
+    mymemo_token: str = field(default="", repr=False)  # MyMemo's access token
+    mymemo_refresh: str = field(default="", repr=False)
+    mymemo: dict[str, Any] = field(default_factory=dict)  # MyMemo's sign-in: service, expires_at, via, account, hold
     features: dict[str, bool] = field(default_factory=lambda: dict(DEFAULT_FEATURES))
     private_topics: list[str] = field(default_factory=list)  # opted in, for a model on this computer only
     caps: dict[str, int | None] = field(default_factory=lambda: dict(DEFAULT_CAPS))
@@ -98,10 +102,13 @@ class Settings:
     @property
     def endpoint(self) -> str:
         """The base URL calls go to."""
-        if self.kind == "mymemo":
+        if self.kind == "mymemo":  # the service signed in to, else MyMemo Cloud's choice (§16.11)
             from ..cloud import service_url
 
-            return (self.base_url or service_url()).rstrip("/") + ("" if self.base_url else MYMEMO_PATH)
+            if self.base_url:
+                return self.base_url.rstrip("/")
+            service = self.mymemo.get("service") if isinstance(self.mymemo.get("service"), str) else ""
+            return (service or service_url()).rstrip("/") + MYMEMO_PATH
         return (self.base_url or DEFAULT_URLS.get((self.kind, self.protocol), "")).rstrip("/")
 
     @property
@@ -128,7 +135,7 @@ class Settings:
         """Why calls can't be made with these settings, for the person; None when they can."""
         if self.kind == "mymemo":
             if not self.mymemo_token:
-                return "MyMemo's hosted model isn't available yet."
+                return "Sign in to MyMemo to use its hosted model."
         elif not self.model:
             return "Choose a model."
         bad = url_problem(self.endpoint, self.kind)
@@ -295,6 +302,8 @@ def _from_raw(data: Mapping[str, Any]) -> Settings:
         s.caps = {k: _cap(caps.get(k, DEFAULT_CAPS[k])) for k in DEFAULT_CAPS}
     if isinstance(data.get("usage"), dict):
         s.usage = dict(data["usage"])
+    if isinstance(data.get("mymemo"), dict):
+        s.mymemo = dict(data["mymemo"])
     if isinstance(data.get("timeout"), int | float) and not isinstance(data.get("timeout"), bool):
         s.timeout = min(max(float(data["timeout"]), 5.0), 600.0)
     if isinstance(data.get("check_budget"), int | float) and not isinstance(data.get("check_budget"), bool):
@@ -309,7 +318,7 @@ def _from_raw(data: Mapping[str, Any]) -> Settings:
         else:
             value = data.get(name) if isinstance(data.get(name), str) else ""
         setattr(s, name, value)
-        if name == ("mymemo_token" if s.kind == "mymemo" else "api_key") and value:
+        if name == ("mymemo_token" if s.kind == "mymemo" else "api_key") and value:  # (not the refresh token)
             s.key_store = "keychain" if where == "keychain" else "file"
     return s
 
@@ -462,25 +471,30 @@ def save_settings(*, enabled: bool | None = None, kind: str | None = None, proto
             stored = raw.get("session_apps") if isinstance(raw.get("session_apps"), dict) else {}
             raw["session_apps"] = {**stored, **session_apps}
         for name, value in (("api_key", api_key), ("mymemo_token", mymemo_token)):
-            if value is None:
-                continue
-            value = value.strip()
-            if len(value) > 4096 or any(c.isspace() for c in value):
-                raise SettingsError("That doesn't look like a key.")
-            account = SECRETS[name]
-            if raw.get(f"{name}_in") == "keychain":
-                keychain_delete(account)
-            raw.pop(name, None)
-            raw.pop(f"{name}_in", None)
-            if value and keychain_set(account, value):
-                raw[f"{name}_in"] = "keychain"
-            elif value:
-                raw[name] = value
-                raw[f"{name}_in"] = "file"
+            if value is not None:
+                set_secret(raw, name, value)
         if enabled is not None:
             raw["enabled"] = bool(enabled)
         _write(raw)
     return load_settings()
+
+
+def set_secret(raw: dict[str, Any], name: str, value: str) -> None:
+    """Put one secret (a ``SECRETS`` field) into the raw settings: the Keychain when it can, else the file; ``""``
+    removes it from both. Raises SettingsError for something that isn't a key. Call it under ``_lock``."""
+    value = value.strip()
+    if len(value) > 4096 or any(c.isspace() for c in value):
+        raise SettingsError("That doesn't look like a key.")
+    account = SECRETS[name]
+    if raw.get(f"{name}_in") == "keychain":
+        keychain_delete(account)
+    raw.pop(name, None)
+    raw.pop(f"{name}_in", None)
+    if value and keychain_set(account, value):
+        raw[f"{name}_in"] = "keychain"
+    elif value:
+        raw[name] = value
+        raw[f"{name}_in"] = "file"
 
 
 def _usage_of(raw: Mapping[str, Any]) -> dict[str, Any]:

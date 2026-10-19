@@ -7,7 +7,8 @@ without a CORS preflight, which we never grant), and ``/mcp`` requires a connect
 
 ``/cloud/callback`` is where the browser comes back after signing in to MyMemo (product-design.md §16.4). It is
 a navigation, so it can't carry the header; it isn't under ``/api/``, it still needs a localhost ``Host``, and it
-does nothing unless its ``state`` matches a link this process started in the last ten minutes, once.
+does nothing unless its ``state`` matches a link this process started in the last ten minutes, once. The OpenMyMemo
+Assistant's MyMemo sign-in (product-design.md §17.8) comes back to the same address; its ``state`` says which it is.
 """
 
 from __future__ import annotations
@@ -31,7 +32,9 @@ from pydantic import BaseModel
 from . import __version__, clients, memfiles, transfer
 from .assistant import Assistant, SettingsError, ensure_connector, save_settings, tidy
 from .assistant import features as assistant_features
+from .assistant import mymemo as assistant_mymemo
 from .cloud import CALLBACK_HEADERS, Cloud, CloudError, SettingLocked, callback_page
+from .cloud import load_link as cloud_link
 from .connectors import Connector, Connectors
 from .context import compile_context
 from .mcp_server import build_server
@@ -210,6 +213,10 @@ class SemanticPatch(BaseModel):
     accept_terms: bool = False
 
 
+class AssistantSignInIn(BaseModel):
+    browser: bool = False  # sign in with the browser even when this computer is linked to MyMemo Cloud
+
+
 class TidyIn(BaseModel):
     dry_run: bool = False
     topic: str | None = None
@@ -235,6 +242,7 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
     connectors = Connectors(vault)
     proposals = Proposals(vault)
     base_url = f"http://127.0.0.1:{port}"
+    signin = assistant_mymemo.SignIn()
 
     @api.middleware("http")
     async def guard(request: Request, call_next):
@@ -518,20 +526,22 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
 
     @api.get("/cloud/callback", include_in_schema=False)
     def cloud_callback(request: Request) -> HTMLResponse:
-        outcome = cloud.callback(dict(request.query_params))
+        params = dict(request.query_params)
+        if signin.owns(params.get("state")):  # the Assistant's sign-in to MyMemo, not a Cloud link
+            outcome = signin.finish(params, keep=assistant_mymemo.keep_signin)
+        else:
+            outcome = cloud.callback(params)
         return HTMLResponse(callback_page(outcome), status_code=outcome.status, headers=CALLBACK_HEADERS)
 
     # ---- OpenMyMemo Assistant (product-design.md §17) --------------------------------------------------------
 
     @api.get("/api/assistant")
     def get_assistant() -> dict:
-        return Assistant.from_settings(vault).status()
+        return assistant_status()
 
     @api.patch("/api/assistant")
     def patch_assistant(body: AssistantPatch) -> dict:
         changes = body.model_dump(exclude_unset=True)
-        if body.kind == "mymemo":  # its sign-in comes with MyMemo's hosted model (§17.8)
-            raise HTTPException(400, "MyMemo's hosted model isn't available yet.")
         if "caps" in changes:
             changes["caps"] = body.caps.model_dump(exclude_unset=True) if body.caps else {}
         try:
@@ -541,7 +551,7 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
         if settings.enabled:
             # Registered when first turned on; turning it on again here is the explicit re-grant after a removal.
             ensure_connector(vault, regrant=bool(changes.get("enabled")))
-        return Assistant(vault, settings).status()
+        return assistant_status()
 
     @api.post("/api/assistant/sessions/{app_id}")
     def assistant_session_consent(app_id: str, body: dict[str, bool]) -> dict:
@@ -557,6 +567,39 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
     @api.post("/api/assistant/test")
     def test_assistant() -> dict:
         return Assistant.from_settings(vault).test()
+
+    def assistant_status() -> dict:
+        s = Assistant.from_settings(vault).status()
+        if s["mymemo"] is not None:
+            s["mymemo"]["pending"] = signin.pending()
+            s["mymemo"]["signin_error"] = signin.error
+        return s
+
+    @api.post("/api/assistant/mymemo/signin")
+    def assistant_signin(body: AssistantSignInIn | None = None) -> dict:
+        """Sign in to MyMemo for its hosted model (§17.8): with this computer's MyMemo Cloud link when there is one
+        (no browser), else ``{"url"}`` for the panel to open; the browser comes back to /cloud/callback."""
+        link = None if body and body.browser else cloud_link()
+        if link is not None:
+            done = assistant_mymemo.exchange(link)
+            if done == "signed_in":
+                return {"signed_in": True, "url": None, "assistant": assistant_status()}
+            if done != "use_browser":
+                raise HTTPException(502, assistant_mymemo.EXCHANGE_MESSAGES[done])
+        url = signin.begin(f"http://127.0.0.1:{port}/cloud/callback")
+        return {"signed_in": False, "url": url, "assistant": assistant_status()}
+
+    @api.get("/api/assistant/mymemo")
+    def assistant_account() -> dict:
+        """The model, plan and this period's usage, as MyMemo answers them (``GET /models``)."""
+        a = Assistant.from_settings(vault)
+        if a.settings.kind != "mymemo":
+            raise HTTPException(409, "The Assistant doesn't use MyMemo's hosted model.")
+        return {"account": assistant_mymemo.account(a.settings), "assistant": assistant_status()}
+
+    @api.delete("/api/assistant/mymemo")
+    def assistant_signout() -> dict:
+        return {"message": assistant_mymemo.sign_out(), "assistant": assistant_status()}
 
     # ---- search by meaning (product-design.md §17.4) -----------------------------------------------------------
 

@@ -1,0 +1,43 @@
+{
+  "note": "GET /openmymemo/assistant/v1/models with the Assistant's bearer token. The numbers are placeholders, not the plan's real allowance or limits: OpenMyMemo shows whatever the service answers. `member` is optional: when the service names the signed-in account (masked), OpenMyMemo shows it; without it, OpenMyMemo shows only the service's host.",
+  "response": {
+    "object": "list",
+    "data": [
+      {
+        "id": "claude-haiku-5-5",
+        "object": "model",
+        "created": 0,
+        "owned_by": "anthropic",
+        "display_name": "Claude Haiku 5.5",
+        "provider": "Anthropic"
+      }
+    ],
+    "model": "claude-haiku-5-5",
+    "display_name": "Claude Haiku 5.5",
+    "provider": "Anthropic",
+    "plan": {
+      "status": "active",
+      "active": true,
+      "period_start": "2026-10-01T00:00:00Z",
+      "period_end": "2026-11-01T00:00:00Z",
+      "resets_at": "2026-11-01T00:00:00Z",
+      "cancel_at_period_end": false,
+      "plan_url": "https://app.mymemo.ai/openmymemo/assistant"
+    },
+    "usage": {
+      "input_tokens": 1200,
+      "output_tokens": 340,
+      "input_tokens_included": 10000,
+      "output_tokens_included": 2000,
+      "requests": 7
+    },
+    "limits": {
+      "requests_per_minute": 10,
+      "requests_per_day": 100
+    }
+  },
+  "member": {
+    "display_name": "Bob",
+    "email_masked": "b***@example.com"
+  }
+}

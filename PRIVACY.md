@@ -55,7 +55,7 @@ OpenMyMemo's server listens only on `127.0.0.1`, so other devices cannot reach i
   These are ordinary download requests. Like any `uv` download, they carry `uv`'s usual client information, such as its version and your operating system. No memory is sent.
 - **Links you click.** The panel and the Mac app open documentation and download pages in your browser. Install links open the AI app they belong to directly (for example `cursor://` or `vscode:`), never a website, because they carry the command that starts OpenMyMemo and with it the path of your memory folder.
 - **MyMemo Cloud**, only after you turn it on and link this computer (see below).
-- **The OpenMyMemo Assistant**, only after you turn it on with a model that isn't on your computer (see below).
+- **The OpenMyMemo Assistant**, only after you turn it on with a model that isn't on your computer (see below). With MyMemo's hosted model, signing in and refreshing the sign-in also talk to the MyMemo service.
 - **Search by meaning on this computer**, only when you turn it on or switch models: it downloads the model you chose from Hugging Face (huggingface.co and the storage it redirects to), at a fixed address, and checks each file against a SHA-256 checksum in OpenMyMemo's code, deleting a file that doesn't match. If ONNX Runtime isn't installed, it is downloaded from PyPI the same way OpenMyMemo's other libraries are. These are ordinary downloads: no memory and nothing about you is sent, beyond what any download carries (your IP address, and the client's name). Searching with it happens entirely on your computer.
 
 ## MyMemo Cloud (optional)
@@ -87,7 +87,7 @@ The OpenMyMemo Assistant uses a model to help with imports, sorting and search, 
 | Off (the default) | Nowhere |
 | On this computer (Ollama, LM Studio, llama.cpp, vLLM, …) | Only to the model server on your computer. OpenMyMemo checks that its address is local and never follows a redirect elsewhere. |
 | Your own API key (Anthropic, or any OpenAI-compatible service) | To that provider, under its terms and privacy policy. |
-| MyMemo's hosted model | Coming. This section will describe it before it is available. |
+| MyMemo's hosted model | To MyMemo's service, which passes it to Anthropic's Claude models to answer. See "MyMemo's hosted model" below. |
 
 - **What is sent:** for each request, the text a feature works on, with the names of your topics (never private ones):
   - imports and sorting: what you paste or the file you import, or the imported memories being sorted;
@@ -99,6 +99,18 @@ The OpenMyMemo Assistant uses a model to help with imports, sorting and search, 
 - **Never sent to a model outside your computer:** private topics (`health` and `finance` by default) and memories marked private. OpenMyMemo refuses a request that contains any part of them, however it is worded or formatted, and that includes archived memories, earlier versions and proposed changes, whatever a feature asks. Memories in topics you have kept the Assistant from reading are treated the same way, and topics it can't read aren't even named to the model. A model on your computer gets only the private topics you pick in its settings.
 - **Its access:** the Assistant appears on the Connectors page as "OpenMyMemo Assistant". You can limit which topics it reads, make it read-only or remove its access, as for any app. Anything it changes is a proposal you can review and undo, and it never writes into a private topic.
 - **Your key** stays on your computer (see above) and is sent only to the endpoint you chose.
+
+### MyMemo's hosted model
+
+You can choose MyMemo's hosted model in Settings → Assistant, or with `openmymemo assistant signin`. It is a MyMemo service with its own monthly plan, the OpenMyMemo Assistant plan. Nothing is sent until you choose it and sign in.
+
+- **Signing in.** If this computer is linked to MyMemo Cloud, OpenMyMemo trades the link's device token for a sign-in that can only reach the model, with no browser. Otherwise your browser opens MyMemo's sign-in page with this computer's name. The service returns an access token and a refresh token. They are kept on your computer like an API key (in the Keychain on a Mac, otherwise in `assistant.json`), never in your memory folder, and sent only to that service.
+- **For each request,** OpenMyMemo sends the service the text a feature works on (as above) and the feature's name, such as "import" or "sort". The service passes the text to Anthropic's Claude models to answer and returns the answer. Private topics are never sent, as for any model outside your computer.
+- **What MyMemo keeps.** The service doesn't keep the text or the answer after answering. It keeps metadata only: your account, the feature, the model, token counts, the time and whether it worked, which it uses for your plan's usage and limits. It shows OpenMyMemo your plan and this period's usage, and OpenMyMemo shows them in Settings → Assistant.
+- **Anthropic** processes the text to answer it, under its terms as MyMemo's provider.
+- **Signing out** asks the service to revoke the sign-in and deletes both tokens from your computer. MyMemo Cloud, if linked, stays linked.
+
+How MyMemo handles your account and its metadata is governed by [MyMemo's privacy policy](https://mymemo.ai/privacy-policy/).
 
 ## Your choices
 

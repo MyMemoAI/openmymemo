@@ -466,9 +466,56 @@ export interface AssistantStatus {
   where: string;
   connector_id: string | null;
   revoked: boolean;
-  /** Which choices can be picked; MyMemo's hosted model is false until it ships. */
+  /** Which choices can be picked. */
   kinds: Record<AssistantKind, boolean>;
+  /** MyMemo's hosted model (product-design.md §17.8), when it is the chosen kind; never a token. */
+  mymemo?: AssistantMyMemo | null;
 }
+
+/** The service's reason to pause MyMemo's hosted model: features use their rules until `until`. */
+export interface AssistantHold {
+  code: "plan_required" | "quota_exceeded" | "rate_limited" | "unavailable";
+  message: string;
+  plan_url: string | null;
+  resets_at: string | null;
+  until: string;
+}
+
+export interface AssistantMyMemo {
+  signed_in: boolean;
+  service: string;
+  /** cloud: the token came from this computer's MyMemo Cloud link; browser: a sign-in in the browser; env: OPENMYMEMO_ASSISTANT_API_KEY. */
+  via: "cloud" | "browser" | "env" | null;
+  /** The MyMemo account, when known (from the MyMemo Cloud link): its name and masked email. */
+  account: { display_name?: string; email_masked?: string } | null;
+  signed_in_at: string | null;
+  /** "expired": MyMemo stopped accepting the sign-in, so this computer signed out. */
+  signed_out: string | null;
+  cloud_linked: boolean;
+  hold: AssistantHold | null;
+  /** A browser sign-in started in this panel is waiting for the browser to come back. */
+  pending?: boolean;
+  signin_error?: string | null;
+}
+
+/** MyMemo's answer about its hosted model, the plan and this period's usage (`GET /models`), as it gave it. */
+export type AssistantAccount =
+  | {
+      ok: true;
+      model: string | null;
+      display_name: string | null;
+      provider: string | null;
+      plan: {
+        status: string | null; active: boolean; period_start: string | null; period_end: string | null;
+        resets_at: string | null; cancel_at_period_end: boolean; plan_url: string | null;
+      };
+      usage: {
+        input_tokens: number | null; output_tokens: number | null; input_tokens_included: number | null;
+        output_tokens_included: number | null; requests: number | null;
+      };
+      limits: { requests_per_minute: number | null; requests_per_day: number | null };
+    }
+  | { ok: false; error: string; signed_out: boolean };
 
 export interface AssistantPatch {
   enabled?: boolean;
@@ -628,6 +675,12 @@ export const api = {
   assistantSettings: (body: AssistantPatch) => req<AssistantStatus>("PATCH", "/api/assistant", body),
   /** One tiny request to the configured model: its name and how long it took. */
   assistantTest: () => req<AssistantTest>("POST", "/api/assistant/test"),
+  /** Sign in to MyMemo: done at once with this computer's MyMemo Cloud link, else a page to open in the browser. */
+  assistantSignIn: (browser = false) =>
+    req<{ signed_in: boolean; url: string | null; assistant: AssistantStatus }>("POST", "/api/assistant/mymemo/signin", { browser }),
+  assistantAccount: () =>
+    req<{ account: AssistantAccount; assistant: AssistantStatus }>("GET", "/api/assistant/mymemo"),
+  assistantSignOut: () => req<{ message: string; assistant: AssistantStatus }>("DELETE", "/api/assistant/mymemo"),
   /** Allow or decline reading an app's sessions when they end. */
   assistantSessions: (app: SessionApp, allow: boolean) =>
     req<AssistantStatus>("POST", `/api/assistant/sessions/${enc(app)}`, { allow }),

@@ -432,10 +432,15 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def _request(method: str, url: str, *, token: str | None = None, body: dict | None = None,
-             timeout: float = 20.0, follow_redirects: bool = True) -> tuple[int, Any]:
-    data = json.dumps(body).encode() if body is not None else None
+             timeout: float = 20.0, follow_redirects: bool = True, form: dict | None = None) -> tuple[int, Any]:
+    """One request to the service: ``body`` is sent as JSON, ``form`` as an HTML form (the OAuth endpoints)."""
     headers = {"Accept": "application/json", "User-Agent": f"OpenMyMemo/{__version__}"}
-    if data is not None:
+    data = None
+    if form is not None:
+        data = urlencode(form).encode()
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
+    elif body is not None:
+        data = json.dumps(body).encode()
         headers["Content-Type"] = "application/json"
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -504,10 +509,21 @@ class Outcome:
     message: str
     link: Link | None = None
     used: bool = False  # it answered a link this process started (so that link is over)
+    result: Any = None  # what another kind of sign-in made (the Assistant's tokens), when it isn't a Link
+
+    @property
+    def ok(self) -> bool:
+        return self.link is not None or self.result is not None
 
 
 class Linker:
-    """Links started in this process. Each ``state`` answers one callback, within ten minutes."""
+    """Links started in this process. Each ``state`` answers one callback, within ten minutes. The OpenMyMemo
+    Assistant's sign-in (``assistant.mymemo.SignIn``) is a subclass with its own ``begin`` and ``_exchange``."""
+
+    STALE = ("It was already used, or it is more than ten minutes old. Start again in OpenMyMemo: "
+             "Connectors → MyMemo Cloud → Sign in.")
+    FAILED = "MyMemo didn't link this computer"
+    CANCELLED = ("Linking was cancelled", "Nothing was linked. You can close this tab.")
 
     def __init__(self, ttl: float = LINK_TTL):
         self.ttl = ttl
@@ -543,6 +559,12 @@ class Linker:
             self._expire()
             return bool(self._pending)
 
+    def owns(self, state: str | None) -> bool:
+        """Whether ``state`` belongs to a sign-in this linker started and is still waiting for."""
+        with self._lock:
+            self._expire()
+            return bool(state) and state in self._pending
+
     def _take(self, state: str) -> PendingLink | None:
         with self._lock:
             self._expire()
@@ -554,35 +576,40 @@ class Linker:
         with self._finishing:
             p = self._take(params.get("state") or "")
             if p is None:
-                return Outcome(400, "This sign-in link isn't valid anymore",
-                               "It was already used, or it is more than ten minutes old. Start again in OpenMyMemo: "
-                               "Connectors → MyMemo Cloud → Sign in.")
+                return Outcome(400, "This sign-in link isn't valid anymore", self.STALE)
             outcome = self._exchange(p, params, before_exchange)
             outcome.used = True
-            if outcome.link is None:
+            if not outcome.ok:
                 self.error = outcome.message
                 return outcome
             if keep:
-                keep(outcome.link)
+                keep(outcome.link if outcome.link is not None else outcome.result)
             with self._lock:  # linked: any other sign-in still open in a browser tab is stale now
                 self._pending.clear()
             return outcome
 
-    def _exchange(self, p: PendingLink, params: Mapping[str, str],
-                  before_exchange: Callable[[], None] | None) -> Outcome:
+    def _code(self, p: PendingLink, params: Mapping[str, str]) -> str | Outcome:
+        """The authorization code from the browser's answer, once it is checked; an Outcome when it can't be used."""
         if params.get("error"):
             why = params.get("error_description") or params["error"]
             if params["error"] == "access_denied":
-                return Outcome(400, "Linking was cancelled", "Nothing was linked. You can close this tab.")
-            return Outcome(400, "MyMemo didn't link this computer", f"{why[:300]}. You can close this tab.")
+                return Outcome(400, *self.CANCELLED)
+            return Outcome(400, self.FAILED, f"{why[:300]}. You can close this tab.")
         iss = params.get("iss") or ""
         if iss != p.service:  # RFC 9207: MyMemo always says who answered, and it must be the server we asked
-            return Outcome(400, "MyMemo didn't link this computer",
+            return Outcome(400, self.FAILED,
                            "The answer came from an unexpected server, so OpenMyMemo ignored it." if iss else
                            "The answer didn't say it came from MyMemo, so OpenMyMemo ignored it.")
         code = params.get("code") or ""
         if not code:
-            return Outcome(400, "MyMemo didn't link this computer", "The answer had no code.")
+            return Outcome(400, self.FAILED, "The answer had no code.")
+        return code
+
+    def _exchange(self, p: PendingLink, params: Mapping[str, str],
+                  before_exchange: Callable[[], None] | None) -> Outcome:
+        code = self._code(p, params)
+        if isinstance(code, Outcome):
+            return code
         if before_exchange:
             before_exchange()
         try:
@@ -607,7 +634,7 @@ class Linker:
 
 def callback_page(outcome: Outcome) -> str:
     title, message = html.escape(outcome.title), html.escape(outcome.message)
-    mark = "✓" if outcome.link else "!"
+    mark = "✓" if outcome.ok else "!"
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title} · OpenMyMemo</title>
@@ -1321,10 +1348,20 @@ class Cloud:
 def link_with_listener(vault: Vault, open_url: Callable[[str], Any], timeout: float = LINK_TTL,
                        service: str | None = None) -> Outcome:
     """Link this computer when no panel is running: a short-lived listener on 127.0.0.1 takes the callback."""
+    linker = Linker(ttl=timeout)
+    return listen_for_callback(
+        linker, lambda redirect_uri: linker.begin(vault.root, redirect_uri, service),
+        lambda link: keep_link(vault, link), open_url, timeout,
+        "Nobody signed in within ten minutes. Run `openmymemo cloud link` again.")
+
+
+def listen_for_callback(linker: Linker, begin: Callable[[str], str], keep: Callable[[Any], None],
+                        open_url: Callable[[str], Any], timeout: float, timeout_message: str) -> Outcome:
+    """A sign-in without a panel: a short-lived listener on 127.0.0.1 takes ``/cloud/callback`` for ``linker``.
+    ``begin(redirect_uri)`` returns the URL to open; ``keep`` saves what the sign-in made."""
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     from urllib.parse import parse_qsl
 
-    linker = Linker(ttl=timeout)
     done = threading.Event()
     result: dict[str, Outcome] = {}
     hosts: set[str] = set()
@@ -1346,7 +1383,7 @@ def link_with_listener(vault: Vault, open_url: Callable[[str], Any], timeout: fl
             url = urlsplit(self.path)
             if url.path != "/cloud/callback":
                 return self._reply(404, "Not found")
-            outcome = linker.finish(dict(parse_qsl(url.query)), keep=lambda link: keep_link(vault, link))
+            outcome = linker.finish(dict(parse_qsl(url.query)), keep=keep)
             self._reply(outcome.status, callback_page(outcome), CALLBACK_HEADERS)
             if outcome.used:
                 result["outcome"] = outcome
@@ -1358,13 +1395,13 @@ def link_with_listener(vault: Vault, open_url: Callable[[str], Any], timeout: fl
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     port = server.server_address[1]
     hosts.update({f"127.0.0.1:{port}", f"localhost:{port}", f"[::1]:{port}"})
-    url = linker.begin(vault.root, f"http://127.0.0.1:{port}/cloud/callback", service)
+    url = begin(f"http://127.0.0.1:{port}/cloud/callback")
     thread = threading.Thread(target=server.serve_forever, name="openmymemo-cloud-link", daemon=True)
     thread.start()
     try:
         open_url(url)
         if not done.wait(timeout):
-            return Outcome(408, "Timed out", "Nobody signed in within ten minutes. Run `openmymemo cloud link` again.")
+            return Outcome(408, "Timed out", timeout_message)
         return result["outcome"]
     finally:
         server.shutdown()
