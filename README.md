@@ -29,7 +29,7 @@ There are two ways in. Both use the same memory folder, the same panel and the s
 
 For everyone: no terminal, no config files, no Python to install.
 
-1. Download `OpenMyMemo-<version>-arm64.dmg` from the [latest release](https://github.com/MyMemoAI/openmymemo/releases/latest) (a Mac with Apple silicon, macOS 12 or later).
+1. Download the disk image for your Mac from the [latest release](https://github.com/MyMemoAI/openmymemo/releases/latest): `OpenMyMemo-<version>-arm64.dmg` for Apple silicon (M1 and later) or `OpenMyMemo-<version>-x86_64.dmg` for an Intel Mac, macOS 12 or later. (Apple menu → About This Mac shows which: "Chip: Apple …" or "Processor: … Intel …".)
 2. Open it and drag OpenMyMemo to Applications. (Opened straight from the disk image, it offers to move itself there.)
 3. Open OpenMyMemo from Applications. Release builds are signed and notarized and open like any app. A build without a Developer ID signature (one you built, or a fork's) needs one extra step the first time: on macOS 15 and later, try to open it, then go to System Settings → Privacy & Security and click **Open Anyway**; on earlier versions, right-click the app and choose **Open**.
 4. The first start downloads Python and the libraries OpenMyMemo runs on, about 25 MB and usually under a minute, into `~/Library/Application Support/ai.mymemo.openmymemo/`. It happens once; after that the app starts in a couple of seconds, also offline.
@@ -172,7 +172,7 @@ openmymemo semantic off                         # deletes the model and the inde
 openmymemo recall "what do I like to drink?" --max-chars 1500   # ranked, ready for a prompt or a hook
 ```
 
-It downloads an embedding model (and ONNX Runtime, the `openmymemo[semantic]` extra, if it isn't installed) into OpenMyMemo's settings folder on this computer, never into your memory folder, and checks each file's SHA-256. Memory text never leaves the computer. It works with or without the Assistant, and search uses it everywhere: AI apps' `memory_search`, `openmymemo search` and the panel. The index in `.openmymemo/index/` is a cache: it keeps itself out of git and can be deleted at any time. With the Assistant on a server on this computer or your own key, you can instead set an embeddings model at that endpoint (`openmymemo assistant set --embeddings-model nomic-embed-text`).
+It downloads an embedding model (and ONNX Runtime, the `openmymemo[semantic]` extra, if it isn't installed) into OpenMyMemo's settings folder on this computer, never into your memory folder, and checks each file's SHA-256. Memory text never leaves the computer. On an Intel Mac it needs macOS 13 or later, and uses ONNX Runtime 1.23, its last release for Intel Macs; on older ones, an embeddings model at the Assistant's endpoint (below) works instead. It works with or without the Assistant, and search uses it everywhere: AI apps' `memory_search`, `openmymemo search` and the panel. The index in `.openmymemo/index/` is a cache: it keeps itself out of git and can be deleted at any time. With the Assistant on a server on this computer or your own key, you can instead set an embeddings model at that endpoint (`openmymemo assistant set --embeddings-model nomic-embed-text`).
 
 ## What happens when an AI writes
 

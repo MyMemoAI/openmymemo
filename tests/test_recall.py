@@ -2,6 +2,7 @@
 remote embeddings endpoint's privacy rule, local model downloads (fake HTTP, never the network), the switch's CLI
 and panel routes. Real models never run here: ``ConceptEmbedder`` (tests/recall) stands in for one."""
 
+import collections
 import hashlib
 import json
 import sys
@@ -483,6 +484,7 @@ def test_terms_must_be_accepted_before_embeddinggemma_downloads(monkeypatch, tmp
 def test_runtime_install_uses_uv_into_its_own_folder_or_names_the_command(monkeypatch, tmp_path):
     ran = []
     monkeypatch.setattr(local, "runtime_available", lambda: bool(ran))
+    monkeypatch.setattr(local, "runtime_unsupported", lambda: False)
     uv = tmp_path / "uv"
     uv.write_text("#!/bin/sh\n")
     uv.chmod(0o755)
@@ -507,6 +509,51 @@ def test_runtime_install_uses_uv_into_its_own_folder_or_names_the_command(monkey
     with pytest.raises(local.SemanticError) as e:
         local.install_runtime()
     assert e.value.code == "runtime" and "pip install" in str(e.value) and "--target" in str(e.value)
+
+
+def test_an_intel_mac_gets_the_runtime_from_macos_13_and_is_told_before_that(demo, monkeypatch, tmp_path):
+    """ONNX Runtime 1.23, its last release for Intel Macs, needs macOS 13 and Python 3.13 or earlier: there the
+    install goes ahead (the installer picks 1.23); before that, say so instead of failing it or downloading a model."""
+    py = collections.namedtuple("version_info", "major minor micro")
+    monkeypatch.setattr(local.sys, "platform", "darwin")
+    monkeypatch.setattr(local.platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr(local.sys, "version_info", py(3, 12, 9))
+    for version, unsupported in (("13.0", False), ("15.6.1", False), ("12.7.6", True), ("", False)):
+        monkeypatch.setattr(local.platform, "mac_ver", lambda v=version: (v, ("", "", ""), "x86_64"))
+        assert local.runtime_unsupported() is unsupported, version
+    monkeypatch.setattr(local.platform, "mac_ver", lambda: ("14.5", ("", "", ""), "x86_64"))
+    monkeypatch.setattr(local.sys, "version_info", py(3, 14, 0))
+    assert local.runtime_unsupported()
+    monkeypatch.setattr(local.sys, "version_info", py(3, 12, 9))
+    monkeypatch.setattr(local.platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(local.platform, "mac_ver", lambda: ("12.7", ("", "", ""), "arm64"))
+    assert not local.runtime_unsupported()
+
+    # macOS 13 on Intel: the installer runs.
+    monkeypatch.setattr(local.platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr(local.platform, "mac_ver", lambda: ("13.6", ("", "", ""), "x86_64"))
+    ran = []
+    monkeypatch.setattr(local, "runtime_available", lambda: bool(ran))
+    monkeypatch.setattr(local, "install_command", lambda display=False: ["uv", "pip", "install"])
+
+    class Done:
+        returncode = 0
+        stderr = ""
+
+    monkeypatch.setattr(local, "_run", lambda cmd, **kw: ran.append(cmd) or Done())
+    local.install_runtime()
+    assert ran
+
+    # macOS 12 on Intel: told before anything is installed or downloaded.
+    monkeypatch.setattr(local.platform, "mac_ver", lambda: ("12.7.6", ("", "", ""), "x86_64"))
+    monkeypatch.setattr(local, "runtime_available", lambda: False)
+    monkeypatch.setattr(local, "_run", lambda *a, **kw: pytest.fail("nothing is installed"))
+    monkeypatch.setattr(local, "ensure_downloaded", lambda *a, **kw: pytest.fail("nothing is downloaded"))
+    _pin(monkeypatch, tmp_path, FILES)
+    with pytest.raises(local.SemanticError) as e:
+        local.turn_on()
+    assert e.value.code == "runtime" and "Intel Mac" in str(e.value) and "macOS 13" in str(e.value)
+    assert not local.load_semantic().enabled
 
 
 def test_turning_off_deletes_the_model_and_the_index_and_keeps_the_choice(demo, monkeypatch, tmp_path):
@@ -569,6 +616,41 @@ def test_onnx_embedder_prefixes_pools_and_normalizes():
     assert abs(sum(x * x for x in q) - 1) < 1e-6
     e.embed(["tea coffee", "tea"], "passage")
     assert seen["input_ids"].tolist() == [[2, 6, 3, 4], [2, 6, 3, 0]] and seen["attention_mask"].tolist()[1] == [1, 1, 1, 0]
+
+
+def test_onnx_embedder_gives_a_decoder_an_empty_key_value_cache():
+    """Qwen3's export also takes past_key_values.N.key/value; with no past, each is an empty [batch, heads, 0, dims]."""
+    np = pytest.importorskip("numpy")
+    pytest.importorskip("tokenizers")
+    from tokenizers import Tokenizer, models, pre_tokenizers
+
+    tok = Tokenizer(models.WordLevel({"<|endoftext|>": 0, "tea": 1, "[UNK]": 2}, unk_token="[UNK]"))
+    tok.pre_tokenizer = pre_tokenizers.Whitespace()
+    seen = {}
+
+    class Input:
+        def __init__(self, name, shape=(), type="tensor(int64)"):
+            self.name, self.shape, self.type = name, list(shape), type
+
+    class Session:
+        def get_inputs(self):
+            return [Input("input_ids"), Input("attention_mask"), Input("position_ids"),
+                    Input("past_key_values.0.key", ("batch_size", 8, "past_sequence_length", 128), "tensor(float)"),
+                    Input("past_key_values.0.value", ("batch_size", 8, "past_sequence_length", 128), "tensor(float16)")]
+
+        def get_outputs(self):
+            return [Input("last_hidden_state"), Input("present.0.key")]
+
+        def run(self, names, feeds):
+            seen.update(feeds)
+            ids = feeds["input_ids"]
+            return [np.stack([ids + 1, ids * 0 + 1], axis=-1).astype(np.float32)]
+
+    e = embed.OnnxEmbedder(local.BY_ID["qwen3-embedding-0.6b"], session=Session(), tokenizer=tok)
+    assert len(e.embed(["tea", "tea tea"], "passage")) == 2
+    assert seen["past_key_values.0.key"].shape == (2, 8, 0, 128) and seen["past_key_values.0.key"].dtype == np.float32
+    assert seen["past_key_values.0.value"].dtype == np.float16
+    assert embed.empty_past(("batch_size", 8, "past_sequence_length", 128), 3) == [3, 8, 0, 128]
 
 
 # ---- panel routes and CLI ----------------------------------------------------------------------------------

@@ -319,11 +319,30 @@ def manual_command() -> str:
     return " ".join(f'"{a}"' if any(c in a for c in " <>=") else a for a in install_command(display=True) or [])
 
 
+INTEL_MAC = ("Search by meaning on this computer needs ONNX Runtime, which on an Intel Mac needs macOS 13 or later "
+             "(and Python 3.13 or earlier). With the Assistant on a server on this computer or your own key, you can "
+             "set an embeddings model instead.")
+
+
+def runtime_unsupported() -> bool:
+    """Whether ONNX Runtime can't be installed here. Its last release for Intel Macs, 1.23, has packages for macOS 13
+    and later and Python 3.10 to 3.13 only (the installer picks it there by itself)."""
+    if sys.platform != "darwin" or platform.machine().lower() != "x86_64":
+        return False
+    try:
+        macos = tuple(int(x) for x in platform.mac_ver()[0].split(".")[:2])
+    except ValueError:
+        return False  # unknown: let the installer try
+    return macos < (13, 0) or sys.version_info >= (3, 14)
+
+
 def install_runtime() -> None:
     """Install ``onnxruntime`` and ``tokenizers`` into the runtime folder; raises SemanticError (code ``runtime``
     with the command to run, when there is no uv or pip, or the install failed)."""
     if runtime_available():
         return
+    if runtime_unsupported():
+        raise SemanticError(INTEL_MAC, "runtime")
     cmd = install_command()
     if cmd is None:
         raise SemanticError("Search by meaning needs ONNX Runtime and tokenizers. Install them with: "
