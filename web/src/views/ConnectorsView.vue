@@ -13,7 +13,7 @@ import { act, store } from "../store";
 
 /**
  * The AI apps: connect them with one click, then set what each connected one may read and write. In a browser,
- * which has no Settings sheet, the Assistant's and MyMemo Cloud's settings (shown or not, its service) sit at the bottom.
+ * which has no Settings sheet, the Assistant's and OpenMyMemo Cloud's settings (shown or not, its service) sit at the bottom.
  */
 const props = defineProps<{ initialConnector: string | null }>();
 

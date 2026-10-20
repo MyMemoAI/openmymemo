@@ -1,4 +1,4 @@
-"""MyMemo Cloud: the optional connector that lets ChatGPT and claude.ai on the web use this folder
+"""OpenMyMemo Cloud: the optional connector that lets ChatGPT and claude.ai on the web use this folder
 (product-design.md §16).
 
 Nothing here runs until the person links this computer to their MyMemo account. From then on, the process that
@@ -15,7 +15,7 @@ tool calls the service relays from web apps, by running the same tool code as th
   in this process within ten minutes, once. The code is exchanged at ``POST /openmymemo/device/link``, which also
   registers the public key.
 * **The service** is ``OPENMYMEMO_CLOUD_URL``, else the one chosen in Settings (``settings.json`` next to
-  ``cloud.json``, which also says whether MyMemo Cloud is shown at all; §16.11), else https://api.mymemo.ai; the
+  ``cloud.json``, which also says whether OpenMyMemo Cloud is shown at all; §16.11), else https://api.mymemo.ai; the
   bridge is ``/openmymemo/bridge`` on the same host. The wire format is pinned by ``tests/fixtures/cloud/`` (the MyMemo service tests against the same files).
 * **The bridge** runs on a thread of its own, starts once the panel's port is bound (``web.panel_server``) and
   closes with 1000 when the panel stops. It reconnects with backoff and follows the close codes in
@@ -151,15 +151,21 @@ def settings_path() -> Path:
     return cloud_dir() / "settings.json"
 
 
+# settings.json's format: 2 since OpenMyMemo Cloud is listed by default. Version 0.2.8 and older wrote no format,
+# and wrote `"show": false` whenever anything else changed (it was the default then), so their `show` says nothing
+# about what the person chose; only a format-2 file's `show` is taken as theirs.
+SETTINGS_FORMAT = 2
+
+
 def load_settings() -> dict[str, Any]:
-    """This computer's MyMemo Cloud preferences (product-design.md §16.11): ``show`` (the panel and ``openmymemo
-    apps`` list MyMemo Cloud; off until the person turns it on) and ``service`` (None: MyMemo's own)."""
+    """This computer's OpenMyMemo Cloud preferences (product-design.md §16.11): ``show`` (the panel and ``openmymemo
+    apps`` list OpenMyMemo Cloud; on unless the person hid it) and ``service`` (None: MyMemo's own)."""
     try:
         data = json.loads(settings_path().read_text(encoding="utf-8"))
     except FileNotFoundError:
         data = {}
     except (OSError, ValueError) as e:
-        log.warning("MyMemo Cloud: ignoring an unreadable %s (%s)", settings_path(), type(e).__name__)
+        log.warning("OpenMyMemo Cloud: ignoring an unreadable %s (%s)", settings_path(), type(e).__name__)
         data = {}
     if not isinstance(data, dict):
         data = {}
@@ -168,15 +174,23 @@ def load_settings() -> dict[str, Any]:
         service = normalize_service(service) if isinstance(service, str) and service.strip() else None
     except CloudError:
         service = None  # edited by hand into something that can't be used: MyMemo's own
-    return {**data, "show": data.get("show") is True, "service": service}
+    # Hidden only by a hide chosen in a version that lists it by default (a format-2 file's `"show": false`).
+    show = data.get("show") is not False if _settings_format(data) >= SETTINGS_FORMAT else True
+    return {**data, "show": show, "service": service}
+
+
+def _settings_format(data: Mapping[str, Any]) -> int:
+    fmt = data.get("format")
+    return fmt if isinstance(fmt, int) and not isinstance(fmt, bool) else 1
 
 
 def save_settings(*, show: bool | None = None, service: str | None = None, default_service: bool = False) -> dict:
     """Change the preferences; returns them. The service can't change while this computer is linked (the link
-    keeps the service it was made with; unlink first) or while ``OPENMYMEMO_CLOUD_URL`` decides it."""
+    keeps the service it was made with; unlink first) or while ``OPENMYMEMO_CLOUD_URL`` decides it. What is
+    written is format 2, with ``show`` as it is now (an older file's ``show`` was already set aside on loading)."""
     with _link_lock():
         current = load_settings()
-        new = dict(current)
+        new = {**current, "format": max(_settings_format(current), SETTINGS_FORMAT)}
         if show is not None:
             new["show"] = bool(show)
         if default_service or service is not None:
@@ -187,15 +201,16 @@ def save_settings(*, show: bool | None = None, service: str | None = None, defau
                 if os.environ.get("OPENMYMEMO_CLOUD_URL", "").strip():
                     raise SettingLocked("OPENMYMEMO_CLOUD_URL sets the service on this computer; change it there.")
                 if load_link() is not None:
-                    raise SettingLocked("Unlink this computer from MyMemo Cloud before choosing another service.")
+                    raise SettingLocked("Unlink this computer from OpenMyMemo Cloud before choosing another service.")
             new["service"] = chosen
-        if new != current:
+        asked = show is not None or default_service or service is not None  # only showing them writes nothing
+        if asked and new != current:
             _write_private(settings_path(), json.dumps(new, indent=2) + "\n")
         return new
 
 
 def shown() -> bool:
-    """MyMemo Cloud is listed when the person turned it on, and always while this computer is linked."""
+    """OpenMyMemo Cloud is listed unless the person hid it, and always while this computer is linked."""
     return load_settings()["show"] or link_path().exists()
 
 
@@ -260,7 +275,7 @@ def load_link() -> Link | None:
     except FileNotFoundError:
         return None
     except (OSError, ValueError, TypeError, KeyError) as e:
-        log.warning("MyMemo Cloud: ignoring an unreadable %s (%s)", link_path(), type(e).__name__)
+        log.warning("OpenMyMemo Cloud: ignoring an unreadable %s (%s)", link_path(), type(e).__name__)
         return None
 
 
@@ -521,7 +536,7 @@ class Linker:
     Assistant's sign-in (``assistant.mymemo.SignIn``) is a subclass with its own ``begin`` and ``_exchange``."""
 
     STALE = ("It was already used, or it is more than ten minutes old. Start again in OpenMyMemo: "
-             "Connectors → MyMemo Cloud → Sign in.")
+             "Connectors → OpenMyMemo Cloud → Sign in.")
     FAILED = "MyMemo didn't link this computer"
     CANCELLED = ("Linking was cancelled", "Nothing was linked. You can close this tab.")
 
@@ -628,7 +643,7 @@ class Linker:
                     plan={k: plan[k] for k in ("tier", "live", "queue") if k in plan}, linked_at=now_iso())
         return Outcome(200, f"Linked to {link.account}",
                        f"This computer is now linked to {link.account} on MyMemo. If that isn't your MyMemo account, "
-                       "unlink it in OpenMyMemo now (Connectors → MyMemo Cloud → Unlink). Otherwise you can close "
+                       "unlink it in OpenMyMemo now (Connectors → OpenMyMemo Cloud → Unlink). Otherwise you can close "
                        "this tab.", link=link)
 
 
@@ -677,7 +692,7 @@ def unlink() -> str:
     """Tell MyMemo to forget this computer, delete ``cloud.json`` and revoke the web apps. Returns what happened."""
     link = load_link()
     if link is None:
-        return "This computer isn't linked to MyMemo Cloud."
+        return "This computer isn't linked to OpenMyMemo Cloud."
     try:
         status, data = _request("DELETE", f"{link.service}/openmymemo/device", token=link.device_token)
         reached = status in (200, 202, 204, 401, 403, 404)  # 401/403/404: MyMemo had already forgotten it
@@ -686,7 +701,7 @@ def unlink() -> str:
         reached, why = False, f" ({e})"
     forget_link(link.device_id, _linked_vault(link))
     if reached:
-        return "Unlinked this computer from MyMemo Cloud. ChatGPT and claude.ai on the web can't reach your memory anymore."
+        return "Unlinked this computer from OpenMyMemo Cloud. ChatGPT and claude.ai on the web can't reach your memory anymore."
     return ("Unlinked this computer here, but MyMemo couldn't be told" + why.rstrip(".") + ". It stops working either "
             "way; remove it from your MyMemo account settings too.")
 
@@ -869,7 +884,7 @@ class Bridge:
         if c is None:
             from mcp.server.mcpserver.exceptions import ToolError
 
-            raise ToolError("No MyMemo Cloud call in progress.")
+            raise ToolError("No OpenMyMemo Cloud call in progress.")
         return c
 
     def _set(self, state: str, reason: str | None = None) -> None:
@@ -902,7 +917,7 @@ class Bridge:
                     refused = status in (401, 403)  # turned away before the upgrade
                     if status in (429, 503):  # busy (two handshakes already waiting) or a passing failure
                         wait = retry_after(getattr(e, "response", None))
-                    log.info("MyMemo Cloud: couldn't connect (%s%s)", type(e).__name__, f" {status}" if status else "")
+                    log.info("OpenMyMemo Cloud: couldn't connect (%s%s)", type(e).__name__, f" {status}" if status else "")
                 self.close_code = code
                 if online_for >= self.timing.reset_after:
                     attempt = 0
@@ -910,7 +925,7 @@ class Bridge:
                     # Only MyMemo's own word that the device is gone deletes the link; a refusal can also come from
                     # a firewall or proxy in front of it, or from the bridge being switched off for a while.
                     if await asyncio.to_thread(device_gone, self.link):
-                        log.info("MyMemo Cloud: MyMemo no longer knows this computer; unlinking")
+                        log.info("OpenMyMemo Cloud: MyMemo no longer knows this computer; unlinking")
                         self._forget()
                         return self._set("stopped", "unlinked")
                     self._set("waiting", "refused")
@@ -945,7 +960,7 @@ class Bridge:
         try:
             forget_link(self.link.device_id, self.vault)
         except (VaultError, OSError) as e:  # the web apps couldn't be revoked: keep the link, so this is tried again
-            log.warning("MyMemo Cloud: couldn't revoke the web apps (%s)", type(e).__name__)
+            log.warning("OpenMyMemo Cloud: couldn't revoke the web apps (%s)", type(e).__name__)
 
     async def _sleep(self, seconds: float) -> None:
         assert self._wake is not None
@@ -1000,7 +1015,7 @@ class Bridge:
                 self._on_welcome(msg)
                 since = time.monotonic()
                 self._set("online")
-                log.info("MyMemo Cloud: connected")
+                log.info("OpenMyMemo Cloud: connected")
                 items: asyncio.Queue[dict] = asyncio.Queue()
                 drain = asyncio.create_task(self._drain(ws, items))
                 try:
@@ -1039,7 +1054,7 @@ class Bridge:
             try:
                 raw = await asyncio.wait_for(ws.recv(), timeout=self._heartbeat * 2 + 10)
             except TimeoutError:
-                log.info("MyMemo Cloud: no heartbeat from the service; reconnecting")
+                log.info("OpenMyMemo Cloud: no heartbeat from the service; reconnecting")
                 with contextlib.suppress(Exception):
                     await ws.close(4408, "no heartbeat")
                 return
@@ -1084,7 +1099,7 @@ class Bridge:
             except Exception as e:  # noqa: BLE001 - a passing failure (a full disk, a locked file): try it again later
                 # Nothing after it may be filed first, or an older change could land on top of a newer one when it
                 # is sent again. Hang up instead: the service sends the queue again, in order, after reconnecting.
-                log.warning("MyMemo Cloud: couldn't file a queued change (%s); reconnecting", type(e).__name__)
+                log.warning("OpenMyMemo Cloud: couldn't file a queued change (%s); reconnecting", type(e).__name__)
                 await ws.close(1011, "couldn't file a queued change")
                 return
             if outcome is None:
@@ -1134,15 +1149,15 @@ class Bridge:
             try:
                 frame = await asyncio.wait_for(self.answer(call_id, msg), timeout)
             except TimeoutError:  # the service has answered "didn't answer in time" by now
-                log.info("MyMemo Cloud: a relayed call outlived its deadline")
+                log.info("OpenMyMemo Cloud: a relayed call outlived its deadline")
                 return
             except Exception as e:  # noqa: BLE001 - never logs arguments or results, only what kind of failure
-                log.warning("MyMemo Cloud: a relayed call failed (%s)", type(e).__name__)
+                log.warning("OpenMyMemo Cloud: a relayed call failed (%s)", type(e).__name__)
                 frame = _error(call_id, "internal", "OpenMyMemo couldn't answer this call.")
         await self._send(ws, frame)
 
     def _refused(self, client: Mapping[str, Any], op: str, qid: str) -> None:
-        """Record a queued write turned down here, as its web app, or as MyMemo Cloud when that id belongs to an
+        """Record a queued write turned down here, as its web app, or as OpenMyMemo Cloud when that id belongs to an
         app of the person's own."""
         from .clients import CLOUD
 
@@ -1212,7 +1227,7 @@ class Bridge:
 
 
 class Cloud:
-    """MyMemo Cloud in the process that serves the panel for `vault` on `port`: linking, the bridge, status."""
+    """OpenMyMemo Cloud in the process that serves the panel for `vault` on `port`: linking, the bridge, status."""
 
     def __init__(self, vault: Vault, port: int, timing: Timing | None = None):
         self.vault = vault

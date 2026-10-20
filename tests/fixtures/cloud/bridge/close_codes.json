@@ -4,7 +4,7 @@
   "1012": "service restart: reconnect after the bye frame's retry_after_ms (30-60 s); without a bye, after 0-5 s jitter",
   "4400": "protocol error: backoff",
   "4401": "unlinked or token revoked: delete cloud.json, stop",
-  "4403": "plan no longer includes MyMemo Cloud: stop; retry hourly or when the panel asks",
+  "4403": "plan no longer includes OpenMyMemo Cloud: stop; retry hourly or when the panel asks",
   "4408": "heartbeat missed: reconnect",
   "4409": "replaced by a newer connection for this device: don't reconnect",
   "4410": "key_id mismatch: ask the person to re-link",

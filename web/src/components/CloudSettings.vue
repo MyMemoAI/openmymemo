@@ -5,8 +5,8 @@ import { t } from "../i18n";
 import { store, toast } from "../store";
 
 /**
- * MyMemo Cloud in Settings (product-design.md §16.11): whether the Connectors page lists it (off until turned on;
- * always listed while this computer is linked) and which service it links to (MyMemo's own unless chosen).
+ * OpenMyMemo Cloud in Settings (product-design.md §16.11): whether the Connectors page lists it (on unless the person
+ * hides it; always listed while this computer is linked) and which service it links to (MyMemo's own unless chosen).
  */
 const status = ref<CloudStatus | null>(null);
 const draft = ref("");
@@ -24,7 +24,7 @@ async function load() {
     const s = await api.cloud();
     if (mine === seq) take(s);
   } catch {
-    if (mine === seq && !status.value) status.value = null; // an older server without MyMemo Cloud: nothing to set
+    if (mine === seq && !status.value) status.value = null; // an older server without OpenMyMemo Cloud: nothing to set
   }
 }
 onMounted(load);

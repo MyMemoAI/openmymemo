@@ -1,4 +1,4 @@
-"""A fake MyMemo service for the MyMemo Cloud tests, built from tests/fixtures/cloud/ (the MyMemo service tests against the same files).
+"""A fake MyMemo service for the OpenMyMemo Cloud tests, built from tests/fixtures/cloud/ (the MyMemo service tests against the same files).
 
 It runs on 127.0.0.1 in a thread of its own: the link endpoints over HTTP and the bridge over a WebSocket, on one
 port, like the service. Tests drive it from the main thread: authorize a link the way the consent page would, send

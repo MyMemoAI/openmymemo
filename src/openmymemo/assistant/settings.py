@@ -1,6 +1,6 @@
 """The Assistant's settings: per computer, never in the memory folder (product-design.md §17.2).
 
-``assistant.json`` (mode 0600) sits next to MyMemo Cloud's ``cloud.json`` in ``cloud.cloud_dir()``, so
+``assistant.json`` (mode 0600) sits next to OpenMyMemo Cloud's ``cloud.json`` in ``cloud.cloud_dir()``, so
 ``OPENMYMEMO_CLOUD_DIR`` moves both. On macOS the API key (and the MyMemo token) go in the login Keychain when the
 ``security`` tool is there and the key is plain ASCII; otherwise they stay in the 0600 file. MyMemo's hosted model
 (§17.8) keeps its access and refresh tokens the same way, and the rest of its sign-in (service, expiry, account, any
@@ -103,7 +103,7 @@ class Settings:
     @property
     def endpoint(self) -> str:
         """The base URL calls go to."""
-        if self.kind == "mymemo":  # the service signed in to, else MyMemo Cloud's choice (§16.11)
+        if self.kind == "mymemo":  # the service signed in to, else OpenMyMemo Cloud's choice (§16.11)
             from ..cloud import service_url
 
             if self.base_url:

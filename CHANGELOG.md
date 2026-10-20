@@ -2,6 +2,10 @@
 
 What changed in each release, for people who use OpenMyMemo. Every release is also on [GitHub](https://github.com/MyMemoAI/openmymemo/releases).
 
+## Unreleased
+
+- **OpenMyMemo Cloud: your memory in ChatGPT and claude.ai on the web.** MyMemo Cloud is now called OpenMyMemo Cloud, and it is listed on the Connectors page, under "On the web", for everyone. With MyMemo Pro, Ultra or Lifetime, sign in there (or run `openmymemo cloud link`), then add the URL it shows as a custom connector in claude.ai or in ChatGPT. MyMemo relays their calls to OpenMyMemo on your computer: your memory stays there, and the web apps reach it only while OpenMyMemo is running. Listed, it does nothing and contacts nobody until you sign in, and you can hide it in Settings → OpenMyMemo Cloud. It is listed even if you had turned "Show MyMemo Cloud" off before, because older versions saved off as their default too; turn it off again to hide it. `openmymemo connect mymemo-cloud` and the other commands keep their names.
+
 ## 0.2.8 — 2026-10-19
 
 - **The Mac app on Intel Macs.** Each release now has a disk image for Intel Macs, `OpenMyMemo-<version>-x86_64.dmg`, next to the one for Apple silicon (`-arm64.dmg`). Everything works the same. Search by meaning on this computer needs macOS 13 or later on an Intel Mac and uses ONNX Runtime 1.23, its last release for Intel Macs; on macOS 12, turning it on says so instead of failing partway through an install, and an embeddings model at the Assistant's endpoint works instead.

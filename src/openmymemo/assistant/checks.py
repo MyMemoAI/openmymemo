@@ -1,6 +1,6 @@
 """Checking an app's proposal before it is filed (product-design.md §17.7, "Writes").
 
-When an AI app calls ``memory_propose`` (MCP over stdio or HTTP, ``/v1/propose``, or relayed and queued by MyMemo
+When an AI app calls ``memory_propose`` (MCP over stdio or HTTP, ``/v1/propose``, or relayed and queued by OpenMyMemo
 Cloud) and the Assistant's ``check`` feature is available, ``Proposals.propose`` asks ``check_proposal`` for a
 second look before it takes the folder's lock. The model is asked, within a short time budget (2 s by default,
 ``check_budget`` in the Assistant's settings):

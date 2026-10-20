@@ -108,7 +108,7 @@ class Proposal:
     evidence: str | None = None
     idempotency_key: str | None = None
     created_at: str = ""
-    queue_id: str | None = None  # filed from MyMemo Cloud's offline queue: its receipt's id
+    queue_id: str | None = None  # filed from OpenMyMemo Cloud's offline queue: its receipt's id
     status: str = "pending"
     hold: str | None = None  # why it waits: approval | protected | private | sensitive (None: applied at once)
     decided_at: str | None = None
@@ -265,7 +265,7 @@ class Proposals:
                 hold: str | None = None, batch_id: str | None = None,
                 expected: Mapping[str, tuple[int, str | None]] | None = None, check: bool = False) -> dict:
         """`created_at`: when the AI proposed it, if that was earlier, and `queue_id`: the receipt it got then
-        (both from MyMemo Cloud's offline queue). `until`: a review date to set (``YYYY-MM`` or ``YYYY-MM-DD``).
+        (both from OpenMyMemo Cloud's offline queue). `until`: a review date to set (``YYYY-MM`` or ``YYYY-MM-DD``).
         `hold`: make it wait for the person with this reason even where the rules would apply it (a reason the
         rules give, such as ``private``, still wins). `batch_id`: groups the proposals of one run.
         `expected`: memory id → (version, until) as the proposer last saw them; checked under the lock this

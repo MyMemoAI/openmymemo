@@ -73,9 +73,9 @@ describe("CloudRow", () => {
     const open = vi.spyOn(window, "open").mockImplementation(() => null);
     const w = mountRow();
     await flushPromises();
-    expect(w.text()).toContain("MyMemo Cloud");
+    expect(w.text()).toContain("OpenMyMemo Cloud");
     expect(w.text()).toContain("Use your memory in ChatGPT and claude.ai on the web");
-    expect(w.text()).toContain("Part of MyMemo Pro and Ultra");
+    expect(w.text()).toContain("Part of MyMemo Pro, Ultra and Lifetime. Your memory stays on this computer");
     await button(w, "Sign in")!.trigger("click");
     await flushPromises();
     expect(open).toHaveBeenCalledWith("https://api.mymemo.ai/openmymemo/oauth/authorize?state=s", "_blank", "noopener");
@@ -90,7 +90,7 @@ describe("CloudRow", () => {
     await flushPromises();
     await (w.vm as unknown as { reload: () => Promise<void> }).reload(); // the browser came back
     await flushPromises();
-    expect(w.text()).toContain("MyMemo Cloud · Ultra · live relay + offline queue");
+    expect(w.text()).toContain("OpenMyMemo Cloud · Ultra · live relay + offline queue");
     expect(w.text()).toContain("Online · Signed in as Sam · s***@example.com"); // whose account, unmistakably
     expect(w.find("[data-endpoint]").text()).toBe(ENDPOINT); // exactly, no trailing slash
     expect(w.text()).toContain("Developer Mode");
@@ -98,6 +98,17 @@ describe("CloudRow", () => {
     expect(w.text()).toContain("Settings → Connectors → Add custom connector");
     expect(button(w, "Unlink")).toBeTruthy();
     expect(button(w, "Sign in")).toBeUndefined();
+  });
+
+  it("promises nothing about an offline queue on a plan with the live relay only", async () => {
+    api.cloud.mockResolvedValue(linked({ plan: { tier: "pro", live: true, queue: false }, queued: 0 }));
+    const w = mountRow();
+    await flushPromises();
+    await button(w, "Set up")!.trigger("click");
+    expect(w.text()).toContain("OpenMyMemo Cloud · Pro · live relay");
+    expect(w.text()).toContain("Works while OpenMyMemo runs on this computer.");
+    expect(w.text()).not.toMatch(/offline queue|wait in MyMemo|encrypted/);
+    expect(w.find("[data-queued]").exists()).toBe(false);
   });
 
   it("lists the web apps as connector rows, with permissions, and lets a removed one back in", async () => {
@@ -108,7 +119,7 @@ describe("CloudRow", () => {
     });
     await flushPromises();
     expect(w.text()).toContain("ChatGPT (web)");
-    expect(w.text()).toContain("Through MyMemo Cloud");
+    expect(w.text()).toContain("Through OpenMyMemo Cloud");
     expect(w.text()).toContain("manage cloud-chatgpt");
     expect(w.text()).toContain("Claude (web)");
     expect(w.text()).toContain("Access removed");
@@ -133,7 +144,7 @@ describe("CloudRow", () => {
     api.cloud.mockResolvedValue(linked({ online: false, state: "waiting", reason: "plan" }));
     const plan = mountRow();
     await flushPromises();
-    expect(plan.text()).toContain("Your MyMemo plan doesn't include MyMemo Cloud");
+    expect(plan.text()).toContain("Your MyMemo plan doesn't include OpenMyMemo Cloud (Pro, Ultra or Lifetime)");
     expect(button(plan, "Try again")).toBeTruthy();
     plan.unmount();
 
@@ -165,7 +176,7 @@ describe("CloudRow", () => {
 
   it("unlinks after asking", async () => {
     api.cloud.mockResolvedValue(linked());
-    api.cloudUnlink.mockResolvedValue({ message: "Unlinked this computer from MyMemo Cloud.", cloud: status() });
+    api.cloudUnlink.mockResolvedValue({ message: "Unlinked this computer from OpenMyMemo Cloud.", cloud: status() });
     vi.stubGlobal("confirm", vi.fn(() => true));
     const version = store.cloudVersion;
     const w = mountRow();
@@ -173,13 +184,13 @@ describe("CloudRow", () => {
     await button(w, "Unlink")!.trigger("click");
     await flushPromises();
     expect(api.cloudUnlink).toHaveBeenCalled();
-    expect(store.toast?.text).toBe("Unlinked this computer from MyMemo Cloud.");
+    expect(store.toast?.text).toBe("Unlinked this computer from OpenMyMemo Cloud.");
     expect(button(w, "Sign in")).toBeTruthy();
     expect(store.cloudVersion).toBe(version + 1); // Settings and the catalog follow
   });
 });
 
-describe("ConnectApps with MyMemo Cloud", () => {
+describe("ConnectApps with OpenMyMemo Cloud", () => {
   function app(id: string, name: string, extra: Partial<AppStatus> = {}): AppStatus {
     return {
       id, name, method: "file", docs: "", site: null, note: null, session: false, restart_name: name, installed: false,
@@ -192,7 +203,7 @@ describe("ConnectApps with MyMemo Cloud", () => {
     apps: [
       app("cursor", "Cursor", { installed: true }),
       app("windsurf", "Windsurf"),
-      app("mymemo-cloud", "MyMemo Cloud", { method: "account", description: "Use your memory in ChatGPT and claude.ai on the web" }),
+      app("mymemo-cloud", "OpenMyMemo Cloud", { method: "account", description: "Use your memory in ChatGPT and claude.ai on the web" }),
     ],
     custom: [],
   });
@@ -204,18 +215,18 @@ describe("ConnectApps with MyMemo Cloud", () => {
     store.connectors = [];
   });
 
-  it("puts MyMemo Cloud in its own section on the Connectors page, and leaves it out of the first-run guide", async () => {
+  it("puts OpenMyMemo Cloud in its own section on the Connectors page, and leaves it out of the first-run guide", async () => {
     const page = mount(ConnectApps, { props: {} });
     await flushPromises();
     const labels = page.findAll("h3").map((x) => x.text());
     expect(labels).toEqual(["On this Mac", "On the web", "More apps"]);
     expect(page.findAll("button").filter((b) => b.text() === "Sign in")).toHaveLength(1);
-    expect(page.findAll("button").filter((b) => b.text() === "Connect")).toHaveLength(2); // not for MyMemo Cloud
+    expect(page.findAll("button").filter((b) => b.text() === "Connect")).toHaveLength(2); // not for OpenMyMemo Cloud
     page.unmount();
 
     const guide = mount(ConnectApps, { props: { compact: true } });
     await flushPromises();
-    expect(guide.text()).not.toContain("MyMemo Cloud");
+    expect(guide.text()).not.toContain("OpenMyMemo Cloud");
     guide.unmount();
   });
 });

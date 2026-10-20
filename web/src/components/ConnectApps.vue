@@ -13,7 +13,7 @@ import SnippetTabs from "./SnippetTabs.vue";
  * The AI apps OpenMyMemo knows (src/openmymemo/clients.py), each with one action: Connect, Disconnect, or
  * "Set up" for apps that need a snippet pasted. Loads its own data. `compact` (the first-run guide) lists the
  * apps on this computer and folds the rest; the Connectors page passes a `manage` slot, shown under a
- * connected app's row when its permissions are opened. MyMemo Cloud (the catalog's `account` entry) has a section
+ * connected app's row when its permissions are opened. OpenMyMemo Cloud (the catalog's `account` entry) has a section
  * of its own, "On the web", with the web apps using it underneath (CloudRow); the first-run guide leaves it out.
  */
 const props = defineProps<{ compact?: boolean; open?: string | null }>();
@@ -55,7 +55,7 @@ async function load() {
 const connectorIds = computed(() => store.connectors.map((c) => c.id).join(" "));
 watch(connectorIds, () => catalog.value && load());
 watch(() => store.version, () => Date.now() - loadedAt > 30_000 && load());
-watch(() => store.cloudVersion, () => load());  // MyMemo Cloud shown, hidden, linked or unlinked
+watch(() => store.cloudVersion, () => load());  // OpenMyMemo Cloud shown, hidden, linked or unlinked
 const onFocus = () => document.visibilityState === "visible" && Date.now() - loadedAt > 2_000 && load();
 onMounted(() => {
   load();
@@ -76,7 +76,7 @@ function live(a: AppStatus): AppStatus {
 
 const mac = computed(() => catalog.value?.system === "darwin");
 const apps = computed(() => (catalog.value?.apps ?? []).filter((a) => a.id !== OTHER && a.method !== "account").map(live));
-/** MyMemo Cloud, when this installation's catalog has it. */
+/** OpenMyMemo Cloud, when this installation's catalog has it. */
 const cloud = computed(() => (props.compact ? null : catalog.value?.apps.find((a) => a.method === "account") ?? null));
 const other = computed(() => catalog.value?.apps.find((a) => a.id === OTHER) ?? null);
 const here = (a: AppStatus) => a.installed || a.connected || a.has_connector;

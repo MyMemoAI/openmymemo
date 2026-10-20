@@ -1,6 +1,6 @@
 """MyMemo's hosted model for the OpenMyMemo Assistant (product-design.md §17.8) against a fake MyMemo service built
 from tests/fixtures/cloud/assistant/ (tests/assistant_fake.py): signing in (token exchange for a computer linked to
-MyMemo Cloud, or PKCE in the browser with the iss check), tokens kept per computer and refreshed with rotation, the
+OpenMyMemo Cloud, or PKCE in the browser with the iss check), tokens kept per computer and refreshed with rotation, the
 endpoint's 401 / 402 / 429 / 503 answers, signing out, and privacy. Nothing here reaches MyMemo."""
 
 import json
@@ -144,7 +144,7 @@ def test_signing_in_with_the_browser_checks_the_state_and_iss(vault, fake, api):
     assert set(form) == set(TOKEN["authorization_code"]) and form["redirect_uri"] == params["redirect_uri"]
     s = api.get("/api/assistant", headers=H).json()
     assert s["mymemo"]["signed_in"] and s["mymemo"]["via"] == "browser" and s["ready"]
-    assert not s["mymemo"]["pending"] and not cloud.load_link()  # MyMemo Cloud isn't linked by this
+    assert not s["mymemo"]["pending"] and not cloud.load_link()  # OpenMyMemo Cloud isn't linked by this
     assert api.get(back).status_code == 400  # a replay does nothing
     assert len(fake.token_forms) == 1
 
@@ -283,7 +283,10 @@ def test_the_plan_view_shows_what_the_service_answers(vault, fake, api):
     acct = api.get("/api/assistant/mymemo", headers=H).json()["account"]
     want = MODELS["response"]
     assert acct["display_name"] == want["display_name"] and acct["provider"] == want["provider"]
-    assert acct["usage"] == want["usage"] and acct["limits"] == want["limits"]
+    # The panel shows the token counts and requests; the service's cost figures (`cost_usd`, …) are left out.
+    assert acct["usage"] == {k: want["usage"][k] for k in acct["usage"]} and acct["limits"] == want["limits"]
+    assert set(acct["usage"]) == {"input_tokens", "output_tokens", "input_tokens_included", "output_tokens_included",
+                                  "requests"} and {"cost_usd", "cost_usd_included"} <= set(want["usage"])
     assert acct["plan"]["status"] == "active" and acct["plan"]["plan_url"] == f"{fake.base}/openmymemo/assistant"
     fake.expire_access()  # refreshed once on 401, here too
     assert api.get("/api/assistant/mymemo", headers=H).json()["account"]["ok"]
@@ -310,7 +313,7 @@ def test_signing_out_revokes_the_grant_and_forgets_the_tokens(vault, fake, api):
     assert "mymemo_token" not in stored and "mymemo_refresh" not in stored and stored["kind"] == "mymemo"
     s = r["assistant"]
     assert not s["mymemo"]["signed_in"] and s["mymemo"]["signed_out"] is None and not s["ready"]
-    assert cloud.load_link() is not None  # MyMemo Cloud stays linked
+    assert cloud.load_link() is not None  # OpenMyMemo Cloud stays linked
 
 
 def test_signing_out_while_mymemo_is_unreachable_still_forgets(vault, fake, monkeypatch):
@@ -329,7 +332,7 @@ def test_cli_signin_by_exchange_plan_and_signout(vault, fake):
     v = ["--vault", str(vault.root)]
     r = runner.invoke(app, [*v, "assistant", "signin"])
     assert r.exit_code == 0, r.stdout
-    assert "Signed in: Sam (s***@example.com) with this computer's MyMemo Cloud link" in r.stdout
+    assert "Signed in: Sam (s***@example.com) with this computer's OpenMyMemo Cloud link" in r.stdout
     assert raw()["mymemo_token"] not in r.stdout
     r = runner.invoke(app, [*v, "assistant", "plan"])
     assert r.exit_code == 0 and "Claude Haiku 5.5 by Anthropic" in r.stdout and "Manage the plan:" in r.stdout
@@ -372,7 +375,12 @@ def test_private_memories_never_reach_mymemo(vault, fake):
 
 
 def test_the_fixtures_name_no_prices():
-    text = json.dumps([fixture("assistant/models.json"), fixture("assistant/errors.json")]).lower()
+    # Only the usage figures the service reports in dollars (`cost_usd`, `cost_usd_included`), which the panel doesn't
+    # show; nothing else names a price.
+    models = fixture("assistant/models.json")
+    usage = models["response"]["usage"]
+    assert isinstance(usage.pop("cost_usd"), float) and isinstance(usage.pop("cost_usd_included"), float)
+    text = json.dumps([models, fixture("assistant/errors.json")]).lower()
     assert "$" not in text and "usd" not in text and "price" not in text
 
 
@@ -384,7 +392,7 @@ def grants(fake, kind: str = "refresh_token") -> int:
 
 
 def test_signing_out_and_in_as_another_account_mid_request_stops_that_request(vault, fake):
-    a = signed_in(vault, fake)  # as Sam, through the MyMemo Cloud link
+    a = signed_in(vault, fake)  # as Sam, through the OpenMyMemo Cloud link
     old = raw()["mymemo_token"]
     bob = {}
 
@@ -673,7 +681,7 @@ def test_a_pause_in_the_single_slot_of_earlier_builds_is_still_honoured(vault, f
 
 
 def test_with_an_environment_token_the_stored_sign_ins_account_isnt_shown(vault, fake, api, monkeypatch):
-    signed_in(vault, fake)  # as Sam, through the MyMemo Cloud link
+    signed_in(vault, fake)  # as Sam, through the OpenMyMemo Cloud link
     env_token(vault, fake, monkeypatch)
     m = api.get("/api/assistant", headers=H).json()["mymemo"]
     assert m["signed_in"] and m["via"] == "env" and m["account"] is None and m["signed_in_at"] is None

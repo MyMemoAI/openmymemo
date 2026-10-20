@@ -136,7 +136,7 @@ describe("AssistantSettings", () => {
       });
     });
 
-    it("signs in with the MyMemo Cloud link, then shows the account, model, plan and usage", async () => {
+    it("signs in with the OpenMyMemo Cloud link, then shows the account, model, plan and usage", async () => {
       api.assistant.mockResolvedValue(status());
       api.assistantSettings.mockResolvedValue(on(mymemo({ cloud_linked: true })));
       const signed = on(mymemo({ signed_in: true, via: "cloud", cloud_linked: true,
@@ -155,7 +155,7 @@ describe("AssistantSettings", () => {
       await flushPromises();
       expect(api.assistantSignIn).toHaveBeenCalledWith(false);
       expect(opened).toEqual([]);
-      expect(w.get('[data-test="mm-account"]').text()).toBe("Signed in as Sam (s***@example.com) with this computer's MyMemo Cloud link");
+      expect(w.get('[data-test="mm-account"]').text()).toBe("Signed in as Sam (s***@example.com) with this computer's OpenMyMemo Cloud link");
       expect(w.get('[data-test="mm-model"]').text()).toBe("Model: Claude Haiku 5.5 by Anthropic");
       expect(w.get('[data-test="mm-plan"]').text()).toBe("OpenMyMemo Assistant plan: active");
       expect(w.get('[data-test="mm-usage"]').text()).toContain("1,200 of 10,000 input tokens, 340 of 2,000 output tokens, 7 requests.");

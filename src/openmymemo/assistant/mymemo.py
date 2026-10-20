@@ -1,9 +1,9 @@
 """MyMemo's hosted model for the Assistant (product-design.md §17.8): signing in, its tokens, and how its answers
 change what the Assistant does. The endpoint itself is OpenAI-compatible and called by ``client.py`` like any other.
 
-* **Signing in** reuses MyMemo Cloud's machinery (``cloud.py``): the service URL setting, PKCE with a loopback
+* **Signing in** reuses OpenMyMemo Cloud's machinery (``cloud.py``): the service URL setting, PKCE with a loopback
   redirect to ``/cloud/callback`` and the ``iss`` check (``Linker``), and the per-computer folder. A computer already
-  linked to MyMemo Cloud needs no browser: its device token is exchanged for an ``assistant`` token (RFC 8693).
+  linked to OpenMyMemo Cloud needs no browser: its device token is exchanged for an ``assistant`` token (RFC 8693).
   Otherwise the browser signs in with ``scope=assistant offline_access``. The token is scoped to the model endpoint.
 * **Tokens** are kept like the API key (``settings.py``): the Keychain on macOS when possible, else the 0600
   ``assistant.json``. An access token is refreshed shortly before it expires and when the endpoint answers 401; the
@@ -15,7 +15,7 @@ change what the Assistant does. The endpoint itself is OpenAI-compatible and cal
   stored sign-in is still that generation at that service, checked under the lock. Otherwise the request stops and
   the feature uses its rules: a request never carries another sign-in's token, never sends its own to another
   service, and never writes over a newer sign-in.
-* **The account** shown is only one this sign-in authenticated: the MyMemo Cloud account whose device token was
+* **The account** shown is only one this sign-in authenticated: the OpenMyMemo Cloud account whose device token was
   exchanged, or a masked ``member`` in the service's token or ``/models`` answer. A browser sign-in is otherwise
   "signed in to MyMemo at <host>".
 * **Pauses.** MyMemo answers 402 when the account has no Assistant plan (``plan_required``) or this month's
@@ -84,7 +84,7 @@ def _parse(value: Any) -> datetime | None:
 
 
 def service_of(s: Settings) -> str:
-    """The service this computer signed in to, else the one a sign-in would use (MyMemo Cloud's setting)."""
+    """The service this computer signed in to, else the one a sign-in would use (OpenMyMemo Cloud's setting)."""
     service = s.mymemo.get("service")
     return (service if isinstance(service, str) and service else cloud.service_url()).rstrip("/")
 
@@ -215,7 +215,7 @@ def _forget(raw: dict[str, Any], reason: str | None) -> None:
 
 
 EXCHANGE_MESSAGES = {
-    "signed_in": "Signed in to MyMemo with this computer's MyMemo Cloud link.",
+    "signed_in": "Signed in to MyMemo with this computer's OpenMyMemo Cloud link.",
     "use_browser": "MyMemo no longer knows this computer's link. Sign in with the browser instead.",
     "unreachable": "MyMemo couldn't be reached. Check your connection and try again.",
     "busy": "MyMemo is busy. Try again in a minute.",
@@ -224,7 +224,7 @@ EXCHANGE_MESSAGES = {
 
 
 def exchange(link: cloud.Link) -> str:
-    """A computer linked to MyMemo Cloud: trade its device token for an ``assistant`` token, no browser. Returns a
+    """A computer linked to OpenMyMemo Cloud: trade its device token for an ``assistant`` token, no browser. Returns a
     key of ``EXCHANGE_MESSAGES``: ``signed_in``; ``use_browser`` when MyMemo no longer accepts the device token; or
     why it didn't work."""
     form = {"grant_type": TOKEN_EXCHANGE, "client_id": CLIENT_ID, "subject_token": link.device_token,
@@ -258,7 +258,7 @@ def authorize_url(service: str, redirect_uri: str, challenge: str, state: str, n
 
 class SignIn(Linker):
     """Browser sign-ins for the Assistant started in this process: PKCE, a loopback redirect to ``/cloud/callback``
-    (shared with MyMemo Cloud's linking; the ``state`` tells them apart) and the ``iss`` check, as ``Linker``."""
+    (shared with OpenMyMemo Cloud's linking; the ``state`` tells them apart) and the ``iss`` check, as ``Linker``."""
 
     STALE = ("It was already used, or it is more than ten minutes old. Start again in OpenMyMemo: "
              "Settings → Assistant → Sign in.")
@@ -302,7 +302,7 @@ class SignIn(Linker):
 
 
 def service_url_for_signin() -> str:
-    """Where a new sign-in goes: the service of this computer's MyMemo Cloud link, else MyMemo Cloud's setting."""
+    """Where a new sign-in goes: the service of this computer's OpenMyMemo Cloud link, else OpenMyMemo Cloud's setting."""
     link = cloud.load_link()
     return (link.service if link else cloud.service_url()).rstrip("/")
 

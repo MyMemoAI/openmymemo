@@ -1,4 +1,4 @@
-"""MyMemo Cloud (product-design.md §16) against a fake service built from tests/fixtures/cloud/.
+"""OpenMyMemo Cloud (product-design.md §16) against a fake service built from tests/fixtures/cloud/.
 
 Every test has its own HOME, OPENMYMEMO_CLOUD_DIR and a local OPENMYMEMO_CLOUD_URL (conftest.py); nothing here
 reaches MyMemo or touches this computer's real cloud.json.
@@ -339,7 +339,7 @@ def test_the_callback_needs_a_state_this_process_started_recently(vault, fake, p
     assert fake.link_requests == [] and cloud.load_link() is None
 
     c.linker.ttl = cloud.LINK_TTL
-    fake.link_response = {"error": "plan_required", "message": "MyMemo Cloud is part of Pro and Ultra."}
+    fake.link_response = {"error": "plan_required", "message": "OpenMyMemo Cloud is part of Pro and Ultra."}
     url = api.post("/api/cloud/link", headers=H).json()["url"]
     r = api.get(callback_path(fake.authorize(url)))
     assert r.status_code == 502 and cloud.load_link() is None
@@ -366,7 +366,7 @@ def test_unlinking_tells_mymemo_deletes_cloud_json_and_revokes_the_web_apps(vaul
     assert [x.id for x in Connectors(vault).list()] == ["cloud-chatgpt"]
 
     out = api.delete("/api/cloud", headers=H).json()
-    assert out["message"].startswith("Unlinked this computer from MyMemo Cloud")
+    assert out["message"].startswith("Unlinked this computer from OpenMyMemo Cloud")
     assert fake.unlinks == [f"Bearer {fake.token}"] and cloud.load_link() is None
     assert conn.closed.wait(5) and conn.client_close == 1000 and len(fake.conns) == 1
     assert Connectors(vault).list() == []
@@ -382,25 +382,94 @@ def test_unlinking_tells_mymemo_deletes_cloud_json_and_revokes_the_web_apps(vaul
 def test_unlinking_while_mymemo_is_unreachable_still_forgets_the_link(vault):
     linked(vault, "http://127.0.0.1:9")
     assert "couldn't be told" in cloud.unlink() and cloud.load_link() is None
-    assert cloud.unlink() == "This computer isn't linked to MyMemo Cloud."
+    assert cloud.unlink() == "This computer isn't linked to OpenMyMemo Cloud."
 
 
 def cloud_rows(vault) -> list[dict]:
     return [r for r in clients.catalog(vault) if r["id"] == clients.CLOUD]
 
 
-def test_mymemo_cloud_is_listed_once_turned_on_and_always_while_linked(vault, fake, panel):
+def test_openmymemo_cloud_is_listed_until_hidden_and_always_while_linked(vault, fake, panel):
     api, _ = panel
-    assert cloud_rows(vault) == [] and api.get("/api/cloud", headers=H).json()["shown"] is False
+    assert len(cloud_rows(vault)) == 1 and api.get("/api/cloud", headers=H).json()["shown"] is True
+    assert not cloud.settings_path().exists()  # listed by default: nothing written, nothing sent anywhere
+    assert sum(a["id"] == clients.CLOUD for a in api.get("/api/clients", headers=H).json()["apps"]) == 1
+    out = api.patch("/api/cloud/settings", json={"show": False}, headers=H).json()
+    assert out["shown"] is False and out["settings"]["show"] is False and cloud_rows(vault) == []
     assert all(a["id"] != clients.CLOUD for a in api.get("/api/clients", headers=H).json()["apps"])
-    out = api.patch("/api/cloud/settings", json={"show": True}, headers=H).json()
-    assert out["shown"] is True and out["settings"]["show"] is True and len(cloud_rows(vault)) == 1
-    assert api.patch("/api/cloud/settings", json={"show": False}, headers=H).json()["shown"] is False
     linked(vault, fake.base)  # linked from the CLI while hidden: listed, so it can be seen and unlinked
     assert len(cloud_rows(vault)) == 1 and api.get("/api/cloud", headers=H).json()["shown"] is True
     cloud.unlink()
-    assert cloud_rows(vault) == []
+    assert cloud_rows(vault) == []  # hidden again: the person's choice stays
+    assert api.patch("/api/cloud/settings", json={"show": True}, headers=H).json()["shown"] is True
+    assert len(cloud_rows(vault)) == 1
     assert stat.S_IMODE(cloud.settings_path().stat().st_mode) == 0o600
+
+
+@pytest.mark.parametrize("old", [
+    {"show": False, "service": None},  # what 0.2.8 and older wrote after any change while hidden, its default
+    {"show": False, "service": "https://memo.example.org", "later": 1},
+    {"show": True, "service": None},
+    {"show": False},
+])
+def test_an_older_settings_files_show_false_isnt_a_hide(vault, monkeypatch, old):
+    monkeypatch.delenv("OPENMYMEMO_CLOUD_URL")
+    cloud.settings_path().parent.mkdir(parents=True, exist_ok=True)
+    cloud.settings_path().write_text(json.dumps(old))
+    assert cloud.load_settings()["show"] is True and cloud.shown() and len(cloud_rows(vault)) == 1
+    assert cloud.service_url() == (old.get("service") or cloud.DEFAULT_SERVICE)  # the service chosen stays
+    cloud.save_settings()  # only reading them: the file stays as it was
+    assert json.loads(cloud.settings_path().read_text()) == old
+
+    # Any change writes format 2, listed unless the person hides it now; a hide from now on is kept.
+    cloud.save_settings(service="https://other.example.org")
+    assert json.loads(cloud.settings_path().read_text()) == \
+        {**old, "format": 2, "show": True, "service": "https://other.example.org"}
+    cloud.save_settings(show=False)
+    assert cloud.load_settings()["show"] is False and not cloud.shown() and cloud_rows(vault) == []
+    cloud.save_settings(service="")
+    assert json.loads(cloud.settings_path().read_text()) == {**old, "format": 2, "show": False, "service": None}
+    assert not cloud.shown()
+
+
+def test_a_newer_settings_format_keeps_its_hide(vault):
+    cloud.settings_path().parent.mkdir(parents=True, exist_ok=True)
+    cloud.settings_path().write_text('{"format": 3, "show": false, "service": null}')
+    assert not cloud.shown()
+    cloud.save_settings(show=True)
+    assert json.loads(cloud.settings_path().read_text())["format"] == 3 and cloud.shown()
+
+
+def test_a_new_install_signs_in_from_the_listed_row_with_no_settings_or_environment(vault, fake, panel, monkeypatch):
+    """What a person gets after installing: no OPENMYMEMO_CLOUD_URL, no settings.json, MyMemo's own service (the fake
+    stands in for it), and a plan with the live relay only, as MyMemo offers it at launch."""
+    monkeypatch.delenv("OPENMYMEMO_CLOUD_URL")
+    monkeypatch.setattr(cloud, "DEFAULT_SERVICE", fake.base)
+    live_only = {"tier": "pro", "live": True, "queue": False}
+    fake.link_response = {**fake.link_response, "plan": live_only}
+    fake.welcome = {**fake.welcome, "plan": live_only, "queued": 0}
+    api, _ = panel
+
+    # Listed in Connectors, and nothing has talked to MyMemo yet.
+    row = next(a for a in api.get("/api/clients", headers=H).json()["apps"] if a["id"] == clients.CLOUD)
+    assert row["name"] == "OpenMyMemo Cloud" and row["method"] == "account" and not row["connected"]
+    s = api.get("/api/cloud", headers=H).json()
+    assert s["shown"] and not s["linked"] and s["service"] == fake.base and s["settings"]["service_from_env"] is None
+    assert not fake.authorize_params and not fake.link_requests and not fake.handshakes
+
+    # Sign in → the browser consents on MyMemo → /cloud/callback → POST /openmymemo/device/link → connected.
+    url = api.post("/api/cloud/link", headers=H).json()["url"]
+    assert url.startswith(f"{fake.base}/openmymemo/oauth/authorize?")
+    r = api.get(callback_path(fake.authorize(url)))
+    assert r.status_code == 200 and "Connectors → OpenMyMemo Cloud → Unlink" in r.text
+    link = cloud.load_link()
+    assert link.service == fake.base and link.plan == live_only and len(fake.link_requests) == 1
+    conn = fake.connection()
+    assert "features" not in conn.hello  # the offline queue isn't offered: the service queues nothing for us
+    status = wait_until(lambda: (s := api.get("/api/cloud", headers=H).json())["online"] and s)
+    assert status["plan"] == live_only and status["queued"] == 0 and status["endpoint"] == f"{fake.base}/openmymemo/mcp"
+    assert next(a for a in api.get("/api/clients", headers=H).json()["apps"] if a["id"] == clients.CLOUD)["connected"]
+    assert not cloud.settings_path().exists()  # signing in changes no preference
 
 
 def test_choosing_the_service(vault, fake, panel, monkeypatch):
@@ -436,16 +505,17 @@ def test_choosing_the_service(vault, fake, panel, monkeypatch):
     assert api.patch("/api/cloud/settings", json={"service": "https://memo.example.org"}, headers=H).status_code == 409
 
 
-def test_unusable_settings_fall_back_to_hidden_and_mymemos_own(vault, monkeypatch):
+def test_unusable_settings_fall_back_to_listed_and_mymemos_own(vault, monkeypatch):
     monkeypatch.delenv("OPENMYMEMO_CLOUD_URL")
     cloud.settings_path().parent.mkdir(parents=True, exist_ok=True)
-    for text in ("not json", "[]", '{"show": "yes", "service": "http://example.com"}'):
+    for text in ("not json", "[]", '{"show": "yes", "service": "http://example.com"}',
+                 '{"format": 2, "show": "no", "service": "ftp://example.com"}', '{"format": "2", "show": false}'):
         cloud.settings_path().write_text(text)
-        assert (cloud.load_settings()["show"], cloud.service_url(), cloud.shown()) == (False, cloud.DEFAULT_SERVICE, False)
-    cloud.settings_path().write_text('{"show": true, "later": 1}')
+        assert (cloud.load_settings()["show"], cloud.service_url(), cloud.shown()) == (True, cloud.DEFAULT_SERVICE, True)
+    cloud.settings_path().write_text('{"format": 2, "show": true, "later": 1}')
     cloud.save_settings(service="https://memo.example.org")
     assert json.loads(cloud.settings_path().read_text()) == \
-        {"show": True, "later": 1, "service": "https://memo.example.org"}  # keys a later version adds are kept
+        {"format": 2, "show": True, "later": 1, "service": "https://memo.example.org"}  # keys a later version adds are kept
 
 
 def test_the_catalog_lists_mymemo_cloud(vault, fake, panel):
@@ -460,7 +530,7 @@ def test_the_catalog_lists_mymemo_cloud(vault, fake, panel):
     row = next(r for r in clients.catalog(vault) if r["id"] == clients.CLOUD)
     assert row["connected"] is True and row["via"] == "account"
     listed = api.get("/api/clients", headers=H).json()
-    assert listed["custom"] == []  # web apps are listed under MyMemo Cloud, not as apps added by name
+    assert listed["custom"] == []  # web apps are listed under OpenMyMemo Cloud, not as apps added by name
     assert any(a["id"] == clients.CLOUD for a in listed["apps"])
 
 
@@ -1158,11 +1228,16 @@ def test_cloud_settings_from_the_cli(vault, monkeypatch):
     monkeypatch.delenv("OPENMYMEMO_CLOUD_URL")
     runner = CliRunner()
     apps = runner.invoke(cli, ["--vault", str(vault.root), "apps"])
-    assert apps.exit_code == 0 and "mymemo-cloud" not in apps.output and "cloud link" not in apps.output
-    out = runner.invoke(cli, ["cloud", "settings", "--show", "--service", "https://memo.example.org"])
-    assert out.exit_code == 0 and "Listed: yes" in out.output and "Service: https://memo.example.org\n" in out.output
+    assert apps.exit_code == 0 and "OpenMyMemo Cloud (mymemo-cloud)" in apps.output
+    assert "ChatGPT and claude.ai on the web: openmymemo cloud link (needs MyMemo Pro, Ultra or Lifetime)" in apps.output
+    out = runner.invoke(cli, ["cloud", "settings"])
+    assert out.exit_code == 0 and "Listed: yes" in out.output and not cloud.settings_path().exists()
+    out = runner.invoke(cli, ["cloud", "settings", "--hide", "--service", "https://memo.example.org"])
+    assert out.exit_code == 0 and "Listed: no" in out.output and "Service: https://memo.example.org\n" in out.output
+    apps = runner.invoke(cli, ["--vault", str(vault.root), "apps"]).output
+    assert "mymemo-cloud" not in apps and "cloud link" not in apps
+    out = runner.invoke(cli, ["cloud", "settings", "--show", "--service", ""])
+    assert "Listed: yes" in out.output and "(MyMemo's own)" in out.output
     assert "mymemo-cloud" in runner.invoke(cli, ["--vault", str(vault.root), "apps"]).output
-    out = runner.invoke(cli, ["cloud", "settings", "--hide", "--service", ""])
-    assert "Listed: no" in out.output and "(MyMemo's own)" in out.output
     bad = runner.invoke(cli, ["cloud", "settings", "--service", "http://example.com"])
     assert bad.exit_code == 1 and "https://" in bad.output

@@ -6,8 +6,8 @@ import ConnectorsView from "./ConnectorsView.vue";
 
 const MYMEMO = "https://api.mymemo.ai";
 
-/** A panel server with MyMemo Cloud: `linked`, `show` and `service` change as the page asks. */
-const server = { linked: false, show: false, service: "" };
+/** A panel server with OpenMyMemo Cloud: `linked`, `show` and `service` change as the page asks. */
+const server = { linked: false, show: true, service: "" };
 
 function cloudStatus(): CloudStatus {
   const service = server.service || MYMEMO;
@@ -22,8 +22,8 @@ function cloudStatus(): CloudStatus {
 }
 
 const cloudApp: AppStatus = {
-  id: "mymemo-cloud", name: "MyMemo Cloud", method: "account", docs: "", site: null, note: null, session: false,
-  restart_name: "MyMemo Cloud", installed: false, connected: false, via: null, plugin: null, broken: false,
+  id: "mymemo-cloud", name: "OpenMyMemo Cloud", method: "account", docs: "", site: null, note: null, session: false,
+  restart_name: "OpenMyMemo Cloud", installed: false, connected: false, via: null, plugin: null, broken: false,
   revoked: false, in_use: false, last_seen: null, has_connector: false, connector: null,
 };
 
@@ -35,7 +35,7 @@ const { api } = vi.hoisted(() => ({
     cloud: vi.fn(async () => cloudStatus()),
     cloudUnlink: vi.fn(async () => {
       server.linked = false;
-      return { message: "Unlinked this computer from MyMemo Cloud.", cloud: cloudStatus() };
+      return { message: "Unlinked this computer from OpenMyMemo Cloud.", cloud: cloudStatus() };
     }),
     cloudSettings: vi.fn(async (body: { show?: boolean; service?: string }) => {
       if (body.service !== undefined && server.linked) throw new Error("Unlink this computer first.");
@@ -52,10 +52,10 @@ const { api } = vi.hoisted(() => ({
 }));
 vi.mock("../api", () => ({ api }));
 
-const section = (w: VueWrapper) => w.get('section[aria-label="MyMemo Cloud"]');
+const section = (w: VueWrapper) => w.get('section[aria-label="OpenMyMemo Cloud"]');
 const toggle = (w: VueWrapper) => section(w).get('[role="switch"]');
 
-describe("Connectors page with MyMemo Cloud", () => {
+describe("Connectors page with OpenMyMemo Cloud", () => {
   let w: VueWrapper | null = null;
   beforeEach(() => {
     vi.clearAllMocks();
@@ -67,6 +67,21 @@ describe("Connectors page with MyMemo Cloud", () => {
     w?.unmount();
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("lists it on the web by default, and hides it from its settings", async () => {
+    Object.assign(server, { linked: false, show: true, service: "" }); // a new install
+    w = mount(ConnectorsView, { props: { initialConnector: null } });
+    await flushPromises();
+    expect(w.text()).toContain("On the web");
+    expect(w.findAll("button").find((b) => b.text() === "Sign in")).toBeTruthy();
+    expect(toggle(w).attributes("aria-checked")).toBe("true");
+
+    await toggle(w).trigger("click");
+    await flushPromises();
+    expect(api.cloudSettings).toHaveBeenLastCalledWith({ show: false });
+    expect(w.text()).not.toContain("On the web");
+    expect(toggle(w).attributes("aria-checked")).toBe("false");
   });
 
   it("unlocks its settings when the computer is unlinked, without reloading the page", async () => {

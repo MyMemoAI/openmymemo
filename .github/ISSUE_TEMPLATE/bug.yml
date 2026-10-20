@@ -33,7 +33,7 @@ body:
         - Codex plugin
         - Gemini CLI extension
         - Connected with "openmymemo connect" or the panel
-        - MyMemo Cloud
+        - OpenMyMemo Cloud
         - Other
     validations:
       required: true

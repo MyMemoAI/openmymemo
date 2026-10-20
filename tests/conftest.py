@@ -8,7 +8,7 @@ from openmymemo.vault import Vault
 
 @pytest.fixture(autouse=True)
 def _no_real_cloud_link(tmp_path_factory, monkeypatch):
-    """Every test (and every subprocess it starts) gets its own home, its own MyMemo Cloud folder and a local
+    """Every test (and every subprocess it starts) gets its own home, its own OpenMyMemo Cloud folder and a local
     service URL that nothing listens on, so no test reads or writes this computer's real cloud.json (or anything
     else in the real home) or reaches MyMemo. Kept outside `tmp_path`, which some tests list."""
     monkeypatch.setenv("HOME", str(tmp_path_factory.mktemp("home")))
@@ -24,7 +24,7 @@ def _no_real_cloud_link(tmp_path_factory, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _no_bridge_outlives_its_test(monkeypatch):
-    """Every MyMemo Cloud bridge a test starts (directly, or through the panel's link callback) is stopped when the
+    """Every OpenMyMemo Cloud bridge a test starts (directly, or through the panel's link callback) is stopped when the
     test ends. A bridge left running re-reads cloud.json from whatever folder the next test points it at, and the
     fixtures all share one device id, so it would quietly connect to a later test's fake service."""
     started: list[cloud.Cloud] = []
@@ -39,7 +39,7 @@ def _no_bridge_outlives_its_test(monkeypatch):
     for c in started:
         c.stop()
     leaked = [t for t in threading.enumerate() if t.name == "openmymemo-cloud" and t.is_alive()]
-    assert not leaked, "a MyMemo Cloud bridge is still running after the test"
+    assert not leaked, "an OpenMyMemo Cloud bridge is still running after the test"
 
 
 @pytest.fixture

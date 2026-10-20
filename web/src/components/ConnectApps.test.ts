@@ -65,7 +65,7 @@ describe("ConnectApps", () => {
     expect(w.text()).toContain("Other MCP app");
   });
 
-  it("loads the list again when MyMemo Cloud is shown or hidden in Settings", async () => {
+  it("loads the list again when OpenMyMemo Cloud is shown or hidden in Settings", async () => {
     const w = mount(ConnectApps, { props: { compact: true } });
     await flushPromises();
     api.apps.mockClear();

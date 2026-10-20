@@ -38,7 +38,7 @@ Every tool has a title and read-only or destructive hints (`src/openmymemo/mcp_s
 | Gemini CLI | `gemini extensions install https://github.com/MyMemoAI/openmymemo`; the [extension gallery](https://geminicli.com/extensions/browse/) | `gemini-extension.json`, `integrations/gemini/GEMINI.md` | `main`; the gallery crawls tagged repositories daily | add the topic `gemini-cli-extension` to the repository's About section |
 | Cline MCP Marketplace | one-click install in Cline | `README.md`, `llms-install.md` | `main` | open a submission issue at [cline/mcp-marketplace](https://github.com/cline/mcp-marketplace) with the repository URL, a 400×400 PNG icon and why it helps Cline users; check first that Cline installs it from `llms-install.md` alone |
 | Cursor | the panel's one-click link, `openmymemo connect cursor` | `src/openmymemo/snippets.py` | each release | check Cursor's current MCP directory submission process in its docs |
-| ChatGPT / OpenAI apps directory | — | — | — | only remote servers can be listed; that would be MyMemo Cloud, a separate MyMemo service, not this repository |
+| ChatGPT / OpenAI apps directory | — | — | — | only remote servers can be listed; that would be OpenMyMemo Cloud, a separate MyMemo service, not this repository |
 
 Third-party directories (Smithery, Glama, PulseMCP, mcp.so and others) mostly find servers on their own,
 often from the official registry. Claim a listing only through the directory's own site, and correct it

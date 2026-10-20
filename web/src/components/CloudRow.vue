@@ -7,7 +7,7 @@ import { copy, refresh, store, toast } from "../store";
 import AppIcon from "./AppIcon.vue";
 
 /**
- * MyMemo Cloud (product-design.md §16): sign in to link this computer, its status, what to paste into ChatGPT and
+ * OpenMyMemo Cloud (product-design.md §16): sign in to link this computer, its status, what to paste into ChatGPT and
  * claude.ai, how many changes wait in its offline queue (from the service's `welcome`, counted down as they are
  * filed), and the web apps using it, each a normal connector row (`manage` shows a row's permissions, as in
  * ConnectApps). Polls /api/cloud while it is on screen.

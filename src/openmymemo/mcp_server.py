@@ -1,7 +1,7 @@
 """The MCP server AI apps talk to: read the user's memory, propose changes.
 
 The same server runs over stdio (``openmymemo mcp --connector claude-desktop``), over local HTTP
-(``openmymemo serve``, bearer token per connector) and, for web apps, relayed by MyMemo Cloud (``cloud.py``,
+(``openmymemo serve``, bearer token per connector) and, for web apps, relayed by OpenMyMemo Cloud (``cloud.py``,
 connector ``cloud-<slug>``). Every call is attributed to a connector so the user can see who read what. Every write is a proposal: most apply at once and land in the user's
 digest, where they can be undone; the rest wait for the user (see ``proposals.py``).
 """
@@ -47,7 +47,7 @@ month, call memory_propose (with a reason and my words as evidence). I'll see th
 OpenMyMemo and undo anything I don't want, so don't ask me to approve them here."""
 
 # What the cloud variant of memory_propose adds to its description: only the cloud ever answers "queued".
-CLOUD_QUEUED = (' Through MyMemo Cloud, when the person\'s computer is offline the status can also be "queued", '
+CLOUD_QUEUED = (' Through OpenMyMemo Cloud, when the person\'s computer is offline the status can also be "queued", '
                 "with a `queue_id`: a receipt, not an acceptance. The change waits encrypted and is filed when the "
                 "computer is back, where it can still be turned down; memory_proposals then shows it with that "
                 "`queue_id`.")
@@ -67,7 +67,7 @@ def _token_from(headers) -> str | None:
 
 def build_server(vault: Vault, *, stdio_connector: str | None = None, panel_url: str | None = None,
                  relayed: Callable[[], Connector] | None = None) -> MCPServer:
-    """The MCP server. `relayed` makes the MyMemo Cloud variant: it names the connector of the call being
+    """The MCP server. `relayed` makes the OpenMyMemo Cloud variant: it names the connector of the call being
     relayed, `memory_propose` mentions the cloud's "queued" status, and results carry no link to this
     computer's panel."""
     connectors = Connectors(vault)
@@ -121,7 +121,7 @@ def build_server(vault: Vault, *, stdio_connector: str | None = None, panel_url:
     async def memory_search(ctx: Context, query: str, topics: list[str] | None = None,
                             limit: int = 10) -> dict[str, Any]:
         """Search the user's memory by keywords (any language). Returns matching memories with their ids."""
-        # The description is part of MyMemo Cloud's wire fixture (tests/fixtures/cloud/bridge/hello.json), so it
+        # The description is part of OpenMyMemo Cloud's wire fixture (tests/fixtures/cloud/bridge/hello.json), so it
         # stays as is: search by meaning and the Assistant's rerank (§17.4) are added without changing the tool.
         c = who(ctx)
         found = await run(recall_search, vault, c, query, topics=topics, limit=max(1, min(limit, 50)), model=True)
@@ -211,7 +211,7 @@ def build_server(vault: Vault, *, stdio_connector: str | None = None, panel_url:
 
         Statuses: applied (saved; the user may still undo it), pending (waiting for the user; `hold` says
         why), accepted or edited_accepted (the user approved it, perhaps reworded), rejected, undone, expired.
-        A proposal that waited in MyMemo Cloud's offline queue also has the `queue_id` it was given then.
+        A proposal that waited in OpenMyMemo Cloud's offline queue also has the `queue_id` it was given then.
         """
         c = who(ctx)
         rows = await run(proposals.list, status, c.id)

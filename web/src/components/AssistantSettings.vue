@@ -15,7 +15,7 @@ import SemanticSettings from "./SemanticSettings.vue";
  * Settings → Assistant (product-design.md §17.2): off, a model on this computer, your own API key, or MyMemo's hosted
  * model; its endpoint, model and key (write-only), a Test button, a switch per feature, the private topics a model on
  * this computer may read, monthly limits and this month's usage, and where memory text goes. For MyMemo (§17.8):
- * sign-in (no browser when this computer is linked to MyMemo Cloud), the account, and the model, plan and usage as
+ * sign-in (no browser when this computer is linked to OpenMyMemo Cloud), the account, and the model, plan and usage as
  * MyMemo reports them, with its plan page opened in the browser; nothing about the plan is known here.
  * Its embeddings model (optional) and the local model for search by meaning (`SemanticSettings`, shown even with
  * the Assistant off) are here too.

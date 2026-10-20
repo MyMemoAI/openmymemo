@@ -103,7 +103,7 @@ From your next new session on, Codex starts with your memory. The plugin also ad
 - **Local process (recommended):** Claude Desktop, Claude Code, Cursor, Codex and other stdio MCP clients. `openmymemo connect <app>` writes the app's config for you (`openmymemo apps` lists them); for anything else, `openmymemo connector add <name>` prints a config with absolute paths to paste in. Give each app its own `--connector` so permissions and logs stay separate.
 - **From the MCP Registry:** OpenMyMemo is listed in the official [MCP Registry](https://registry.modelcontextprotocol.io) as `io.github.MyMemoAI/openmymemo`, so MCP clients that browse it can install it from there (it runs with `uvx`).
 - **Local HTTP:** `openmymemo connector add <name> --http` creates a token (shown once) for use with `openmymemo serve` at `http://127.0.0.1:8787/mcp`.
-- ChatGPT chat (web, desktop and mobile) and claude.ai on the web can only reach MCP servers on the public internet, so they aren't supported yet. On the OpenAI side, Codex works today, including the Codex built into the ChatGPT desktop app.
+- **ChatGPT and claude.ai on the web, through OpenMyMemo Cloud (optional):** they can only reach MCP servers on the public internet, so they can't start OpenMyMemo on your computer the way the apps above do. With MyMemo Pro, Ultra or Lifetime, OpenMyMemo Cloud relays their calls to OpenMyMemo on your computer: sign in from the panel (Connectors → On the web → OpenMyMemo Cloud) or with `openmymemo cloud link`, then add the URL it shows as a custom connector in claude.ai (Settings → Connectors) or in ChatGPT (with Developer Mode on). It is a relay, not hosting: your memory stays on your computer, the web apps reach it only while OpenMyMemo runs there, and MyMemo passes each call through without keeping your memory. It does nothing until you sign in, and you can hide it in Settings. On the OpenAI side, Codex works without it, including the Codex built into the ChatGPT desktop app.
 
 Tools AI apps see: `memory_context`, `memory_search`, `memory_get`, `memory_propose`, `memory_proposals`, plus the `recall` prompt.
 
@@ -116,7 +116,8 @@ Tools AI apps see: `memory_context`, `memory_search`, `memory_get`, `memory_prop
 | Codex (the CLI, and Codex in the ChatGPT desktop app) | ✅ Plugin |
 | Gemini CLI | ✅ Extension |
 | Cursor, VS Code, Zed, Cline, Kiro, LM Studio, opencode, GitHub Copilot CLI and other MCP apps | ✅ One click in the app, `openmymemo connect`, or a config to paste (`openmymemo apps` lists them all) |
-| ChatGPT chat (web, desktop and mobile), claude.ai on the web | ❌ Not yet. They can only connect to MCP servers on the public internet, and OpenMyMemo stays on your computer. You can still bring your ChatGPT memories over with `openmymemo import chatgpt`. |
+| ChatGPT and claude.ai on the web | ✅ Through OpenMyMemo Cloud (optional; MyMemo Pro, Ultra or Lifetime): MyMemo relays their calls to OpenMyMemo on your computer, which has to be running. Your memory stays on your computer. |
+| ChatGPT chat in its desktop and mobile apps, Claude's mobile apps | Not tested with OpenMyMemo Cloud yet. You can always bring your ChatGPT memories over with `openmymemo import chatgpt`. |
 
 ## Principles
 
@@ -208,7 +209,7 @@ Found a vulnerability? Please report it privately as described in [SECURITY.md](
 
 ## Privacy Policy
 
-Your memory stays on your computer: MyMemo doesn't receive it, and OpenMyMemo has no account, telemetry, analytics or update check. AI apps you connect read the topics you allow (never `health` or `finance` unless you say so) and send what they read to their own model provider under their own policies. OpenMyMemo goes online only to download Python and its libraries when it is installed or first started, and for MyMemo Cloud, which is off until you turn it on and link this computer; then the memories web apps read pass through the MyMemo service in transit. The optional OpenMyMemo Assistant sends memory text to the model you choose, and only when you turn it on: a model on your own computer keeps it there. Search by meaning on this computer downloads its model from Hugging Face when you turn it on, and sends nothing. The full policy, including what is stored where: [PRIVACY.md](https://github.com/MyMemoAI/openmymemo/blob/main/PRIVACY.md).
+Your memory stays on your computer: MyMemo doesn't receive it, and OpenMyMemo has no account, telemetry, analytics or update check. AI apps you connect read the topics you allow (never `health` or `finance` unless you say so) and send what they read to their own model provider under their own policies. OpenMyMemo goes online only to download Python and its libraries when it is installed or first started, and for OpenMyMemo Cloud, which does nothing until you sign in and link this computer; then the memories web apps read pass through the MyMemo service in transit. The optional OpenMyMemo Assistant sends memory text to the model you choose, and only when you turn it on: a model on your own computer keeps it there. Search by meaning on this computer downloads its model from Hugging Face when you turn it on, and sends nothing. The full policy, including what is stored where: [PRIVACY.md](https://github.com/MyMemoAI/openmymemo/blob/main/PRIVACY.md).
 
 ## Development
 
@@ -245,7 +246,7 @@ Local builds are signed ad hoc, so macOS asks once before opening them (see [The
 
 ## Relationship to MyMemo
 
-An independent project with no dependency on MyMemo accounts or services. MyMemo may later read this memory as an ordinary connector, on equal footing with Claude.
+An independent project with no dependency on MyMemo accounts or services: everything works without them. The one optional piece that talks to MyMemo is OpenMyMemo Cloud, the relay for ChatGPT and claude.ai on the web, which does nothing until you sign in. MyMemo may later read this memory as an ordinary connector, on equal footing with Claude.
 
 ## License
 
