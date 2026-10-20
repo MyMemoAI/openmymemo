@@ -190,7 +190,9 @@ describe("AssistantSettings", () => {
 
     it.each([
       [6.2, "62%", "62%", "bg-accent", "Resets November 1."],
+      [0.29, "3%", "3%", "bg-accent", "Resets November 1."], // $0.29, not floored to $0.28
       [9.96, "99%", "99%", "bg-wait", "Resets November 1."], // full only once it is used up
+      [9.999, "99%", "99%", "bg-wait", "Resets November 1."], // and $9.99, not the cap, while it isn't
       [10.02, "100%, used up", "100%", "bg-danger", "Used up. Resets November 1."],
     ])("fills the meter at $%s of $10.00", async (used, label, width, color, resets) => {
       const signed = on(mymemo({ signed_in: true, via: "browser" }));
@@ -204,6 +206,8 @@ describe("AssistantSettings", () => {
       expect(fill.classes()).toContain(color);
       expect(meter.get('[data-test="mm-resets"]').text()).toBe(resets);
       expect(meter.get('[data-test="mm-usage"]').text()).toContain("1,200 of 10,000 input tokens"); // the detail line
+      const shown = used === 9.999 ? "$9.99" : used === 0.29 ? "$0.29" : `$${used.toFixed(2)}`;
+      expect(meter.get('[data-test="mm-cost"]').text()).toBe(`${shown} of $10.00 used this month.`);
     });
 
     it("names a limited-time offer only while the month includes more than the regular use", async () => {

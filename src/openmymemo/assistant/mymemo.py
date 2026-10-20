@@ -667,6 +667,12 @@ def _usd(n: float) -> str:
     return f"${n:,.2f}"
 
 
+def _used_usd(n: float) -> str:
+    """Use so far, floored to the cent: $9.999 of $10.00 shows $9.99, never the cap before the service says it is
+    reached. (Rounded to 6 places first, so 0.29 isn't floored to 0.28 by binary floating point.)"""
+    return _usd(math.floor(round(n * 100, 6)) / 100)
+
+
 def offer_text(usage: Mapping[str, Any]) -> str | None:
     """ "Limited-time offer: $10.00 of use this month instead of the regular $5.00, until November 30." when the
     service includes more than the plan's regular use this month; None otherwise (no offer wording at all)."""
@@ -713,9 +719,9 @@ def cost_text(usage: Mapping[str, Any]) -> str | None:
     if used is None:
         return None
     if included is not None:
-        return f"{_usd(used)} of {_usd(included)} used this month"
+        return f"{_used_usd(used)} of {_usd(included)} used this month"
     capped = any(usage.get(k) is not None for k in ("input_tokens_included", "output_tokens_included"))
-    return f"{_usd(used)} used this month" + ("" if capped else ", no cap")
+    return f"{_used_usd(used)} used this month" + ("" if capped else ", no cap")
 
 
 def account(s: Settings) -> dict[str, Any]:

@@ -287,7 +287,7 @@ def test_the_plan_view_shows_what_the_service_answers(vault, fake, api):
 
 
 @pytest.mark.parametrize(("usage", "text"), [
-    ({"cost_usd": 3.456, "cost_usd_included": 10}, "$3.46 of $10.00 used this month"),
+    ({"cost_usd": 3.456, "cost_usd_included": 10}, "$3.45 of $10.00 used this month"),
     ({"cost_usd": 12, "cost_usd_included": None, "input_tokens_included": None, "output_tokens_included": None},
      "$12.00 used this month, no cap"),
     ({"cost_usd": 1.5, "cost_usd_included": None}, "$1.50 used this month"),  # the token caps say what is included
@@ -386,6 +386,17 @@ def test_a_limited_time_offer_is_named_only_when_the_service_includes_more_than_
 ])
 def test_the_usage_bar(used, included, bar):
     assert mymemo.usage_bar({"cost_usd": used, "cost_usd_included": included}) == bar
+
+
+@pytest.mark.parametrize(("used", "text", "bar"), [
+    (9.999, "$9.99 of $10.00 used this month", "[█████████░] 99%"),  # never shows the cap before it is reached
+    (0.29, "$0.29 of $10.00 used this month", "[░░░░░░░░░░] 3%"),  # not floored to $0.28 by floating point
+    (10.0, "$10.00 of $10.00 used this month", "[██████████] 100%"),
+    (10.029, "$10.02 of $10.00 used this month", "[██████████] 100%"),
+])
+def test_the_month_s_use_is_floored_to_the_cent(used, text, bar):
+    usage = {"cost_usd": used, "cost_usd_included": 10.0}
+    assert mymemo.cost_text(usage) == text and mymemo.usage_bar(usage) == bar
 
 
 def test_offered_by_default_and_turned_off_by_the_environment(vault, fake, monkeypatch):

@@ -167,15 +167,18 @@ const day = (iso: string | null | undefined) => {
 const ok = computed(() => (account.value?.ok ? account.value : null));
 const planUrl = computed(() => ok.value?.plan.plan_url ?? mm.value?.hold?.plan_url ?? null);
 const usd = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+/** Use so far, floored to the cent: $9.999 of $10.00 shows $9.99, never the cap before the service says it is reached
+ * (rounded to 6 places first, so 0.29 isn't floored to 0.28 by floating point). */
+const usedUsd = (n: number) => usd(Math.floor(Number((n * 100).toFixed(6))) / 100);
 const active = computed(() => !!ok.value?.plan.active);
 /** This month's use in dollars, as the service meters it ("$1.23 of $10.00 used this month."), for an active plan;
  * "" from an older service that reports tokens only. No dollar cap and no token caps: no cap. */
 const costText = computed(() => {
   const u = ok.value?.usage;
   if (!active.value || u?.cost_usd == null) return "";
-  if (u.cost_usd_included != null) return t("ast.mm.cost", { used: usd(u.cost_usd), included: usd(u.cost_usd_included) });
+  if (u.cost_usd_included != null) return t("ast.mm.cost", { used: usedUsd(u.cost_usd), included: usd(u.cost_usd_included) });
   const capped = u.input_tokens_included != null || u.output_tokens_included != null;
-  return t(capped ? "ast.mm.costUncapped" : "ast.mm.costNoCap", { used: usd(u.cost_usd) });
+  return t(capped ? "ast.mm.costUncapped" : "ast.mm.costNoCap", { used: usedUsd(u.cost_usd) });
 });
 /** The usage meter, like a battery: how much of this month's included use is used. Only with a dollar cap; full,
  * and used up, only once the use reaches it (99.6% shows 99%). */
