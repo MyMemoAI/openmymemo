@@ -1301,3 +1301,10 @@ def test_cloud_settings_from_the_cli(vault, monkeypatch):
     assert "mymemo-cloud" in runner.invoke(cli, ["--vault", str(vault.root), "apps"]).output
     bad = runner.invoke(cli, ["cloud", "settings", "--service", "http://example.com"])
     assert bad.exit_code == 1 and "https://" in bad.output
+
+
+def test_cloud_settings_says_when_the_environment_sets_the_service(monkeypatch):
+    monkeypatch.setenv("OPENMYMEMO_CLOUD_URL", "http://127.0.0.1:9911/")
+    out = CliRunner().invoke(cli, ["cloud", "settings"])
+    assert out.exit_code == 0
+    assert "Service: http://127.0.0.1:9911 (set by OPENMYMEMO_CLOUD_URL)\n" in out.output  # not "MyMemo's own"
