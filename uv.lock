@@ -740,7 +740,7 @@ wheels = [
 
 [[package]]
 name = "openmymemo"
-version = "0.2.8"
+version = "0.2.9"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography", version = "48.0.1", source = { registry = "https://pypi.org/simple" }, marker = "platform_machine == 'x86_64' and sys_platform == 'darwin'" },
