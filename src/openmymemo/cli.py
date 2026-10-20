@@ -24,8 +24,9 @@ connector_app = typer.Typer(help="Manage the AI apps that can read your memory."
 app.add_typer(connector_app, name="connector")
 setup_app = typer.Typer(help="Set up AI apps that need more than an MCP config.", no_args_is_help=True)
 app.add_typer(setup_app, name="setup")
-cloud_app = typer.Typer(help="MyMemo Cloud: use your memory in ChatGPT and claude.ai on the web (optional; needs a "
-                             "MyMemo account).", no_args_is_help=True)
+cloud_app = typer.Typer(help="OpenMyMemo Cloud: use your memory in ChatGPT and claude.ai on the web, relayed by MyMemo "
+                             "while your memory stays on this computer (optional; needs MyMemo Pro, Ultra or Lifetime).",
+                        no_args_is_help=True)
 app.add_typer(cloud_app, name="cloud")
 assistant_app = typer.Typer(help="OpenMyMemo Assistant: optional model help with imports, sorting and more "
                                  "(off by default).", no_args_is_help=True)
@@ -830,7 +831,7 @@ def apps_(ctx: typer.Context) -> None:
                    f"{_ago(r['last_seen']) if r['in_use'] else '-'}")
     typer.echo("\nConnect one: openmymemo connect <app>    Any other MCP app: openmymemo connect other")
     if any(r["id"] == clients.CLOUD for r in rows):
-        typer.echo("ChatGPT and claude.ai on the web: openmymemo cloud link (needs a MyMemo account)")
+        typer.echo("ChatGPT and claude.ai on the web: openmymemo cloud link (needs MyMemo Pro, Ultra or Lifetime)")
 
 
 @app.command()
@@ -988,14 +989,14 @@ def connector_remove(ctx: typer.Context, connector_id: str) -> None:
     typer.echo(f"Revoked {connector_id}. Its MCP calls will now fail; `connector add --id {connector_id}` re-grants.")
 
 
-# ---- MyMemo Cloud -----------------------------------------------------------------------------------
+# ---- OpenMyMemo Cloud -----------------------------------------------------------------------------------
 
 # The ports the Mac app looks at and starts its server on (desktop/src-tauri/src/core.rs `PORTS`): 8787 and the next nine.
 PANEL_PORTS = range(DEFAULT_PORT, DEFAULT_PORT + 10)
 
 
 def _panel_for(vault_root: Path, port: int) -> str | None:
-    """The panel serving this folder, if one is running (it then runs MyMemo Cloud too): on `port`, or on any of
+    """The panel serving this folder, if one is running (it then runs OpenMyMemo Cloud too): on `port`, or on any of
     the ports the Mac app uses. A panel for another folder is never used."""
     import json
     import urllib.request
@@ -1030,7 +1031,8 @@ BRIDGE_STATES = {
     "connecting": "connecting…",
     "offline": "offline, reconnecting",
     "refused": "turned away by MyMemo (it didn't say the link is gone), trying again",
-    "plan": "paused: your MyMemo plan doesn't include MyMemo Cloud (it checks again every hour)",
+    "plan": "paused: your MyMemo plan doesn't include OpenMyMemo Cloud, which needs Pro, Ultra or Lifetime (it checks "
+            "again every hour)",
     "replaced": "stopped: another OpenMyMemo took over this link",
     "key": "stopped: run `openmymemo cloud link` again",
     "unlinked": "unlinked",
@@ -1091,7 +1093,7 @@ def _cloud_link(ctx: typer.Context, port: int, open_browser: bool) -> None:
     typer.echo("If that isn't your MyMemo account, run `openmymemo cloud unlink` now.")
     _web_steps(cloud.endpoint(link.service))
     if not panel:
-        typer.echo("\nMyMemo Cloud works while OpenMyMemo runs on this computer: the Mac app, `openmymemo serve`, or "
+        typer.echo("\nOpenMyMemo Cloud works while OpenMyMemo runs on this computer: the Mac app, `openmymemo serve`, or "
                    "an AI app that opens the panel.")
 
 
@@ -1107,7 +1109,7 @@ def cloud_link(ctx: typer.Context,
 def cloud_status(ctx: typer.Context,
                  port: Annotated[int, typer.Option(help="The port of the panel, if one is running.")] = DEFAULT_PORT
                  ) -> None:
-    """Show whether this computer is linked to MyMemo Cloud, and whether it is connected."""
+    """Show whether this computer is linked to OpenMyMemo Cloud, and whether it is connected."""
     from . import cloud
 
     link = cloud.load_link()
@@ -1127,10 +1129,10 @@ def cloud_status(ctx: typer.Context,
         state = BRIDGE_STATES.get(status["reason"] if status["state"] != "online" and status["reason"]
                                   else status["state"], status["state"])
         typer.echo(f"Connection: {state}")
-        if status.get("queued"):
-            typer.echo(f"Waiting in MyMemo Cloud: {status['queued']}")
+        if status.get("queue_enabled") and status.get("queued"):
+            typer.echo(f"Waiting in OpenMyMemo Cloud: {status['queued']}")
     else:
-        typer.echo("Connection: not running. MyMemo Cloud works while OpenMyMemo runs on this computer: the Mac app, "
+        typer.echo("Connection: not running. OpenMyMemo Cloud works while OpenMyMemo runs on this computer: the Mac app, "
                    "`openmymemo serve`, or an AI app that opens the panel.")
 
 
@@ -1139,9 +1141,9 @@ def _cloud_unlink(port: int, yes: bool) -> None:
 
     link = cloud.load_link()
     if link is None:
-        typer.echo("This computer isn't linked to MyMemo Cloud.")
+        typer.echo("This computer isn't linked to OpenMyMemo Cloud.")
         return
-    if not yes and not typer.confirm("Unlink this computer from MyMemo Cloud? ChatGPT and claude.ai on the web won't "
+    if not yes and not typer.confirm("Unlink this computer from OpenMyMemo Cloud? ChatGPT and claude.ai on the web won't "
                                      "reach your memory anymore.", default=True):
         raise typer.Exit()
     panel = _panel_for(Path(link.vault), port)
@@ -1152,16 +1154,17 @@ def _cloud_unlink(port: int, yes: bool) -> None:
 @cloud_app.command("unlink")
 def cloud_unlink(port: Annotated[int, typer.Option(help="The port of the panel, if one is running.")] = DEFAULT_PORT,
                  yes: Annotated[bool, typer.Option("--yes", "-y", help="Don't ask first.")] = False) -> None:
-    """Unlink this computer from MyMemo Cloud: the web apps lose access and the link is deleted here and at MyMemo."""
+    """Unlink this computer from OpenMyMemo Cloud: the web apps lose access and the link is deleted here and at MyMemo."""
     _cloud_unlink(port, yes)
 
 
 @cloud_app.command("settings")
 def cloud_settings(
-    show: Annotated[bool | None, typer.Option("--show/--hide", help="List MyMemo Cloud in the panel and `apps`.")] = None,
+    show: Annotated[bool | None, typer.Option("--show/--hide", help="List OpenMyMemo Cloud in the panel and `apps` "
+                                                                    "(listed unless hidden).")] = None,
     service: Annotated[str | None, typer.Option(help="The MyMemo service to link to; \"\" for MyMemo's own.")] = None,
 ) -> None:
-    """Show or change this computer's MyMemo Cloud settings: whether it is listed, and which service it links to."""
+    """Show or change this computer's OpenMyMemo Cloud settings: whether it is listed, and which service it links to."""
     from . import cloud
 
     try:
@@ -1233,7 +1236,7 @@ def _assistant_status(vault: Vault) -> None:
         typer.echo("  Model:     MyMemo's hosted model (see `openmymemo assistant plan`)")
         typer.echo(f"  Endpoint:  {s['endpoint']}")
         if m["signed_in"]:
-            how = {"cloud": " with this computer's MyMemo Cloud link",
+            how = {"cloud": " with this computer's OpenMyMemo Cloud link",
                    "env": " (the token in OPENMYMEMO_ASSISTANT_API_KEY)"}.get(m["via"] or "", "")
             who = cloud.account_label(m["account"]) if m["account"] else "a MyMemo account"
             typer.echo(f"  Signed in: {who}{how}")
@@ -1277,7 +1280,8 @@ def assistant_status(ctx: typer.Context) -> None:
 def assistant_set(
     ctx: typer.Context,
     kind: Annotated[str | None, typer.Option(
-        help="local (a model on this computer) or key (your own API key).")] = None,
+        help="local (a model on this computer), key (your own API key) or mymemo (MyMemo's hosted model; then "
+             "`openmymemo assistant signin`).")] = None,
     protocol: Annotated[str | None, typer.Option(help="openai (OpenAI-compatible) or anthropic.")] = None,
     base_url: Annotated[str | None, typer.Option(help="The endpoint's base URL; empty for the default.")] = None,
     model: Annotated[str | None, typer.Option(help="The model's name, e.g. llama3.2 or claude-haiku-5-5.")] = None,
@@ -1332,16 +1336,17 @@ def assistant_set(
         raise typer.Exit(1)
 
 
-# MyMemo's hosted model is hidden until its plan opens (product-design.md §17.8), so are its commands.
-@assistant_app.command("signin", hidden=True)
+# MyMemo's hosted model (product-design.md §17.8). OPENMYMEMO_ASSISTANT_MYMEMO=0 turns it off on a computer; then
+# `signin` refuses it, and `signout` and `plan` have nothing to do.
+@assistant_app.command("signin")
 def assistant_signin(
     ctx: typer.Context,
     browser: Annotated[bool, typer.Option("--browser", help="Sign in with the browser even when this computer is "
-                                                           "linked to MyMemo Cloud.")] = False,
+                                                           "linked to OpenMyMemo Cloud.")] = False,
     open_browser: Annotated[bool, typer.Option("--open/--no-open", help="Open the browser.")] = True,
 ) -> None:
-    """Sign in to MyMemo to use its hosted model, and choose it for the Assistant. A computer linked to MyMemo Cloud
-    needs no browser."""
+    """Sign in to MyMemo to use its hosted model, and choose it for the Assistant. A computer linked to
+    OpenMyMemo Cloud needs no browser."""
     import webbrowser
 
     from . import cloud
@@ -1384,7 +1389,7 @@ def assistant_signin(
     _assistant_status(vault)
 
 
-@assistant_app.command("signout", hidden=True)
+@assistant_app.command("signout")
 def assistant_signout() -> None:
     """Sign out of MyMemo: the sign-in is revoked at MyMemo and forgotten here; the Assistant uses its rules."""
     from .assistant import mymemo
@@ -1392,9 +1397,9 @@ def assistant_signout() -> None:
     typer.echo(mymemo.sign_out())
 
 
-@assistant_app.command("plan", hidden=True)
+@assistant_app.command("plan")
 def assistant_plan(ctx: typer.Context) -> None:
-    """Show MyMemo's hosted model, your OpenMyMemo Assistant plan and this period's usage, as MyMemo reports them."""
+    """Show MyMemo's hosted model, your OpenMyMemo Assistant plan and this month's use, as MyMemo reports them."""
     from .assistant import load_settings, mymemo
 
     s = load_settings()
@@ -1414,12 +1419,28 @@ def assistant_plan(ctx: typer.Context) -> None:
     if when:
         typer.echo(f"        this period ends {when}")
     u = a["usage"]
-    if any(v is not None for v in u.values()):
+    cost, bar, offer = mymemo.cost_text(u), mymemo.usage_bar(u), mymemo.offer_text(u)
+    if not plan["active"]:  # what the plan would include, as the service says
+        for line in (mymemo.includes_text(u, a["display_name"] or a["model"]), offer):
+            if line:
+                typer.echo(f"        {line}")
+    elif cost:
+        used_up = (mymemo.used_share(u) or 0) >= 1
+        reset = mymemo._date(when) if used_up else ""
+        typer.echo("Usage:  " + (f"{bar}  " if bar else "") + cost
+                   + (f": used up, resets {reset}" if reset else ": used up" if used_up else ""))
+        if offer:
+            typer.echo(f"        {offer}")
+    if any(u[k] is not None for k in ("input_tokens", "output_tokens", "input_tokens_included",
+                                      "output_tokens_included", "requests")):
         def part(used: int | None, included: int | None, what: str) -> str:
             return f"{used or 0:,}" + (f" of {included:,}" if included is not None else "") + f" {what}"
-        typer.echo("Usage:  " + ", ".join([part(u["input_tokens"], u["input_tokens_included"], "input tokens"),
-                                           part(u["output_tokens"], u["output_tokens_included"], "output tokens"),
-                                           f"{u['requests'] or 0:,} requests"]))
+        typer.echo(("        " if cost and plan["active"] else "Usage:  ") + ", ".join([
+            part(u["input_tokens"], u["input_tokens_included"], "input tokens"),
+            part(u["output_tokens"], u["output_tokens_included"], "output tokens"), f"{u['requests'] or 0:,} requests"]))
+    h = mymemo.hold(s)
+    if h:
+        typer.secho(f"Paused: {mymemo.hold_message(h)}", fg="yellow")
     if plan["plan_url"]:
         typer.echo(f"{'Manage' if plan['active'] else 'Get'} the plan: {plan['plan_url']}")
 

@@ -11,7 +11,7 @@ import ModalDialog from "./ModalDialog.vue";
 
 /**
  * The Mac app's settings (⌘,), in small groups: General (the memory folder, opening at login,
- * notifications), Appearance, AI changes (the approval switch), the OpenMyMemo Assistant, MyMemo Cloud (shown or not, and its service), Help, and Advanced (the `openmymemo`
+ * notifications), Appearance, AI changes (the approval switch), the OpenMyMemo Assistant, OpenMyMemo Cloud (shown or not, and its service), Help, and Advanced (the `openmymemo`
  * command the app installs, desktop/src-tauri/src/launcher.rs). In a browser preview only the parts the
  * panel itself provides show.
  */

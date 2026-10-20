@@ -11,7 +11,7 @@ Each app is connected one of three ways:
 * ``cli``    OpenMyMemo runs the app's own ``mcp add`` command, with a timeout; on any failure the person gets
              the command to run instead. Claude Code's ``~/.claude.json`` is its live state and is never edited.
 * ``manual`` a snippet to paste, plus an install link where the app has one.
-* ``account`` MyMemo Cloud (product-design.md §16): not an app on this computer but a sign-in that lets AI apps on
+* ``account`` OpenMyMemo Cloud (product-design.md §16): not an app on this computer but a sign-in that lets AI apps on
              the web reach the folder; it is linked and unlinked in ``cloud.py`` (``openmymemo cloud link``).
 
 An app is ``file`` or ``cli`` only once its config location and schema have been checked against its current
@@ -172,7 +172,7 @@ class Client:
 
 
 OTHER = "other"  # the generic entry: any other MCP app, added by name
-CLOUD = "mymemo-cloud"  # MyMemo Cloud: AI apps on the web, through the person's MyMemo account
+CLOUD = "mymemo-cloud"  # OpenMyMemo Cloud: AI apps on the web, through the person's MyMemo account
 
 
 def display_name(app_id: str) -> str | None:
@@ -520,7 +520,7 @@ def app_status(vault: Vault, client: Client, env: Env, known: dict | None = None
 
 
 def _account_status(vault: Vault, client: Client) -> dict:
-    """MyMemo Cloud: "connected" means this computer is linked for this folder. Its web apps are connectors of
+    """OpenMyMemo Cloud: "connected" means this computer is linked for this folder. Its web apps are connectors of
     their own (``cloud-chatgpt``, …), listed by ``/api/cloud``."""
     from . import cloud
 
@@ -541,7 +541,7 @@ def catalog(vault: Vault, env: Env | None = None) -> list[dict]:
     seen = _last_seen(vault)
     from .cloud import shown
 
-    listed = [c for c in CLIENTS if c.id != CLOUD or shown()]  # MyMemo Cloud: when turned on in Settings, or linked
+    listed = [c for c in CLIENTS if c.id != CLOUD or shown()]  # OpenMyMemo Cloud: unless hidden in Settings, or linked
     return [app_status(vault, c, env, known, seen) for c in listed]
 
 
@@ -721,7 +721,7 @@ def connect(vault: Vault, app_id: str, env: Env | None = None) -> Result:
     env = env or Env.current()
     cmd = _command(vault, client)
     if client.method == "account":
-        return Result("manual", "MyMemo Cloud links this computer to your MyMemo account: Sign in on the Connectors "
+        return Result("manual", "OpenMyMemo Cloud links this computer to your MyMemo account: Sign in on the Connectors "
                                 "page, or run `openmymemo cloud link`.")
     if client.id == OTHER:
         return Result("manual", "Give the app a name of your own: `openmymemo connector add \"App name\"` (add --http "
@@ -767,7 +767,7 @@ def disconnect(vault: Vault, app_id: str, env: Env | None = None) -> Result:
     client = get(app_id)
     env = env or Env.current()
     if client.method == "account":
-        return Result("manual", "Unlink MyMemo Cloud on the Connectors page, or run `openmymemo cloud unlink`.")
+        return Result("manual", "Unlink OpenMyMemo Cloud on the Connectors page, or run `openmymemo cloud unlink`.")
     if client.id == OTHER:
         return Result("manual", "Apps added by name are removed one by one: `openmymemo connector remove <id>`, "
                                 "or Remove in the panel.")
@@ -1070,9 +1070,9 @@ CLIENTS.append(
     Client(OTHER, "Other MCP app", "manual", docs="https://modelcontextprotocol.io/docs/develop/connect-local-servers",
            snippet=lambda cmd: json.dumps({"mcpServers": {ENTRY: plain(cmd)}}, indent=2, ensure_ascii=False)))
 
-# ChatGPT and claude.ai on the web reach only public MCP servers; MyMemo Cloud relays them here (§16).
+# ChatGPT and claude.ai on the web reach only public MCP servers; OpenMyMemo Cloud relays them here (§16).
 CLIENTS.append(
-    Client(CLOUD, "MyMemo Cloud", "account",
-           docs="https://github.com/MyMemoAI/openmymemo/blob/main/docs/product-design.md#16-mymemo-cloud-an-optional-"
-                "connector-for-ai-apps-on-the-web-2026-10-12-design",
+    Client(CLOUD, "OpenMyMemo Cloud", "account",
+           docs="https://github.com/MyMemoAI/openmymemo/blob/main/docs/product-design.md#16-openmymemo-cloud-an-"
+                "optional-connector-for-ai-apps-on-the-web-2026-10-12-design",
            site="https://mymemo.ai", description="Use your memory in ChatGPT and claude.ai on the web"))

@@ -7,9 +7,9 @@ import { copy, refresh, store, toast } from "../store";
 import AppIcon from "./AppIcon.vue";
 
 /**
- * MyMemo Cloud (product-design.md §16): sign in to link this computer, its status, what to paste into ChatGPT and
+ * OpenMyMemo Cloud (product-design.md §16): sign in to link this computer, its status, what to paste into ChatGPT and
  * claude.ai, how many changes wait in its offline queue (from the service's `welcome`, counted down as they are
- * filed), and the web apps using it, each a normal connector row (`manage` shows a row's permissions, as in
+ * filed; only once this OpenMyMemo takes the queue, `queue_enabled`, which it doesn't since the launch), and the web apps using it, each a normal connector row (`manage` shows a row's permissions, as in
  * ConnectApps). Polls /api/cloud while it is on screen.
  */
 const props = defineProps<{ open?: string | null }>();
@@ -60,11 +60,15 @@ onBeforeUnmount(() => window.clearInterval(timer));
 const s = computed(() => status.value);
 const linkedHere = computed(() => !!s.value?.linked && s.value.this_folder);
 
-/** "Ultra · live relay + offline queue". A tier the panel doesn't know yet shows as the service names it. */
+/** The offline queue, only when this OpenMyMemo takes it and the plan has it; never at launch. */
+const queueOn = (c: CloudStatus | null | undefined) => !!c?.queue_enabled && !!c.plan?.queue;
+
+/** "Ultra · live relay" (" + offline queue" with queueOn). A tier the panel doesn't know yet shows as the service
+ * names it. */
 function planLabel(c: CloudStatus): string {
   const key = c.plan?.tier ? `cloud.tier.${c.plan.tier}` : "";
   const tier = key && t(key) !== key ? t(key) : (c.plan?.tier ?? "");
-  const modes = [c.plan?.live && t("cloud.mode.live"), c.plan?.queue && t("cloud.mode.queue")].filter(Boolean);
+  const modes = [c.plan?.live && t("cloud.mode.live"), queueOn(c) && t("cloud.mode.queue")].filter(Boolean);
   return [tier, modes.join(" + ")].filter(Boolean).join(" · ");
 }
 
@@ -224,7 +228,7 @@ defineExpose({ reload: load });
       <a :href="signInUrl" target="_blank" rel="noopener" class="btn btn-link btn-sm">{{ t("cloud.openAgain") }}</a>
     </div>
 
-    <div v-if="s && linkedHere && s.queued" class="flex items-start gap-2.5 bg-sunken px-4.5 py-3 text-[13px]" role="status" data-queued>
+    <div v-if="s && linkedHere && s.queue_enabled && s.queued" class="flex items-start gap-2.5 bg-sunken px-4.5 py-3 text-[13px]" role="status" data-queued>
       <AppIcon name="clock" :size="15" class="mt-px text-wait-ink" />
       <div class="min-w-0 flex-1">
         <div>{{ tn("cloud.queued", s.queued) }}</div>
@@ -247,7 +251,7 @@ defineExpose({ reload: load });
           <span class="text-muted">{{ t("cloud.chatgptPlan") }}</span>
         </li>
       </ul>
-      <p class="text-muted">{{ t(s?.plan?.queue ? "cloud.whileRunningQueue" : "cloud.whileRunning") }}</p>
+      <p class="text-muted">{{ t(queueOn(s) ? "cloud.whileRunningQueue" : "cloud.whileRunning") }}</p>
     </div>
 
     <template v-for="app in apps" :key="app.id">

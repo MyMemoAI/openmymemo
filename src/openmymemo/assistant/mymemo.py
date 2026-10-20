@@ -1,9 +1,9 @@
 """MyMemo's hosted model for the Assistant (product-design.md §17.8): signing in, its tokens, and how its answers
 change what the Assistant does. The endpoint itself is OpenAI-compatible and called by ``client.py`` like any other.
 
-* **Signing in** reuses MyMemo Cloud's machinery (``cloud.py``): the service URL setting, PKCE with a loopback
+* **Signing in** reuses OpenMyMemo Cloud's machinery (``cloud.py``): the service URL setting, PKCE with a loopback
   redirect to ``/cloud/callback`` and the ``iss`` check (``Linker``), and the per-computer folder. A computer already
-  linked to MyMemo Cloud needs no browser: its device token is exchanged for an ``assistant`` token (RFC 8693).
+  linked to OpenMyMemo Cloud needs no browser: its device token is exchanged for an ``assistant`` token (RFC 8693).
   Otherwise the browser signs in with ``scope=assistant offline_access``. The token is scoped to the model endpoint.
 * **Tokens** are kept like the API key (``settings.py``): the Keychain on macOS when possible, else the 0600
   ``assistant.json``. An access token is refreshed shortly before it expires and when the endpoint answers 401; the
@@ -15,11 +15,11 @@ change what the Assistant does. The endpoint itself is OpenAI-compatible and cal
   stored sign-in is still that generation at that service, checked under the lock. Otherwise the request stops and
   the feature uses its rules: a request never carries another sign-in's token, never sends its own to another
   service, and never writes over a newer sign-in.
-* **The account** shown is only one this sign-in authenticated: the MyMemo Cloud account whose device token was
+* **The account** shown is only one this sign-in authenticated: the OpenMyMemo Cloud account whose device token was
   exchanged, or a masked ``member`` in the service's token or ``/models`` answer. A browser sign-in is otherwise
   "signed in to MyMemo at <host>".
 * **Pauses.** MyMemo answers 402 when the account has no Assistant plan (``plan_required``) or this month's
-  allowance is used up (``quota_exceeded``), and 429 or 503 with ``Retry-After`` when busy. Each is kept as a
+  included use is used up (``quota_exceeded``), and 429 or 503 with ``Retry-After`` when busy. Each is kept as a
   ``hold`` with an end time; until then the Assistant makes no request and every feature takes its rule-based path
   quietly. The panel's plan view (``account``) lifts a ``plan_required`` hold as soon as the plan is active.
 * **Signing out** revokes the grant at MyMemo and forgets the tokens.
@@ -33,6 +33,7 @@ import contextlib
 import functools
 import hashlib
 import logging
+import math
 import secrets
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
@@ -84,7 +85,7 @@ def _parse(value: Any) -> datetime | None:
 
 
 def service_of(s: Settings) -> str:
-    """The service this computer signed in to, else the one a sign-in would use (MyMemo Cloud's setting)."""
+    """The service this computer signed in to, else the one a sign-in would use (OpenMyMemo Cloud's setting)."""
     service = s.mymemo.get("service")
     return (service if isinstance(service, str) and service else cloud.service_url()).rstrip("/")
 
@@ -215,7 +216,7 @@ def _forget(raw: dict[str, Any], reason: str | None) -> None:
 
 
 EXCHANGE_MESSAGES = {
-    "signed_in": "Signed in to MyMemo with this computer's MyMemo Cloud link.",
+    "signed_in": "Signed in to MyMemo with this computer's OpenMyMemo Cloud link.",
     "use_browser": "MyMemo no longer knows this computer's link. Sign in with the browser instead.",
     "unreachable": "MyMemo couldn't be reached. Check your connection and try again.",
     "busy": "MyMemo is busy. Try again in a minute.",
@@ -224,7 +225,7 @@ EXCHANGE_MESSAGES = {
 
 
 def exchange(link: cloud.Link) -> str:
-    """A computer linked to MyMemo Cloud: trade its device token for an ``assistant`` token, no browser. Returns a
+    """A computer linked to OpenMyMemo Cloud: trade its device token for an ``assistant`` token, no browser. Returns a
     key of ``EXCHANGE_MESSAGES``: ``signed_in``; ``use_browser`` when MyMemo no longer accepts the device token; or
     why it didn't work."""
     form = {"grant_type": TOKEN_EXCHANGE, "client_id": CLIENT_ID, "subject_token": link.device_token,
@@ -258,7 +259,7 @@ def authorize_url(service: str, redirect_uri: str, challenge: str, state: str, n
 
 class SignIn(Linker):
     """Browser sign-ins for the Assistant started in this process: PKCE, a loopback redirect to ``/cloud/callback``
-    (shared with MyMemo Cloud's linking; the ``state`` tells them apart) and the ``iss`` check, as ``Linker``."""
+    (shared with OpenMyMemo Cloud's linking; the ``state`` tells them apart) and the ``iss`` check, as ``Linker``."""
 
     STALE = ("It was already used, or it is more than ten minutes old. Start again in OpenMyMemo: "
              "Settings → Assistant → Sign in.")
@@ -302,7 +303,7 @@ class SignIn(Linker):
 
 
 def service_url_for_signin() -> str:
-    """Where a new sign-in goes: the service of this computer's MyMemo Cloud link, else MyMemo Cloud's setting."""
+    """Where a new sign-in goes: the service of this computer's OpenMyMemo Cloud link, else OpenMyMemo Cloud's setting."""
     link = cloud.load_link()
     return (link.service if link else cloud.service_url()).rstrip("/")
 
@@ -506,8 +507,8 @@ def hold_message(h: Mapping[str, Any]) -> str:
         return "Needs the OpenMyMemo Assistant plan. Until then, OpenMyMemo uses its rules."
     if code == "quota_exceeded":
         when = _date(h.get("resets_at"))
-        return (f"This month's allowance is used up, resets {when}. Until then, OpenMyMemo uses its rules." if when
-                else "This month's allowance is used up. Until it resets, OpenMyMemo uses its rules.")
+        return (f"This month's included use is used up; it resets {when}. Until then, OpenMyMemo uses its rules."
+                if when else "This month's included use is used up. Until it resets, OpenMyMemo uses its rules.")
     if code == "unavailable":
         return "MyMemo's model is briefly unavailable. OpenMyMemo uses its rules and tries again shortly."
     return "MyMemo asked OpenMyMemo to slow down. It uses its rules and tries again shortly."
@@ -637,6 +638,10 @@ def _models_shape(data: Mapping[str, Any], service: str) -> dict[str, Any]:
     def num(v: Any) -> int | None:
         return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else None
 
+    def money(v: Any) -> float | None:  # US dollars, as the service meters them (`cost_usd`, `cost_usd_included`)
+        ok = isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v >= 0
+        return float(v) if ok else None
+
     plan = data.get("plan") if isinstance(data.get("plan"), dict) else {}
     usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
     limits = data.get("limits") if isinstance(data.get("limits"), dict) else {}
@@ -647,10 +652,76 @@ def _models_shape(data: Mapping[str, Any], service: str) -> dict[str, Any]:
                  "period_start": text(plan.get("period_start")), "period_end": text(plan.get("period_end")),
                  "resets_at": text(plan.get("resets_at")), "cancel_at_period_end": plan.get("cancel_at_period_end") is True,
                  "plan_url": _plan_url(plan.get("plan_url"), service)},
-        "usage": {k: num(usage.get(k)) for k in ("input_tokens", "output_tokens", "input_tokens_included",
-                                                 "output_tokens_included", "requests")},
+        # This period's use. `cost_usd` and `cost_usd_included` (None: no cap) come from services that meter in
+        # dollars; an older service sends only the token counts, and then they are None too. A limited-time offer
+        # includes more than the plan's regular use (`cost_usd_regular_included`), until `offer_ends_at` if announced.
+        "usage": {**{k: num(usage.get(k)) for k in ("input_tokens", "output_tokens", "input_tokens_included",
+                                                    "output_tokens_included", "requests")},
+                  **{k: money(usage.get(k)) for k in ("cost_usd", "cost_usd_included", "cost_usd_regular_included")},
+                  "offer_ends_at": _iso(ends) if (ends := _parse(usage.get("offer_ends_at"))) else None},
         "limits": {k: num(limits.get(k)) for k in ("requests_per_minute", "requests_per_day")},
     }
+
+
+def _usd(n: float) -> str:
+    return f"${n:,.2f}"
+
+
+def _used_usd(n: float) -> str:
+    """Use so far, floored to the cent: $9.999 of $10.00 shows $9.99, never the cap before the service says it is
+    reached. (Rounded to 6 places first, so 0.29 isn't floored to 0.28 by binary floating point.)"""
+    return _usd(math.floor(round(n * 100, 6)) / 100)
+
+
+def offer_text(usage: Mapping[str, Any]) -> str | None:
+    """ "Limited-time offer: $10.00 of use this month instead of the regular $5.00, until November 30." when the
+    service includes more than the plan's regular use this month; None otherwise (no offer wording at all)."""
+    included, regular = usage.get("cost_usd_included"), usage.get("cost_usd_regular_included")
+    if included is None or regular is None or not included > regular:
+        return None
+    until = _date(usage.get("offer_ends_at"))
+    return (f"Limited-time offer: {_usd(included)} of use this month instead of the regular {_usd(regular)}"
+            + (f", until {until}." if until else "."))
+
+
+def includes_text(usage: Mapping[str, Any], model: str | None) -> str | None:
+    """What the plan includes, before it is bought, from the service's figures only (the regular amount during an
+    offer, which ``offer_text`` adds to); None when the service names no dollar allowance or no model."""
+    regular = usage.get("cost_usd_regular_included")
+    included = regular if offer_text(usage) else usage.get("cost_usd_included")
+    if included is None or not model:
+        return None
+    return f"The plan includes up to {_usd(included)} of {model} use a month."
+
+
+def used_share(usage: Mapping[str, Any]) -> float | None:
+    """How much of this month's included use is used, 0 to 1 (1: used up); None without a dollar cap."""
+    used, included = usage.get("cost_usd"), usage.get("cost_usd_included")
+    if used is None or included is None:
+        return None
+    return 1.0 if used >= included else used / included
+
+
+def usage_bar(usage: Mapping[str, Any], width: int = 10) -> str | None:
+    """ "[██████░░░░] 62%" for the CLI; full only once it is used up, so 99.6% still shows 99%. None without a cap."""
+    share = used_share(usage)
+    if share is None:
+        return None
+    percent = 100 if share >= 1 else min(99, round(share * 100))
+    filled = width if share >= 1 else min(width - 1, round(share * width))
+    return f"[{'█' * filled}{'░' * (width - filled)}] {percent}%"
+
+
+def cost_text(usage: Mapping[str, Any]) -> str | None:
+    """ "$1.23 of $10.00 used this month" from ``_models_shape``'s usage; None when the service sent no cost. With no
+    dollar cap and no token caps either, it says there is no cap."""
+    used, included = usage.get("cost_usd"), usage.get("cost_usd_included")
+    if used is None:
+        return None
+    if included is not None:
+        return f"{_used_usd(used)} of {_usd(included)} used this month"
+    capped = any(usage.get(k) is not None for k in ("input_tokens_included", "output_tokens_included"))
+    return f"{_used_usd(used)} used this month" + ("" if capped else ", no cap")
 
 
 def account(s: Settings) -> dict[str, Any]:
@@ -681,7 +752,8 @@ def account(s: Settings) -> dict[str, Any]:
 
 
 __all__ = [
-    "CHANGED", "EXCHANGE_MESSAGES", "MYMEMO_PATH", "SIGNED_OUT", "Session", "SignIn", "access_token", "account", "clear_hold", "exchange",
+    "CHANGED", "EXCHANGE_MESSAGES", "MYMEMO_PATH", "SIGNED_OUT", "Session", "SignIn", "access_token", "account", "clear_hold",
+    "cost_text", "exchange", "includes_text", "offer_text", "usage_bar", "used_share",
     "hold", "hold_message", "keep", "keep_signin", "note_failure", "public_status", "refresh", "resource",
     "service_of", "session", "sign_in_with_browser", "sign_out",
 ]

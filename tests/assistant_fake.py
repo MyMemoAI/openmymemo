@@ -1,5 +1,5 @@
 """A fake MyMemo service for the OpenMyMemo Assistant's hosted model (product-design.md §17.8), built from
-tests/fixtures/cloud/assistant/ on top of the MyMemo Cloud fake (its consent page, device link and device token).
+tests/fixtures/cloud/assistant/ on top of the OpenMyMemo Cloud fake (its consent page, device link and device token).
 
 It adds the OAuth token and revoke endpoints for client ``openmymemo-desktop`` (authorization code with PKCE, token
 exchange of the device token, rotating refresh tokens with reuse detection) and the endpoint itself: ``/tasks``

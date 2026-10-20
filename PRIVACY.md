@@ -1,14 +1,14 @@
 # Privacy Policy
 
-Last updated: 2026-10-18
+Last updated: 2026-10-19
 
-OpenMyMemo is open-source software published by MyMemo. It keeps your AI memory in a folder on your own computer. This policy covers the OpenMyMemo command-line tool, its MCP server, its review panel, the Mac app and the plugins and extensions in this repository. MyMemo Cloud, an optional MyMemo service, is covered by the section of that name below and by MyMemo's own privacy policy.
+OpenMyMemo is open-source software published by MyMemo. It keeps your AI memory in a folder on your own computer. This policy covers the OpenMyMemo command-line tool, its MCP server, its review panel, the Mac app and the plugins and extensions in this repository. OpenMyMemo Cloud, an optional MyMemo service, is covered by the section of that name below and by MyMemo's own privacy policy.
 
 ## In short
 
 - Your memory stays on your computer. MyMemo does not receive it, and OpenMyMemo has no account, telemetry, analytics, crash reporting or update check.
 - AI apps you connect read your memory and send what they read to their own model provider, under that app's privacy policy. The `health` and `finance` topics are hidden from every app unless you allow them.
-- Nothing leaves your computer through OpenMyMemo unless you turn on MyMemo Cloud and link this computer to a MyMemo account, or turn on the OpenMyMemo Assistant with a model that isn't on your computer.
+- Nothing leaves your computer through OpenMyMemo unless you sign in to OpenMyMemo Cloud and link this computer to a MyMemo account, or turn on the OpenMyMemo Assistant with a model that isn't on your computer.
 
 ## What OpenMyMemo stores on your computer
 
@@ -28,12 +28,12 @@ Everything below is stored only on your computer. OpenMyMemo never uploads it.
   - a log of its background server, which never records your memories.
 
   When an AI app changes something, the Mac app can show a macOS notification that includes the text of the change. You can turn notifications off in Settings.
-- **MyMemo Cloud, if you link this computer:** `cloud.json` and `settings.json` in OpenMyMemo's per-user application folder. Only you can read them. They hold:
+- **OpenMyMemo Cloud:** once you change its settings, `settings.json` in OpenMyMemo's per-user application folder holds whether it is listed and which service it uses. If you link this computer, `cloud.json` next to it holds:
   - the service address, a device id and token, and the private key that opens queued changes;
   - which folder is linked;
   - your MyMemo display name, masked email and plan.
 
-  The activity log also records which account the computer was linked to.
+  Only you can read these files. The activity log also records which account the computer was linked to.
 
 - **Search by meaning on this computer, if you turn it on:** `semantic.json` (on or off, the model you chose, and which models' terms you accepted), the downloaded model under `models/`, and, if OpenMyMemo had to install it, ONNX Runtime under `semantic-runtime/`, all next to `cloud.json`. In your memory folder, `.openmymemo/index/` holds a number vector for each memory: a cache that keeps itself out of git and is deleted when you turn the switch off.
 - **The OpenMyMemo Assistant, if you turn it on:** `assistant.json`, next to `cloud.json`, readable by you only. It holds your choice of model and endpoint, its switches and limits, this month's usage counts, and which apps' sessions you allowed it to read. With session reading on, `session-state.json` next to it records, per session, how many messages were already read and when (no text), for 30 days. Your API key is kept in the macOS Keychain when possible, otherwise in that file; it is never put in your memory folder. The activity log records each request the Assistant makes: what it was for, the model, the endpoint's host name, token counts, how long it took, which memories it was sent and whether it worked. It never records the text sent or received.
@@ -54,13 +54,13 @@ OpenMyMemo's server listens only on `127.0.0.1`, so other devices cannot reach i
 
   These are ordinary download requests. Like any `uv` download, they carry `uv`'s usual client information, such as its version and your operating system. No memory is sent.
 - **Links you click.** The panel and the Mac app open documentation and download pages in your browser. Install links open the AI app they belong to directly (for example `cursor://` or `vscode:`), never a website, because they carry the command that starts OpenMyMemo and with it the path of your memory folder.
-- **MyMemo Cloud**, only after you turn it on and link this computer (see below).
+- **OpenMyMemo Cloud**, only after you sign in and link this computer (see below).
 - **The OpenMyMemo Assistant**, only after you turn it on with a model that isn't on your computer (see below). With MyMemo's hosted model, signing in and refreshing the sign-in also talk to the MyMemo service.
 - **Search by meaning on this computer**, only when you turn it on or switch models: it downloads the model you chose from Hugging Face (huggingface.co and the storage it redirects to), at a fixed address, and checks each file against a SHA-256 checksum in OpenMyMemo's code, deleting a file that doesn't match. If ONNX Runtime isn't installed, it is downloaded from PyPI the same way OpenMyMemo's other libraries are. These are ordinary downloads: no memory and nothing about you is sent, beyond what any download carries (your IP address, and the client's name). Searching with it happens entirely on your computer.
 
-## MyMemo Cloud (optional)
+## OpenMyMemo Cloud (optional)
 
-MyMemo Cloud lets ChatGPT and claude.ai on the web use your memory through your MyMemo account. It is hidden until you turn on "Show MyMemo Cloud" in Settings and does nothing until you sign in and link this computer. You can choose another compatible service instead of MyMemo's own (`https://api.mymemo.ai`).
+OpenMyMemo Cloud lets ChatGPT and claude.ai on the web use your memory through your MyMemo account, on MyMemo Pro, Ultra or Lifetime. It is a relay, not hosting: your memory stays on your computer. It is listed on the Connectors page, which sends nothing anywhere, and you can hide it by turning off "Show OpenMyMemo Cloud" in Settings. It does nothing until you sign in and link this computer. You can choose another compatible service instead of MyMemo's own (`https://api.mymemo.ai`).
 
 When this computer is linked:
 
@@ -73,7 +73,7 @@ When this computer is linked:
 - **While OpenMyMemo runs**, it keeps a connection to the service and sends the list of OpenMyMemo's tools.
   - When a web app calls a tool, the service relays the call, and OpenMyMemo answers it on your computer. Your memory therefore passes through the service in transit: the memories the web app reads, and the changes it proposes.
   - Web apps get their own connectors, with the same defaults as other apps: private topics excluded, every change a proposal.
-- **Offline queue.** On plans that include it, changes a web app proposes while your computer is offline wait at the service. They are encrypted to this computer's key, so the service can't read them, and they are deleted once your computer has received them.
+- **While your computer is offline**, web apps can't read or change your memory, and nothing waits at the service: the offline queue isn't offered yet. If it is offered later, on plans that include it, changes a web app proposes while your computer is offline will wait at the service, encrypted to this computer's key so the service can't read them, and be deleted once your computer has received them.
 - **Unlinking** deletes the link on your computer and asks the service to delete the device.
 
 What the MyMemo service stores and how long it keeps it is governed by [MyMemo's privacy policy](https://mymemo.ai/privacy-policy/). If you choose another service, its operator's policy applies.
@@ -102,13 +102,13 @@ The OpenMyMemo Assistant uses a model to help with imports, sorting and search, 
 
 ### MyMemo's hosted model
 
-MyMemo's hosted model isn't offered yet: Settings → Assistant doesn't list it. Once MyMemo opens its plan, you will be able to choose it in Settings → Assistant, or with `openmymemo assistant signin`. It is a MyMemo service with its own monthly plan, the OpenMyMemo Assistant plan. Nothing is sent until you choose it and sign in.
+You can choose MyMemo's hosted model in Settings → Assistant, or with `openmymemo assistant signin`. It is a MyMemo service with its own plan, the OpenMyMemo Assistant plan, separate from MyMemo memberships: $5 a month, including $5 of Claude Haiku 5.5 use a month (for a limited time after the launch, $10). Nothing is sent to MyMemo until you choose it and sign in. (Setting `OPENMYMEMO_ASSISTANT_MYMEMO=0` on a computer removes the choice there.)
 
-- **Signing in.** If this computer is linked to MyMemo Cloud, OpenMyMemo trades the link's device token for a sign-in that can only reach the model, with no browser. Otherwise your browser opens MyMemo's sign-in page with this computer's name. The service returns an access token and a refresh token. They are kept on your computer like an API key (in the Keychain on a Mac, otherwise in `assistant.json`), never in your memory folder, and sent only to that service.
-- **For each request,** OpenMyMemo sends the service the text a feature works on (as above) and the feature's name, such as "import" or "sort". The service passes the text to Anthropic's Claude models to answer and returns the answer. Private topics are never sent, as for any model outside your computer.
-- **What MyMemo keeps.** The service doesn't keep the text or the answer after answering. It keeps metadata only: your account, the feature, the model, token counts, the time and whether it worked, which it uses for your plan's usage and limits. It shows OpenMyMemo your plan and this period's usage, and OpenMyMemo shows them in Settings → Assistant.
-- **Anthropic** processes the text to answer it, under its terms as MyMemo's provider.
-- **Signing out** asks the service to revoke the sign-in and deletes both tokens from your computer. MyMemo Cloud, if linked, stays linked.
+- **Signing in.** If this computer is linked to OpenMyMemo Cloud, OpenMyMemo trades the link's device token for a sign-in that can only reach the model, with no browser. Otherwise your browser opens MyMemo's sign-in page with this computer's name. The service returns an access token and a refresh token. They are kept on your computer like an API key (in the Keychain on a Mac, otherwise in `assistant.json`), never in your memory folder, and sent only to that service.
+- **For each request,** OpenMyMemo sends the service the text a task works on (as above) and the task's name, such as `import.split` or `sort`. Private topics are never sent, as for any model outside your computer.
+- **Who processes it.** Two processors handle the text sent for a task: MyMemo, which runs the service, and Anthropic, to which the service passes the text so that its Claude model can answer, under Anthropic's terms as MyMemo's provider. The answer comes back to your computer through the service.
+- **What MyMemo keeps.** The service keeps no request or answer text. It keeps metadata only: your account, the task, the model, token counts, what the request cost at Anthropic's list price, the time and the outcome. It uses them to count your plan's monthly use and limits, and it reports your plan and this month's use to OpenMyMemo, which shows them in Settings → Assistant and with `openmymemo assistant plan`.
+- **Signing out** asks the service to revoke the sign-in and deletes both tokens from your computer. OpenMyMemo Cloud, if linked, stays linked.
 
 How MyMemo handles your account and its metadata is governed by [MyMemo's privacy policy](https://mymemo.ai/privacy-policy/).
 
@@ -116,7 +116,7 @@ How MyMemo handles your account and its metadata is governed by [MyMemo's privac
 
 - Read, edit, export or delete your memories at any time. They are plain files in a folder you own.
 - Choose for each app which topics it may read and whether it may write. Remove an app's access, or turn approval on so that every change from an app that proposes (the default) waits for you; an app you let write directly still applies its changes at once, except in private topics.
-- Disconnect an app, which removes OpenMyMemo from its settings. Unlink MyMemo Cloud, or leave it hidden. Turn the OpenMyMemo Assistant off, or limit what it is used for.
+- Disconnect an app, which removes OpenMyMemo from its settings. Unlink OpenMyMemo Cloud, or hide it in Settings. Turn the OpenMyMemo Assistant off, or limit what it is used for.
 - To remove everything:
   1. Delete the memory folder.
   2. Delete OpenMyMemo's application folders (`~/Library/Application Support/ai.mymemo.openmymemo`, `~/Library/Application Support/OpenMyMemo` and `~/Library/Caches/ai.mymemo.openmymemo` on a Mac).

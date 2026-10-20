@@ -10,7 +10,7 @@ import SnippetTabs from "./SnippetTabs.vue";
 /**
  * One connected app's permissions: what it may read, how it writes, the topics it may not write to, its
  * setup, a new token, and removing it. `app` is its catalog entry, or null for an app added by name or a web app
- * using MyMemo Cloud (kind "cloud", whose setup is on the MyMemo Cloud row).
+ * using OpenMyMemo Cloud (kind "cloud", whose setup is on the OpenMyMemo Cloud row).
  * Removing asks whether to take OpenMyMemo out of the app's settings too; the parent does the removal.
  */
 const props = defineProps<{ connector: Connector; app: AppStatus | null }>();
@@ -21,7 +21,7 @@ const WRITE_MODES = ["none", "propose", "auto"] as const;
 const c = computed(() => props.connector);
 /** A catalog app running over stdio gets its own setup; anything else the generic snippets (and a token). */
 const ownSetup = computed(() => !!props.app && c.value.kind === "stdio");
-/** A web app through MyMemo Cloud: nothing to paste here, and no token. */
+/** A web app through OpenMyMemo Cloud: nothing to paste here, and no token. */
 const viaCloud = computed(() => c.value.kind === "cloud");
 /** The OpenMyMemo Assistant: built in, set up in Settings → Assistant, with its private topics chosen there. */
 const builtIn = computed(() => c.value.kind === "assistant");

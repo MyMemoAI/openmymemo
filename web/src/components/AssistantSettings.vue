@@ -15,14 +15,15 @@ import SemanticSettings from "./SemanticSettings.vue";
  * Settings → Assistant (product-design.md §17.2): off, a model on this computer, your own API key, or MyMemo's hosted
  * model; its endpoint, model and key (write-only), a Test button, a switch per feature, the private topics a model on
  * this computer may read, monthly limits and this month's usage, and where memory text goes. For MyMemo (§17.8):
- * sign-in (no browser when this computer is linked to MyMemo Cloud), the account, and the model, plan and usage as
+ * sign-in (no browser when this computer is linked to OpenMyMemo Cloud), the account, and the model, plan and usage as
  * MyMemo reports them, with its plan page opened in the browser; nothing about the plan is known here.
  * Its embeddings model (optional) and the local model for search by meaning (`SemanticSettings`, shown even with
  * the Assistant off) are here too.
  */
 type Choice = "off" | AssistantKind;
 const CHOICES: Choice[] = ["off", "local", "key", "mymemo"];
-// A kind the server doesn't offer isn't shown: MyMemo's hosted model stays hidden until its plan opens (§17.8).
+// A kind the server doesn't offer isn't shown: MyMemo's hosted model is offered unless turned off on this computer
+// (OPENMYMEMO_ASSISTANT_MYMEMO=0, §17.8).
 const choices = computed(() => CHOICES.filter((c) => c === "off" || status.value?.kinds[c]));
 const FEATURES: AssistantFeature[] = ["import", "sort", "recall", "check", "session", "tidy"];
 
@@ -165,15 +166,57 @@ const day = (iso: string | null | undefined) => {
 };
 const ok = computed(() => (account.value?.ok ? account.value : null));
 const planUrl = computed(() => ok.value?.plan.plan_url ?? mm.value?.hold?.plan_url ?? null);
+const usd = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+/** Use so far, floored to the cent: $9.999 of $10.00 shows $9.99, never the cap before the service says it is reached
+ * (rounded to 6 places first, so 0.29 isn't floored to 0.28 by floating point). */
+const usedUsd = (n: number) => usd(Math.floor(Number((n * 100).toFixed(6))) / 100);
+const active = computed(() => !!ok.value?.plan.active);
+/** This month's use in dollars, as the service meters it ("$1.23 of $10.00 used this month."), for an active plan;
+ * "" from an older service that reports tokens only. No dollar cap and no token caps: no cap. */
+const costText = computed(() => {
+  const u = ok.value?.usage;
+  if (!active.value || u?.cost_usd == null) return "";
+  if (u.cost_usd_included != null) return t("ast.mm.cost", { used: usedUsd(u.cost_usd), included: usd(u.cost_usd_included) });
+  const capped = u.input_tokens_included != null || u.output_tokens_included != null;
+  return t(capped ? "ast.mm.costUncapped" : "ast.mm.costNoCap", { used: usedUsd(u.cost_usd) });
+});
+/** The usage meter, like a battery: how much of this month's included use is used. Only with a dollar cap; full,
+ * and used up, only once the use reaches it (99.6% shows 99%). */
+const meter = computed(() => {
+  const u = ok.value?.usage;
+  if (!active.value || u?.cost_usd == null || u.cost_usd_included == null) return null;
+  const share = u.cost_usd >= u.cost_usd_included ? 1 : u.cost_usd / u.cost_usd_included;
+  return { usedUp: share >= 1, percent: share >= 1 ? 100 : Math.min(99, Math.round(share * 100)) };
+});
+const resetDate = computed(() => (active.value ? day(ok.value?.plan.resets_at ?? ok.value?.plan.period_end) : ""));
+/** The token counts: the whole usage line from an older service, the detail under the dollars otherwise. */
 const usageText = computed(() => {
   const u = ok.value?.usage;
-  if (!u || Object.values(u).every((v) => v == null)) return "";
+  const counts = u && [u.input_tokens, u.output_tokens, u.input_tokens_included, u.output_tokens_included, u.requests];
+  if (!u || !counts || counts.every((v) => v == null)) return "";
   const of = (used: number | null, included: number | null) =>
     included == null ? fmt(used ?? 0) : t("ast.mm.usageOf", { used: fmt(used ?? 0), included: fmt(included) });
-  return t("ast.mm.usage", {
+  return t(costText.value ? "ast.mm.tokens" : "ast.mm.usage", {
     input: of(u.input_tokens, u.input_tokens_included), output: of(u.output_tokens, u.output_tokens_included),
     requests: fmt(u.requests ?? 0),
   });
+});
+/** A limited-time offer: this month includes more than the plan's regular use. Only when the service says both. */
+const offerText = computed(() => {
+  const u = ok.value?.usage;
+  const included = u?.cost_usd_included;
+  const regular = u?.cost_usd_regular_included;
+  if (included == null || regular == null || !(included > regular)) return "";
+  const until = day(u?.offer_ends_at);
+  return t(until ? "ast.mm.offerUntil" : "ast.mm.offer", { included: usd(included), regular: usd(regular), date: until });
+});
+/** What the plan includes, from the service's answer (never a figure of OpenMyMemo's own): its regular use during an
+ * offer, which offerText adds to. */
+const includesText = computed(() => {
+  const a = ok.value;
+  const included = offerText.value ? a?.usage.cost_usd_regular_included : a?.usage.cost_usd_included;
+  const model = a?.display_name ?? a?.model;
+  return included != null && model ? t("ast.mm.includes", { included: usd(included), model }) : "";
 });
 
 const choice = computed<Choice>(() => (status.value?.enabled ? status.value.kind : "off"));
@@ -293,11 +336,43 @@ const fmt = (n: number) => n.toLocaleString("en-US");
                 : ok.plan.cancel_at_period_end && ok.plan.period_end ? t("ast.mm.planEnds", { date: day(ok.plan.period_end) })
                 : t("ast.mm.planActive") }}
             </p>
-            <p v-if="usageText" class="text-[13px] text-muted" data-test="mm-usage">
+            <p v-if="!ok.plan.active && includesText" class="text-[13px] text-muted" data-test="mm-includes">{{ includesText }}</p>
+            <div v-if="meter" class="space-y-1.5" data-test="mm-meter">
+              <div class="flex items-baseline justify-between gap-3 text-[13px]">
+                <span data-test="mm-cost">{{ costText }}</span>
+                <span class="shrink-0 font-semibold tabular-nums" :class="{ 'text-danger-ink': meter.usedUp }" data-test="mm-percent">
+                  {{ meter.usedUp ? t("ast.mm.usedUp") : t("ast.mm.percent", { percent: meter.percent }) }}
+                </span>
+              </div>
+              <div
+                role="progressbar"
+                class="h-2 overflow-hidden rounded-full bg-fill"
+                :aria-label="t('ast.mm.meter')"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                :aria-valuenow="meter.percent"
+                :aria-valuetext="costText"
+              >
+                <div
+                  class="h-full rounded-full"
+                  :class="meter.usedUp ? 'bg-danger' : meter.percent >= 80 ? 'bg-wait' : 'bg-accent'"
+                  :style="{ width: `${meter.percent}%` }"
+                  data-test="mm-fill"
+                />
+              </div>
+              <p v-if="usageText" class="text-[13px] text-muted" data-test="mm-usage">{{ usageText }}</p>
+              <p v-if="resetDate" class="text-[13px] text-muted" data-test="mm-resets">
+                {{ t(meter.usedUp ? "ast.mm.usedUpResets" : "ast.mm.resets", { date: resetDate }) }}
+              </p>
+            </div>
+            <p v-else-if="costText" class="text-[13px]" data-test="mm-cost">
+              {{ costText }}
+              <template v-if="resetDate">{{ t("ast.mm.resets", { date: resetDate }) }}</template>
+            </p>
+            <p v-if="offerText" class="text-[13px] text-accent-ink" data-test="mm-offer">{{ offerText }}</p>
+            <p v-if="usageText && !meter" class="text-[13px] text-muted" data-test="mm-usage">
               {{ usageText }}
-              <template v-if="ok.plan.active && (ok.plan.resets_at || ok.plan.period_end)">
-                {{ t("ast.mm.resets", { date: day(ok.plan.resets_at ?? ok.plan.period_end) }) }}
-              </template>
+              <template v-if="!costText && resetDate">{{ t("ast.mm.resets", { date: resetDate }) }}</template>
             </p>
           </template>
           <p v-else-if="account && !account.ok" class="text-[13px] text-muted">{{ account.error }}</p>

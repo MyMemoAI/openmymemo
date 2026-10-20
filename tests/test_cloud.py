@@ -1,4 +1,4 @@
-"""MyMemo Cloud (product-design.md §16) against a fake service built from tests/fixtures/cloud/.
+"""OpenMyMemo Cloud (product-design.md §16) against a fake service built from tests/fixtures/cloud/.
 
 Every test has its own HOME, OPENMYMEMO_CLOUD_DIR and a local OPENMYMEMO_CLOUD_URL (conftest.py); nothing here
 reaches MyMemo or touches this computer's real cloud.json.
@@ -21,7 +21,7 @@ from cloud_fake import FakeService, fixture, wait_until
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
-from openmymemo import __version__, clients, cloud
+from openmymemo import __version__, clients, cloud, mcp_server
 from openmymemo.cli import app as cli
 from openmymemo.cloud import Bridge, Cloud, Link, Timing
 from openmymemo.connectors import Connectors
@@ -156,12 +156,24 @@ def test_hello_carries_the_cloud_variant_of_this_installations_tools(vault):
     assert ours["type"] == "hello" and ours["v"] == 1 and ours["app_version"] == __version__
     assert ours["key_id"] == hello["key_id"] == VECTOR["key_id"] and ours["max_inflight"] == hello["max_inflight"]
     assert ours["tools"] == hello["tools"] and ours["instructions"] == hello["instructions"]
-    # Only memory_propose differs from the local tools: it mentions "queued", which only the cloud returns.
-    local = {t.name: t for t in anyio.run(build_server(vault).list_tools)}
-    for tool in ours["tools"]:
-        description = inspect.cleandoc(local[tool["name"]].description)
-        assert (tool["description"] != description) == (tool["name"] == "memory_propose")
-    assert '"queued"' in next(t for t in ours["tools"] if t["name"] == "memory_propose")["description"]
+    # At launch (live relay only, cloud.FEATURES empty) the descriptors are the local tools' own: the service keeps
+    # them and shows them to ChatGPT and Claude, so nothing in them may promise the offline queue.
+    local = {t.name: inspect.cleandoc(t.description) for t in anyio.run(build_server(vault).list_tools)}
+    assert {t["name"]: t["description"] for t in ours["tools"]} == local
+    assert "queue" not in json.dumps(ours["tools"]) and "features" not in ours
+
+
+def test_the_queue_is_described_to_web_apps_once_this_computer_takes_it(vault, queue_on):
+    link = linked(vault, "http://127.0.0.1:9")
+    ours = anyio.run(Bridge(vault, link).hello)
+    assert ours["features"] == ["queue"]
+    local = {t.name: inspect.cleandoc(t.description) for t in anyio.run(build_server(vault).list_tools)}
+    cloud_tools = {t["name"]: t["description"] for t in ours["tools"]}
+    assert {n for n in cloud_tools if cloud_tools[n] != local[n]} == {"memory_propose", "memory_proposals"}
+    assert cloud_tools["memory_propose"] == local["memory_propose"] + mcp_server.CLOUD_QUEUED
+    assert cloud_tools["memory_proposals"] == local["memory_proposals"] + "\n" + mcp_server.CLOUD_QUEUE_ID
+    assert '"queued"' in cloud_tools["memory_propose"] and "`queue_id`" in cloud_tools["memory_proposals"]
+    assert all("queue" not in d for d in local.values())  # apps on this computer never hear of it
 
 
 def test_backoff_is_exponential_with_full_jitter():
@@ -339,7 +351,7 @@ def test_the_callback_needs_a_state_this_process_started_recently(vault, fake, p
     assert fake.link_requests == [] and cloud.load_link() is None
 
     c.linker.ttl = cloud.LINK_TTL
-    fake.link_response = {"error": "plan_required", "message": "MyMemo Cloud is part of Pro and Ultra."}
+    fake.link_response = {"error": "plan_required", "message": "OpenMyMemo Cloud is part of Pro and Ultra."}
     url = api.post("/api/cloud/link", headers=H).json()["url"]
     r = api.get(callback_path(fake.authorize(url)))
     assert r.status_code == 502 and cloud.load_link() is None
@@ -366,7 +378,7 @@ def test_unlinking_tells_mymemo_deletes_cloud_json_and_revokes_the_web_apps(vaul
     assert [x.id for x in Connectors(vault).list()] == ["cloud-chatgpt"]
 
     out = api.delete("/api/cloud", headers=H).json()
-    assert out["message"].startswith("Unlinked this computer from MyMemo Cloud")
+    assert out["message"].startswith("Unlinked this computer from OpenMyMemo Cloud")
     assert fake.unlinks == [f"Bearer {fake.token}"] and cloud.load_link() is None
     assert conn.closed.wait(5) and conn.client_close == 1000 and len(fake.conns) == 1
     assert Connectors(vault).list() == []
@@ -382,25 +394,95 @@ def test_unlinking_tells_mymemo_deletes_cloud_json_and_revokes_the_web_apps(vaul
 def test_unlinking_while_mymemo_is_unreachable_still_forgets_the_link(vault):
     linked(vault, "http://127.0.0.1:9")
     assert "couldn't be told" in cloud.unlink() and cloud.load_link() is None
-    assert cloud.unlink() == "This computer isn't linked to MyMemo Cloud."
+    assert cloud.unlink() == "This computer isn't linked to OpenMyMemo Cloud."
 
 
 def cloud_rows(vault) -> list[dict]:
     return [r for r in clients.catalog(vault) if r["id"] == clients.CLOUD]
 
 
-def test_mymemo_cloud_is_listed_once_turned_on_and_always_while_linked(vault, fake, panel):
+def test_openmymemo_cloud_is_listed_until_hidden_and_always_while_linked(vault, fake, panel):
     api, _ = panel
-    assert cloud_rows(vault) == [] and api.get("/api/cloud", headers=H).json()["shown"] is False
+    assert len(cloud_rows(vault)) == 1 and api.get("/api/cloud", headers=H).json()["shown"] is True
+    assert not cloud.settings_path().exists()  # listed by default: nothing written, nothing sent anywhere
+    assert sum(a["id"] == clients.CLOUD for a in api.get("/api/clients", headers=H).json()["apps"]) == 1
+    out = api.patch("/api/cloud/settings", json={"show": False}, headers=H).json()
+    assert out["shown"] is False and out["settings"]["show"] is False and cloud_rows(vault) == []
     assert all(a["id"] != clients.CLOUD for a in api.get("/api/clients", headers=H).json()["apps"])
-    out = api.patch("/api/cloud/settings", json={"show": True}, headers=H).json()
-    assert out["shown"] is True and out["settings"]["show"] is True and len(cloud_rows(vault)) == 1
-    assert api.patch("/api/cloud/settings", json={"show": False}, headers=H).json()["shown"] is False
     linked(vault, fake.base)  # linked from the CLI while hidden: listed, so it can be seen and unlinked
     assert len(cloud_rows(vault)) == 1 and api.get("/api/cloud", headers=H).json()["shown"] is True
     cloud.unlink()
-    assert cloud_rows(vault) == []
+    assert cloud_rows(vault) == []  # hidden again: the person's choice stays
+    assert api.patch("/api/cloud/settings", json={"show": True}, headers=H).json()["shown"] is True
+    assert len(cloud_rows(vault)) == 1
     assert stat.S_IMODE(cloud.settings_path().stat().st_mode) == 0o600
+
+
+@pytest.mark.parametrize("old", [
+    {"show": False, "service": None},  # what 0.2.8 and older wrote after any change while hidden, its default
+    {"show": False, "service": "https://memo.example.org", "later": 1},
+    {"show": True, "service": None},
+    {"show": False},
+])
+def test_an_older_settings_files_show_false_isnt_a_hide(vault, monkeypatch, old):
+    monkeypatch.delenv("OPENMYMEMO_CLOUD_URL")
+    cloud.settings_path().parent.mkdir(parents=True, exist_ok=True)
+    cloud.settings_path().write_text(json.dumps(old))
+    assert cloud.load_settings()["show"] is True and cloud.shown() and len(cloud_rows(vault)) == 1
+    assert cloud.service_url() == (old.get("service") or cloud.DEFAULT_SERVICE)  # the service chosen stays
+    cloud.save_settings()  # only reading them: the file stays as it was
+    assert json.loads(cloud.settings_path().read_text()) == old
+
+    # Any change writes format 2, listed unless the person hides it now; a hide from now on is kept.
+    cloud.save_settings(service="https://other.example.org")
+    assert json.loads(cloud.settings_path().read_text()) == \
+        {**old, "format": 2, "show": True, "service": "https://other.example.org"}
+    cloud.save_settings(show=False)
+    assert cloud.load_settings()["show"] is False and not cloud.shown() and cloud_rows(vault) == []
+    cloud.save_settings(service="")
+    assert json.loads(cloud.settings_path().read_text()) == {**old, "format": 2, "show": False, "service": None}
+    assert not cloud.shown()
+
+
+def test_a_newer_settings_format_keeps_its_hide(vault):
+    cloud.settings_path().parent.mkdir(parents=True, exist_ok=True)
+    cloud.settings_path().write_text('{"format": 3, "show": false, "service": null}')
+    assert not cloud.shown()
+    cloud.save_settings(show=True)
+    assert json.loads(cloud.settings_path().read_text())["format"] == 3 and cloud.shown()
+
+
+def test_a_new_install_signs_in_from_the_listed_row_with_no_settings_or_environment(vault, fake, panel, monkeypatch):
+    """What a person gets after installing: no OPENMYMEMO_CLOUD_URL, no settings.json, MyMemo's own service (the fake
+    stands in for it), and a plan with the live relay only, as MyMemo offers it at launch."""
+    monkeypatch.delenv("OPENMYMEMO_CLOUD_URL")
+    monkeypatch.setattr(cloud, "DEFAULT_SERVICE", fake.base)
+    live_only = {"tier": "pro", "live": True, "queue": False}
+    fake.link_response = {**fake.link_response, "plan": live_only}
+    fake.welcome = {**fake.welcome, "plan": live_only, "queued": 0}
+    api, _ = panel
+
+    # Listed in Connectors, and nothing has talked to MyMemo yet.
+    row = next(a for a in api.get("/api/clients", headers=H).json()["apps"] if a["id"] == clients.CLOUD)
+    assert row["name"] == "OpenMyMemo Cloud" and row["method"] == "account" and not row["connected"]
+    s = api.get("/api/cloud", headers=H).json()
+    assert s["shown"] and not s["linked"] and s["service"] == fake.base and s["settings"]["service_from_env"] is None
+    assert not fake.authorize_params and not fake.link_requests and not fake.handshakes
+
+    # Sign in → the browser consents on MyMemo → /cloud/callback → POST /openmymemo/device/link → connected.
+    url = api.post("/api/cloud/link", headers=H).json()["url"]
+    assert url.startswith(f"{fake.base}/openmymemo/oauth/authorize?")
+    r = api.get(callback_path(fake.authorize(url)))
+    assert r.status_code == 200 and "Connectors → OpenMyMemo Cloud → Unlink" in r.text
+    link = cloud.load_link()
+    assert link.service == fake.base and link.plan == live_only and len(fake.link_requests) == 1
+    conn = fake.connection()
+    assert "features" not in conn.hello  # the offline queue isn't offered: the service queues nothing for us
+    status = wait_until(lambda: (s := api.get("/api/cloud", headers=H).json())["online"] and s)
+    assert status["plan"] == live_only and status["queued"] is None and status["queue_enabled"] is False
+    assert status["endpoint"] == f"{fake.base}/openmymemo/mcp"
+    assert next(a for a in api.get("/api/clients", headers=H).json()["apps"] if a["id"] == clients.CLOUD)["connected"]
+    assert not cloud.settings_path().exists()  # signing in changes no preference
 
 
 def test_choosing_the_service(vault, fake, panel, monkeypatch):
@@ -436,16 +518,17 @@ def test_choosing_the_service(vault, fake, panel, monkeypatch):
     assert api.patch("/api/cloud/settings", json={"service": "https://memo.example.org"}, headers=H).status_code == 409
 
 
-def test_unusable_settings_fall_back_to_hidden_and_mymemos_own(vault, monkeypatch):
+def test_unusable_settings_fall_back_to_listed_and_mymemos_own(vault, monkeypatch):
     monkeypatch.delenv("OPENMYMEMO_CLOUD_URL")
     cloud.settings_path().parent.mkdir(parents=True, exist_ok=True)
-    for text in ("not json", "[]", '{"show": "yes", "service": "http://example.com"}'):
+    for text in ("not json", "[]", '{"show": "yes", "service": "http://example.com"}',
+                 '{"format": 2, "show": "no", "service": "ftp://example.com"}', '{"format": "2", "show": false}'):
         cloud.settings_path().write_text(text)
-        assert (cloud.load_settings()["show"], cloud.service_url(), cloud.shown()) == (False, cloud.DEFAULT_SERVICE, False)
-    cloud.settings_path().write_text('{"show": true, "later": 1}')
+        assert (cloud.load_settings()["show"], cloud.service_url(), cloud.shown()) == (True, cloud.DEFAULT_SERVICE, True)
+    cloud.settings_path().write_text('{"format": 2, "show": true, "later": 1}')
     cloud.save_settings(service="https://memo.example.org")
     assert json.loads(cloud.settings_path().read_text()) == \
-        {"show": True, "later": 1, "service": "https://memo.example.org"}  # keys a later version adds are kept
+        {"format": 2, "show": True, "later": 1, "service": "https://memo.example.org"}  # keys a later version adds are kept
 
 
 def test_the_catalog_lists_mymemo_cloud(vault, fake, panel):
@@ -460,7 +543,7 @@ def test_the_catalog_lists_mymemo_cloud(vault, fake, panel):
     row = next(r for r in clients.catalog(vault) if r["id"] == clients.CLOUD)
     assert row["connected"] is True and row["via"] == "account"
     listed = api.get("/api/clients", headers=H).json()
-    assert listed["custom"] == []  # web apps are listed under MyMemo Cloud, not as apps added by name
+    assert listed["custom"] == []  # web apps are listed under OpenMyMemo Cloud, not as apps added by name
     assert any(a["id"] == clients.CLOUD for a in listed["apps"])
 
 
@@ -493,7 +576,31 @@ def test_relayed_calls_run_the_local_tools_as_the_web_apps_connector(vault, fake
                         "params": {"name": "memory_search", "arguments": {"query": "short"}}, "deadline_ms": 20000})
     assert found["result"]["structuredContent"]["results"][0]["id"] == m.id
     status = c.status()
-    assert status["last_call_at"] and status["queued"] == WELCOME["queued"]
+    # welcome.json says 1 is queued, but this computer didn't ask for the queue: nothing about it is shown.
+    assert status["last_call_at"] and WELCOME["queued"] == 1 and status["queued"] is None
+    assert status["queue_enabled"] is False
+
+
+def test_a_service_that_reports_a_queue_this_computer_didnt_ask_for_shows_none(vault, fake, clouds):
+    """At launch the computer advertises no `queue` (cloud.FEATURES), so whatever the service says about one, its
+    count and its plan mode, nothing promises it: not the panel's status, nor the CLI's plan line."""
+    fake.welcome = {**fake.welcome, "queued": 3, "plan": {"tier": "ultra", "live": True, "queue": True}}
+    c, conn = online(vault, fake, clouds)
+    assert "features" not in conn.hello and not cloud.queue_enabled()
+    status = wait_until(lambda: (s := c.status())["online"] and s)
+    assert status["queued"] is None and status["queue_enabled"] is False
+    assert status["plan"]["queue"] is True  # kept as MyMemo said it; the panel goes by queue_enabled
+    assert cloud.plan_label(status["plan"]) == "Ultra · live relay"
+    assert cloud.plan_label({"tier": "pro", "live": True, "queue": True}) == "Pro · live relay"
+
+
+def test_the_queue_shows_once_this_computer_asks_for_it(vault, fake, clouds, queue_on):
+    fake.welcome = {**fake.welcome, "queued": 3}
+    c, conn = online(vault, fake, clouds)
+    assert conn.hello["features"] == ["queue"]
+    status = c.status()
+    assert status["queued"] == 3 and status["queue_enabled"] is True
+    assert cloud.plan_label(status["plan"]) == "Ultra · live relay and offline queue"
 
 
 def test_a_revoked_web_app_is_told_so(vault, fake, clouds):
@@ -890,8 +997,27 @@ def queue_clock(monkeypatch):
     return QUEUE_NOW
 
 
-def test_queued_proposals_are_filed_as_their_web_app_with_their_time_and_acknowledged(vault, fake, clouds, queue_clock):
+@pytest.fixture
+def queue_on(monkeypatch):
+    """The offline queue as it works once this computer asks for it (`cloud.FEATURES`; not offered at launch)."""
+    monkeypatch.setattr(cloud, "FEATURES", ("queue",))
+
+
+def test_queued_changes_this_computer_didnt_ask_for_are_left_with_the_service(vault, fake, clouds, queue_clock):
+    """At launch (no `queue` in hello): an `item` the service sends anyway is neither filed nor acknowledged, so it
+    stays with the service, which sends it again once this computer takes the queue."""
     c, conn = online(vault, fake, clouds)
+    conn.send(fixture("bridge/item.json"))
+    assert call(conn, fixture("bridge/call.json"))["result"]["isError"] is False  # handled after the item
+    time.sleep(0.2)
+    assert not [f for f in conn.frames if f.get("type") == "ack"]
+    assert Proposals(vault).list(connector_id="cloud-chatgpt") == [] and c.status()["online"]
+
+
+def test_queued_proposals_are_filed_as_their_web_app_with_their_time_and_acknowledged(vault, fake, clouds, queue_clock,
+                                                                                    queue_on):
+    c, conn = online(vault, fake, clouds)
+    assert conn.hello["features"] == ["queue"] and c.status()["queue_enabled"]
     assert c.status()["queued"] == 1  # welcome.json
     qid = VECTOR["qid"]
     conn.send(fixture("bridge/item.json"))
@@ -910,7 +1036,7 @@ def test_queued_proposals_are_filed_as_their_web_app_with_their_time_and_acknowl
     assert len(Proposals(vault).list(connector_id="cloud-chatgpt")) == 1
 
 
-def test_queued_items_that_cant_be_opened_or_filed(vault, fake, clouds):
+def test_queued_items_that_cant_be_opened_or_filed(vault, fake, clouds, queue_on):
     _, conn = online(vault, fake, clouds)
     good = VECTOR["plaintext"]
     broken = fixture("bridge/item.json")
@@ -948,7 +1074,7 @@ def test_queued_items_that_cant_be_opened_or_filed(vault, fake, clouds):
     assert refused[0]["queue_id"] == "q-revoked" and refused[0]["connector"] == "cloud-chatgpt"
 
 
-def test_a_queued_write_retried_live_is_one_proposal_and_traceable(vault, fake, clouds, queue_clock):
+def test_a_queued_write_retried_live_is_one_proposal_and_traceable(vault, fake, clouds, queue_clock, queue_on):
     _, conn = online(vault, fake, clouds)
     good = VECTOR["plaintext"]
     args = {"op": "add", "content": "Keeps bees on the roof.", "topic": "goals", "idempotency_key": "ai-k1"}
@@ -978,7 +1104,8 @@ def test_a_queued_write_retried_live_is_one_proposal_and_traceable(vault, fake, 
     assert next(p for p in Proposals(vault).list() if p.queue_id == "q-plain").idempotency_key == "q-plain"
 
 
-def test_a_passing_failure_stops_the_queue_until_it_is_sent_again_in_order(vault, fake, clouds, queue_clock, monkeypatch):
+def test_a_passing_failure_stops_the_queue_until_it_is_sent_again_in_order(vault, fake, clouds, queue_clock, monkeypatch,
+                                                                           queue_on):
     m = vault.add("how-to-work-with-me", "Drinks coffee.")
     _, conn = online(vault, fake, clouds)
     Connectors(vault).ensure("cloud-chatgpt", "ChatGPT (web)", kind="cloud")
@@ -1014,7 +1141,8 @@ def test_a_passing_failure_stops_the_queue_until_it_is_sent_again_in_order(vault
 
 
 @pytest.mark.parametrize("live_first", [True, False])
-def test_the_queued_receipt_is_kept_whichever_copy_arrives_first(live_first, vault, fake, clouds, queue_clock):
+def test_the_queued_receipt_is_kept_whichever_copy_arrives_first(live_first, vault, fake, clouds, queue_clock,
+                                                                 queue_on):
     _, conn = online(vault, fake, clouds)
     args = {"op": "add", "content": "Keeps bees on the roof.", "topic": "goals", "idempotency_key": "retry-key"}
     relayed = {**fixture("bridge/call.json"), "client": {"slug": "chatgpt", "name": "ChatGPT", "verified": True}}
@@ -1033,7 +1161,7 @@ def test_the_queued_receipt_is_kept_whichever_copy_arrives_first(live_first, vau
     assert p.queue_id == "q-race" and p.idempotency_key == "retry-key"
 
 
-def test_a_long_idempotency_key_keeps_its_identity(vault, fake, clouds, queue_clock):
+def test_a_long_idempotency_key_keeps_its_identity(vault, fake, clouds, queue_clock, queue_on):
     vault.update_settings(require_approval=True)
     _, conn = online(vault, fake, clouds)
     args = {"op": "add", "content": "Keeps bees on the roof.", "topic": "goals", "idempotency_key": "a" * 201}
@@ -1049,7 +1177,7 @@ def test_a_long_idempotency_key_keeps_its_identity(vault, fake, clouds, queue_cl
     assert len(Proposals(vault).list(connector_id="cloud-chatgpt")) == 1
 
 
-def test_text_no_file_can_hold_is_rejected_and_the_queue_goes_on(vault, fake, clouds, queue_clock):
+def test_text_no_file_can_hold_is_rejected_and_the_queue_goes_on(vault, fake, clouds, queue_clock, queue_on):
     _, conn = online(vault, fake, clouds)
     good = VECTOR["plaintext"]
     bad = json.dumps({**good, "qid": "q-bad", "params": {"name": "memory_propose", "arguments": {
@@ -1062,7 +1190,7 @@ def test_text_no_file_can_hold_is_rejected_and_the_queue_goes_on(vault, fake, cl
     assert not conn.closed.is_set() and [p.content for p in Proposals(vault).list()] == ["Likes rainy mornings."]
 
 
-def test_queued_items_are_filed_in_the_order_they_arrive(vault, fake, clouds):
+def test_queued_items_are_filed_in_the_order_they_arrive(vault, fake, clouds, queue_on):
     _, conn = online(vault, fake, clouds)
     good = VECTOR["plaintext"]
     texts = ["Is learning Japanese", "Plays the cello on weekends", "Wants to run a marathon in Tokyo",
@@ -1077,7 +1205,8 @@ def test_queued_items_are_filed_in_the_order_they_arrive(vault, fake, clouds):
     assert [p.content for p in Proposals(vault).list()][::-1] == texts
 
 
-def test_queued_items_name_unknown_web_apps_as_unverified_and_keep_times_in_range(vault, fake, clouds, queue_clock):
+def test_queued_items_name_unknown_web_apps_as_unverified_and_keep_times_in_range(vault, fake, clouds, queue_clock,
+                                                                                  queue_on):
     _, conn = online(vault, fake, clouds)
     good = VECTOR["plaintext"]
 
@@ -1136,7 +1265,8 @@ def test_cli_links_shows_status_and_unlinks(vault, fake, monkeypatch):
     base = ["--vault", str(vault.root), "cloud"]
     out = runner.invoke(cli, [*base, "link", "--port", str(port)])
     assert out.exit_code == 0, out.output
-    assert "Linked to Sam (s***@example.com) · Ultra · live relay and offline queue." in out.output
+    # The service's plan says it has the queue (link/response.json), but this computer doesn't take it yet.
+    assert "Linked to Sam (s***@example.com) · Ultra · live relay." in out.output and "queue" not in out.output
     assert "If that isn't your MyMemo account, run `openmymemo cloud unlink` now." in out.output
     assert [(a["action"], a["email_masked"]) for a in vault.activity("mymemo-cloud")] == [("link", "s***@example.com")]
     assert f"{fake.base}/openmymemo/mcp" in out.output and "Developer Mode" in out.output
@@ -1145,8 +1275,8 @@ def test_cli_links_shows_status_and_unlinks(vault, fake, monkeypatch):
     assert cloud.load_link().vault == str(vault.root)
 
     out = runner.invoke(cli, [*base, "status", "--port", str(port)])
-    assert out.exit_code == 0 and "Linked to Sam (s***@example.com) · Ultra" in out.output
-    assert "not running" in out.output
+    assert out.exit_code == 0 and "Linked to Sam (s***@example.com) · Ultra · live relay\n" in out.output
+    assert "not running" in out.output and "queue" not in out.output
 
     out = runner.invoke(cli, [*base, "unlink", "--yes", "--port", str(port)])
     assert out.exit_code == 0 and "Unlinked" in out.output and cloud.load_link() is None
@@ -1158,11 +1288,16 @@ def test_cloud_settings_from_the_cli(vault, monkeypatch):
     monkeypatch.delenv("OPENMYMEMO_CLOUD_URL")
     runner = CliRunner()
     apps = runner.invoke(cli, ["--vault", str(vault.root), "apps"])
-    assert apps.exit_code == 0 and "mymemo-cloud" not in apps.output and "cloud link" not in apps.output
-    out = runner.invoke(cli, ["cloud", "settings", "--show", "--service", "https://memo.example.org"])
-    assert out.exit_code == 0 and "Listed: yes" in out.output and "Service: https://memo.example.org\n" in out.output
+    assert apps.exit_code == 0 and "OpenMyMemo Cloud (mymemo-cloud)" in apps.output
+    assert "ChatGPT and claude.ai on the web: openmymemo cloud link (needs MyMemo Pro, Ultra or Lifetime)" in apps.output
+    out = runner.invoke(cli, ["cloud", "settings"])
+    assert out.exit_code == 0 and "Listed: yes" in out.output and not cloud.settings_path().exists()
+    out = runner.invoke(cli, ["cloud", "settings", "--hide", "--service", "https://memo.example.org"])
+    assert out.exit_code == 0 and "Listed: no" in out.output and "Service: https://memo.example.org\n" in out.output
+    apps = runner.invoke(cli, ["--vault", str(vault.root), "apps"]).output
+    assert "mymemo-cloud" not in apps and "cloud link" not in apps
+    out = runner.invoke(cli, ["cloud", "settings", "--show", "--service", ""])
+    assert "Listed: yes" in out.output and "(MyMemo's own)" in out.output
     assert "mymemo-cloud" in runner.invoke(cli, ["--vault", str(vault.root), "apps"]).output
-    out = runner.invoke(cli, ["cloud", "settings", "--hide", "--service", ""])
-    assert "Listed: no" in out.output and "(MyMemo's own)" in out.output
     bad = runner.invoke(cli, ["cloud", "settings", "--service", "http://example.com"])
     assert bad.exit_code == 1 and "https://" in bad.output

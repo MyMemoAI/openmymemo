@@ -29,6 +29,10 @@
       "output_tokens": 340,
       "input_tokens_included": 10000,
       "output_tokens_included": 2000,
+      "cost_usd": 0.0003,
+      "cost_usd_included": 10.0,
+      "cost_usd_regular_included": 5.0,
+      "offer_ends_at": null,
       "requests": 7
     },
     "limits": {

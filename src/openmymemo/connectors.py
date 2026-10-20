@@ -14,7 +14,7 @@ Every change that applies stays undoable for as long as it is the memory's lates
 
 stdio connectors are identified by ``openmymemo mcp --connector <id>``; HTTP connectors by a bearer
 token. Only the SHA-256 of a token is stored. ``cloud`` connectors (``cloud-chatgpt``, ``cloud-claude``, …) are
-web apps that reach the folder through MyMemo Cloud (``cloud.py``); like stdio apps they have no token and are
+web apps that reach the folder through OpenMyMemo Cloud (``cloud.py``); like stdio apps they have no token and are
 created on first use. Ids starting with ``cloud-`` belong to them alone, so a web app can never answer as an app
 the person added: another app whose name would slugify to ``cloud-…`` gets ``app-cloud-…`` instead.
 The ``assistant`` connector (kind ``assistant``) is the OpenMyMemo Assistant (``assistant/``), created when the
@@ -135,10 +135,10 @@ class Connectors:
             raise VaultError(f"write must be one of {', '.join(WRITE_MODES)}")
         cid = connector_id or slugify(name)
         if kind == "cloud" and not cid.startswith(CLOUD_PREFIX):
-            raise VaultError(f"A MyMemo Cloud app's id starts with {CLOUD_PREFIX}")
+            raise VaultError(f"An OpenMyMemo Cloud app's id starts with {CLOUD_PREFIX}")
         if kind != "cloud" and cid.startswith(CLOUD_PREFIX):
             if connector_id:
-                raise VaultError(f"Ids starting with {CLOUD_PREFIX} are kept for apps using MyMemo Cloud; choose "
+                raise VaultError(f"Ids starting with {CLOUD_PREFIX} are kept for apps using OpenMyMemo Cloud; choose "
                                  "another id")
             cid = "app-" + cid
         if (kind == "assistant") != (cid == ASSISTANT_ID):
@@ -220,7 +220,7 @@ class Connectors:
             if c is None:
                 raise NotFound(f"No connector {connector_id}")
             if c.kind == "cloud":
-                raise VaultError("A MyMemo Cloud app signs in with your MyMemo account; it has no token")
+                raise VaultError("An OpenMyMemo Cloud app signs in with your MyMemo account; it has no token")
             if c.kind == "assistant":
                 raise VaultError("The OpenMyMemo Assistant runs inside OpenMyMemo; it has no token")
             token = self._new_token(c)

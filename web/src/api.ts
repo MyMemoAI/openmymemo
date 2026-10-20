@@ -151,7 +151,7 @@ export interface SortRow {
 export interface Connector {
   id: string;
   name: string;
-  /** cloud: a web app reaching the folder through MyMemo Cloud (cloud-chatgpt, cloud-claude, …); assistant: the
+  /** cloud: a web app reaching the folder through OpenMyMemo Cloud (cloud-chatgpt, cloud-claude, …); assistant: the
    * OpenMyMemo Assistant (id "assistant"). */
   kind: "stdio" | "http" | "cloud" | "assistant";
   read_topics: string[] | "all";
@@ -172,7 +172,7 @@ export interface AppStatus {
   name: string;
   /**
    * file: OpenMyMemo edits its settings; cli: it runs the app's own command; manual: the person pastes a snippet;
-   * account: MyMemo Cloud, a sign-in rather than an app (see CloudStatus).
+   * account: OpenMyMemo Cloud, a sign-in rather than an app (see CloudStatus).
    */
   method: "file" | "cli" | "manual" | "account";
   /** One line about what it is, where the name alone doesn't say. */
@@ -247,7 +247,7 @@ export interface CloudPlan {
   queue?: boolean;
 }
 
-/** A web app using MyMemo Cloud: a connector of its own, or a tombstone once its access was removed. */
+/** A web app using OpenMyMemo Cloud: a connector of its own, or a tombstone once its access was removed. */
 export interface CloudApp {
   id: string;
   name: string;
@@ -256,7 +256,7 @@ export interface CloudApp {
   connector: Connector | null;
 }
 
-/** This computer's MyMemo Cloud preferences (product-design.md §16.11). */
+/** This computer's OpenMyMemo Cloud preferences (product-design.md §16.11). */
 export interface CloudSettings {
   /** Listed on the Connectors page (it always is while this computer is linked). */
   show: boolean;
@@ -267,7 +267,7 @@ export interface CloudSettings {
   service_from_env: string | null;
 }
 
-/** MyMemo Cloud on this computer (GET /api/cloud). */
+/** OpenMyMemo Cloud on this computer (GET /api/cloud). */
 export interface CloudStatus {
   linked: boolean;
   /** Listed: turned on in Settings, or linked. */
@@ -297,8 +297,11 @@ export interface CloudStatus {
   online: boolean;
   close_code: number | null;
   last_call_at: string | null;
-  /** Proposals waiting in MyMemo Cloud's encrypted queue, as of the last connection. */
+  /** Proposals waiting in OpenMyMemo Cloud's encrypted queue, as of the last connection; null unless queue_enabled. */
   queued: number | null;
+  /** Whether this OpenMyMemo takes the offline queue (it asked for it in `hello`). False since the launch, which offers
+   * the live relay only: then nothing about the queue is shown, whatever `plan.queue` says. */
+  queue_enabled: boolean;
   apps: CloudApp[];
 }
 
@@ -311,7 +314,7 @@ export interface ConnectorCreated {
 export interface Activity {
   at: string;
   connector: string;
-  /** link: this computer was linked to MyMemo Cloud (connector "mymemo-cloud"), to `account` / `email_masked`. */
+  /** link: this computer was linked to OpenMyMemo Cloud (connector "mymemo-cloud"), to `account` / `email_masked`. */
   /** call: the OpenMyMemo Assistant asked its model (connector "assistant"): feature, model, endpoint host, tokens. */
   action: "context" | "search" | "get" | "propose" | "import" | "link" | "call";
   feature?: string;
@@ -484,9 +487,9 @@ export interface AssistantHold {
 export interface AssistantMyMemo {
   signed_in: boolean;
   service: string;
-  /** cloud: the token came from this computer's MyMemo Cloud link; browser: a sign-in in the browser; env: OPENMYMEMO_ASSISTANT_API_KEY. */
+  /** cloud: the token came from this computer's OpenMyMemo Cloud link; browser: a sign-in in the browser; env: OPENMYMEMO_ASSISTANT_API_KEY. */
   via: "cloud" | "browser" | "env" | null;
-  /** The MyMemo account, when known (from the MyMemo Cloud link): its name and masked email. */
+  /** The MyMemo account, when known (from the OpenMyMemo Cloud link): its name and masked email. */
   account: { display_name?: string; email_masked?: string } | null;
   signed_in_at: string | null;
   /** "expired": MyMemo stopped accepting the sign-in, so this computer signed out. */
@@ -512,6 +515,13 @@ export type AssistantAccount =
       usage: {
         input_tokens: number | null; output_tokens: number | null; input_tokens_included: number | null;
         output_tokens_included: number | null; requests: number | null;
+        /** This month's use in US dollars and what the plan includes (null: no cap); both null from an older
+         * service, which reports tokens only. */
+        cost_usd: number | null; cost_usd_included: number | null;
+        /** The plan's regular monthly use in dollars. A limited-time offer is on while cost_usd_included is more. */
+        cost_usd_regular_included: number | null;
+        /** When that offer ends, if announced (ISO 8601, UTC). */
+        offer_ends_at: string | null;
       };
       limits: { requests_per_minute: number | null; requests_per_day: number | null };
     }
@@ -669,13 +679,13 @@ export const api = {
   cloudUnlink: () => req<{ message: string; cloud: CloudStatus }>("DELETE", "/api/cloud"),
   cloudReconnect: () => req<CloudStatus>("POST", "/api/cloud/reconnect"),
   cloudAllow: (id: string) => req<CloudStatus>("POST", `/api/cloud/apps/${enc(id)}/allow`),
-  /** Show or hide MyMemo Cloud, or choose its service ("" for MyMemo's own). */
+  /** Show or hide OpenMyMemo Cloud, or choose its service ("" for MyMemo's own). */
   cloudSettings: (body: { show?: boolean; service?: string }) => req<CloudStatus>("PATCH", "/api/cloud/settings", body),
   assistant: () => req<AssistantStatus>("GET", "/api/assistant"),
   assistantSettings: (body: AssistantPatch) => req<AssistantStatus>("PATCH", "/api/assistant", body),
   /** One tiny request to the configured model: its name and how long it took. */
   assistantTest: () => req<AssistantTest>("POST", "/api/assistant/test"),
-  /** Sign in to MyMemo: done at once with this computer's MyMemo Cloud link, else a page to open in the browser. */
+  /** Sign in to MyMemo: done at once with this computer's OpenMyMemo Cloud link, else a page to open in the browser. */
   assistantSignIn: (browser = false) =>
     req<{ signed_in: boolean; url: string | null; assistant: AssistantStatus }>("POST", "/api/assistant/mymemo/signin", { browser }),
   assistantAccount: () =>

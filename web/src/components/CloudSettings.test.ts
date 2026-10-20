@@ -7,12 +7,12 @@ import CloudSettings from "./CloudSettings.vue";
 const MYMEMO = "https://api.mymemo.ai";
 
 function status(extra: Partial<CloudStatus> = {}, prefs: Partial<Prefs> = {}): CloudStatus {
-  const settings = { show: false, service: "", default_service: MYMEMO, service_from_env: null, ...prefs };
+  const settings = { show: true, service: "", default_service: MYMEMO, service_from_env: null, ...prefs };
   const service = settings.service_from_env ?? (settings.service || MYMEMO);
   return {
     linked: false, shown: settings.show, settings, service, endpoint: `${service}/openmymemo/mcp`, pending: false,
     link_error: null, folder: null, this_folder: false, account: null, plan: null, linked_at: null, state: "stopped",
-    reason: null, online: false, close_code: null, last_call_at: null, queued: null, apps: [], ...extra,
+    reason: null, online: false, close_code: null, last_call_at: null, queued: null, queue_enabled: false, apps: [], ...extra,
   };
 }
 
@@ -35,19 +35,26 @@ describe("CloudSettings", () => {
   });
   afterEach(() => w?.unmount());
 
-  it("is off until turned on, and then offers the service", async () => {
+  it("is on by default with the service, and hides it when turned off", async () => {
     api.cloud.mockResolvedValue(status());
-    api.cloudSettings.mockResolvedValue(status({}, { show: true }));
+    api.cloudSettings.mockResolvedValueOnce(status({ shown: false }, { show: false }))
+      .mockResolvedValueOnce(status());
     const w = await mountIt();
     const sw = w.get('[role="switch"]');
+    expect(sw.attributes("aria-checked")).toBe("true");
+    expect(w.text()).toContain("It does nothing until you sign in; turn this off to hide it.");
+    expect(w.get("input").element.value).toBe(MYMEMO);
+    expect(button(w, "Save")!.attributes("disabled")).toBeDefined(); // nothing changed yet
+    await sw.trigger("click");
+    await flushPromises();
+    expect(api.cloudSettings).toHaveBeenCalledWith({ show: false });
+    expect(store.cloudVersion).toBe(1); // the Connectors page reloads its list
     expect(sw.attributes("aria-checked")).toBe("false");
     expect(w.find("input").exists()).toBe(false);
     await sw.trigger("click");
     await flushPromises();
-    expect(api.cloudSettings).toHaveBeenCalledWith({ show: true });
-    expect(store.cloudVersion).toBe(1); // the Connectors page reloads its list
+    expect(api.cloudSettings).toHaveBeenLastCalledWith({ show: true });
     expect(w.get("input").element.value).toBe(MYMEMO);
-    expect(button(w, "Save")!.attributes("disabled")).toBeDefined(); // nothing changed yet
   });
 
   it("chooses another service, and goes back to MyMemo's own", async () => {
@@ -60,7 +67,7 @@ describe("CloudSettings", () => {
     await w.get("form").trigger("submit");
     await flushPromises();
     expect(api.cloudSettings).toHaveBeenCalledWith({ service: "https://memo.example.org/" });
-    expect(store.toast?.text).toBe("MyMemo Cloud now uses https://memo.example.org");
+    expect(store.toast?.text).toBe("OpenMyMemo Cloud now uses https://memo.example.org");
     await button(w, "Use MyMemo's own")!.trigger("click");
     await flushPromises();
     expect(api.cloudSettings).toHaveBeenLastCalledWith({ service: "" });
@@ -83,7 +90,7 @@ describe("CloudSettings", () => {
     expect(w.text()).toContain("Set by OPENMYMEMO_CLOUD_URL");
   });
 
-  it("shows a refused change, and nothing at all without MyMemo Cloud", async () => {
+  it("shows a refused change, and nothing at all without OpenMyMemo Cloud", async () => {
     api.cloud.mockResolvedValue(status({}, { show: true }));
     api.cloudSettings.mockRejectedValue(new Error("The service's address must start with https://"));
     let w = await mountIt();

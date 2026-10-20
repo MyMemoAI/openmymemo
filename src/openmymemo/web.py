@@ -223,7 +223,7 @@ class SemanticPatch(BaseModel):
 
 
 class AssistantSignInIn(BaseModel):
-    browser: bool = False  # sign in with the browser even when this computer is linked to MyMemo Cloud
+    browser: bool = False  # sign in with the browser even when this computer is linked to OpenMyMemo Cloud
 
 
 class TidyIn(BaseModel):
@@ -420,7 +420,7 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
 
     @api.post("/api/connectors")
     def create_connector(body: ConnectorIn) -> dict:
-        if body.kind not in ("stdio", "http"):  # web apps come through MyMemo Cloud, not by name
+        if body.kind not in ("stdio", "http"):  # web apps come through OpenMyMemo Cloud, not by name
             raise HTTPException(400, "kind must be stdio or http")
         c, token = connectors.create(body.name, body.kind, write=body.write)
         return {"connector": connector_dict(c), "token": token, "snippets": snippets_for(c, token)}
@@ -479,7 +479,7 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
     def disconnect_client(app_id: str) -> dict:
         return client_action(app_id, clients.disconnect)
 
-    # ---- MyMemo Cloud (product-design.md §16) ----------------------------------------------------
+    # ---- OpenMyMemo Cloud (product-design.md §16) ----------------------------------------------------
 
     def cloud_status() -> dict:
         s = cloud.status()
@@ -501,7 +501,7 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
 
     @api.patch("/api/cloud/settings")
     def patch_cloud_settings(body: CloudSettingsPatch) -> dict:
-        """Show or hide MyMemo Cloud, and choose its service (product-design.md §16.11)."""
+        """Show or hide OpenMyMemo Cloud, and choose its service (product-design.md §16.11)."""
         try:
             cloud.update_settings(show=body.show, service=body.service)
         except CloudError as e:
@@ -528,7 +528,7 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
         """Allow a web app again after its access was removed (an explicit re-grant, §5.5)."""
         c = next((x for x in connectors._load() if x.id == cid and x.kind == "cloud"), None)
         if c is None:
-            raise NotFound(f"No MyMemo Cloud app {cid}")
+            raise NotFound(f"No OpenMyMemo Cloud app {cid}")
         if c.revoked_at:
             connectors.create(c.name, "cloud", connector_id=cid)
         return cloud_status()
@@ -586,7 +586,7 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
 
     @api.post("/api/assistant/mymemo/signin")
     def assistant_signin(body: AssistantSignInIn | None = None) -> dict:
-        """Sign in to MyMemo for its hosted model (§17.8): with this computer's MyMemo Cloud link when there is one
+        """Sign in to MyMemo for its hosted model (§17.8): with this computer's OpenMyMemo Cloud link when there is one
         (no browser), else ``{"url"}`` for the panel to open; the browser comes back to /cloud/callback."""
         if not mymemo_offered(load_settings().kind):
             raise HTTPException(409, MYMEMO_HIDDEN)
@@ -953,7 +953,7 @@ def _panel_server_class():
     import uvicorn
 
     class _PanelServer(uvicorn.Server):
-        """uvicorn, plus MyMemo Cloud: the bridge starts once the port is ours and closes (1000) when we stop.
+        """uvicorn, plus OpenMyMemo Cloud: the bridge starts once the port is ours and closes (1000) when we stop.
 
         Starting it only after the port is bound matters: two AI apps may start the panel for the same folder at
         once, and only the one that gets the port may connect, or the other would be told it was replaced.
@@ -981,7 +981,7 @@ def _panel_server_class():
 
 
 def panel_server(vault: Vault, port: int, log_level: str = "warning"):
-    """The uvicorn server for the panel, `/mcp` and MyMemo Cloud on 127.0.0.1:`port`."""
+    """The uvicorn server for the panel, `/mcp` and OpenMyMemo Cloud on 127.0.0.1:`port`."""
     import uvicorn
 
     cloud = Cloud(vault, port)

@@ -7,6 +7,7 @@ import stat
 
 import httpx2
 import pytest
+import typer
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
@@ -430,7 +431,7 @@ def test_panel_routes(vault, fake, monkeypatch):
     api = TestClient(create_api(vault, 8787), base_url="http://127.0.0.1:8787")
     assert api.get("/api/assistant").status_code == 403  # the guard covers it
     s = api.get("/api/assistant", headers=H).json()
-    assert not s["enabled"] and s["kinds"]["mymemo"] is False and "nowhere" in s["where"] and s["mymemo"] is None
+    assert not s["enabled"] and s["kinds"]["mymemo"] is True and "nowhere" in s["where"] and s["mymemo"] is None
     assert api.get("/api/clients", headers=H).json()["assistant"] is None
     s = api.patch("/api/assistant", headers=H, json={"enabled": True, "kind": "key", "protocol": "anthropic",
                                                      "model": "claude-haiku-5-5", "api_key": "sk-secret",
@@ -442,16 +443,21 @@ def test_panel_routes(vault, fake, monkeypatch):
     assert catalog["assistant"]["id"] == "assistant" and all(c["id"] != "assistant" for c in catalog["custom"])
     r = api.post("/api/assistant/test", headers=H).json()
     assert r["ok"] and r["model"] == "claude-haiku-5-5"
-    r = api.patch("/api/assistant", headers=H, json={"kind": "mymemo"})  # hidden until its plan opens (§17.8)
+    monkeypatch.setenv("OPENMYMEMO_ASSISTANT_MYMEMO", "0")  # turned off on this computer (§17.8)
+    assert api.get("/api/assistant", headers=H).json()["kinds"]["mymemo"] is False
+    r = api.patch("/api/assistant", headers=H, json={"kind": "mymemo"})
     assert r.status_code == 400 and r.json()["detail"] == MYMEMO_HIDDEN
     r = api.post("/api/assistant/mymemo/signin", headers=H)
     assert r.status_code == 409 and r.json()["detail"] == MYMEMO_HIDDEN
     assert load_settings().kind == "key"
-    monkeypatch.setenv("OPENMYMEMO_ASSISTANT_MYMEMO", "1")
+    monkeypatch.delenv("OPENMYMEMO_ASSISTANT_MYMEMO")  # offered by default
     assert api.get("/api/assistant", headers=H).json()["kinds"]["mymemo"] is True
     s = api.patch("/api/assistant", headers=H, json={"kind": "mymemo"}).json()  # chosen; needs a sign-in
     assert s["kind"] == "mymemo" and not s["ready"] and s["problem"] == "Sign in to MyMemo to use its hosted model."
     assert s["mymemo"]["signed_in"] is False and not s["has_key"]
+    monkeypatch.setenv("OPENMYMEMO_ASSISTANT_MYMEMO", "off")  # settings that already use it keep it
+    assert api.get("/api/assistant", headers=H).json()["kinds"]["mymemo"] is True
+    monkeypatch.delenv("OPENMYMEMO_ASSISTANT_MYMEMO")
     assert api.patch("/api/assistant", headers=H, json={"base_url": "ftp://x"}).status_code == 400
     assert api.patch("/api/connectors/assistant", headers=H, json={"include_private": True}).status_code == 400
     assert api.delete("/api/connectors/assistant", headers=H).status_code == 200
@@ -462,8 +468,9 @@ def test_panel_routes(vault, fake, monkeypatch):
 
 
 def test_an_environment_choice_of_mymemo_can_be_turned_on_again(vault, fake, monkeypatch):
-    """OPENMYMEMO_ASSISTANT_KIND=mymemo shows MyMemo without the offer flag, so the panel may turn it on (§17.8)."""
-    monkeypatch.delenv("OPENMYMEMO_ASSISTANT_MYMEMO", raising=False)
+    """OPENMYMEMO_ASSISTANT_KIND=mymemo keeps MyMemo offered even where it is turned off, so the panel may turn it
+    on (§17.8)."""
+    monkeypatch.setenv("OPENMYMEMO_ASSISTANT_MYMEMO", "0")
     save_settings(enabled=False, kind="key")
     monkeypatch.setenv("OPENMYMEMO_ASSISTANT_KIND", "mymemo")
     api = TestClient(create_api(vault, 8787), base_url="http://127.0.0.1:8787")
@@ -486,12 +493,20 @@ def test_cli(vault, fake, monkeypatch):
     r = runner.invoke(app, [*v, "assistant", "test"])
     assert r.exit_code == 0 and "gpt-x answered in" in r.stdout
     assert fake.requests[0].headers["authorization"] == "Bearer sk-cli"
-    for args in (["set", "--kind", "mymemo"], ["signin", "--no-open"]):  # hidden until its plan opens (§17.8)
+    # Offered by default (§17.8): signin, signout and plan are listed in the assistant group's help, and `set --kind`
+    # names mymemo. Read from the commands Typer registers, not from the rendered help, whose layout depends on the
+    # terminal.
+    group = typer.main.get_command(app).commands["assistant"]
+    listed = {name for name, cmd in group.commands.items() if not cmd.hidden}
+    assert {"signin", "signout", "plan"} <= listed
+    kind = next(p for p in group.commands["set"].params if p.name == "kind")
+    assert "or mymemo (MyMemo's hosted model; then `openmymemo assistant signin`)" in kind.help
+    monkeypatch.setenv("OPENMYMEMO_ASSISTANT_MYMEMO", "0")  # turned off on this computer
+    for args in (["set", "--kind", "mymemo"], ["signin", "--no-open"]):
         r = runner.invoke(app, [*v, "assistant", *args])
         assert r.exit_code == 1 and MYMEMO_HIDDEN in r.stderr
     assert load_settings().kind == "key"
-    assert "signin" not in runner.invoke(app, ["assistant", "--help"]).stdout
-    monkeypatch.setenv("OPENMYMEMO_ASSISTANT_MYMEMO", "1")
+    monkeypatch.delenv("OPENMYMEMO_ASSISTANT_MYMEMO")
     r = runner.invoke(app, [*v, "assistant", "set", "--kind", "mymemo"])
     assert r.exit_code == 1 and "Signed in: no" in r.stdout and "Sign in to MyMemo" in r.stdout
     r = runner.invoke(app, [*v, "assistant", "off"])

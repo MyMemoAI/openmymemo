@@ -171,7 +171,7 @@ class Assistant:
             "session_apps": {app: s.session_apps.get(app) for app in SESSION_APPS}, "from_env": list(s.from_env), "local": s.local, "problem": s.problem(),
             "ready": s.enabled and self.unavailable_reason() is None, "reason": self.unavailable_reason(),
             "where": where_text_goes(s), "connector_id": CONNECTOR_ID if c else None, "revoked": revoked,
-            "kinds": {"local": True, "key": True, "mymemo": mymemo_offered(s.kind)},  # hidden until its plan opens
+            "kinds": {"local": True, "key": True, "mymemo": mymemo_offered(s.kind)},  # unless turned off here (§17.8)
             "mymemo": mymemo.public_status(s) if s.kind == "mymemo" else None,
         }
 

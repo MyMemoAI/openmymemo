@@ -75,7 +75,7 @@ def _status_message(status: int, payload: Any) -> Failure:
             code = payload.get("code")
         if status == 402:
             kind = "quota" if code == "quota_exceeded" else "plan"
-            text = ("This month's allowance is used up." if kind == "quota"
+            text = ("This month's included use is used up." if kind == "quota"
                     else "Needs the OpenMyMemo Assistant plan.")
             return Failure(text, kind, status)
     detail = " ".join(detail.split())[:200]

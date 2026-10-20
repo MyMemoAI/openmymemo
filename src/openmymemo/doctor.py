@@ -201,9 +201,9 @@ def cloud(vault: Vault) -> list[Check]:
     if link is None:
         return []
     if not link.serves(vault.root):
-        return [Check("MyMemo Cloud", "warn", f"linked to another folder, {link.vault}.",
+        return [Check("OpenMyMemo Cloud", "warn", f"linked to another folder, {link.vault}.",
                       "Run `openmymemo cloud link` from this folder to move it.")]
-    return [Check("MyMemo Cloud", "ok", "linked for this folder. `openmymemo cloud status` shows the connection.")]
+    return [Check("OpenMyMemo Cloud", "ok", "linked for this folder. `openmymemo cloud status` shows the connection.")]
 
 
 def _guarded(area: str, check: Callable[[], list[Check]]) -> list[Check]:
@@ -224,5 +224,5 @@ def run(root: Path, port: int, panel_for: Callable[[Path, int], str | None]) -> 
     if not any(c.level == "fail" for c in found):
         vault = Vault(root)
         checks += _guarded("AI apps", lambda: apps(vault))
-        checks += _guarded("MyMemo Cloud", lambda: cloud(vault))
+        checks += _guarded("OpenMyMemo Cloud", lambda: cloud(vault))
     return checks
