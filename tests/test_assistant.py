@@ -7,6 +7,7 @@ import stat
 
 import httpx2
 import pytest
+import typer
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
@@ -492,10 +493,14 @@ def test_cli(vault, fake, monkeypatch):
     r = runner.invoke(app, [*v, "assistant", "test"])
     assert r.exit_code == 0 and "gpt-x answered in" in r.stdout
     assert fake.requests[0].headers["authorization"] == "Bearer sk-cli"
-    help_text = runner.invoke(app, ["assistant", "--help"]).stdout
-    assert all(f"│ {cmd} " in help_text for cmd in ("signin", "signout", "plan"))  # offered by default (§17.8)
-    words = " ".join(runner.invoke(app, ["assistant", "set", "--help"]).stdout.replace("│", " ").split())
-    assert "or mymemo (MyMemo's hosted model; then `openmymemo assistant signin`)" in words
+    # Offered by default (§17.8): signin, signout and plan are listed in the assistant group's help, and `set --kind`
+    # names mymemo. Read from the commands Typer registers, not from the rendered help, whose layout depends on the
+    # terminal.
+    group = typer.main.get_command(app).commands["assistant"]
+    listed = {name for name, cmd in group.commands.items() if not cmd.hidden}
+    assert {"signin", "signout", "plan"} <= listed
+    kind = next(p for p in group.commands["set"].params if p.name == "kind")
+    assert "or mymemo (MyMemo's hosted model; then `openmymemo assistant signin`)" in kind.help
     monkeypatch.setenv("OPENMYMEMO_ASSISTANT_MYMEMO", "0")  # turned off on this computer
     for args in (["set", "--kind", "mymemo"], ["signin", "--no-open"]):
         r = runner.invoke(app, [*v, "assistant", *args])
