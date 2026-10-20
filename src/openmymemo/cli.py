@@ -1419,14 +1419,23 @@ def assistant_plan(ctx: typer.Context) -> None:
     if when:
         typer.echo(f"        this period ends {when}")
     u = a["usage"]
-    cost = mymemo.cost_text(u)
-    if cost:
-        typer.echo(f"Usage:  {cost}")
+    cost, bar, offer = mymemo.cost_text(u), mymemo.usage_bar(u), mymemo.offer_text(u)
+    if not plan["active"]:  # what the plan would include, as the service says
+        for line in (mymemo.includes_text(u, a["display_name"] or a["model"]), offer):
+            if line:
+                typer.echo(f"        {line}")
+    elif cost:
+        used_up = (mymemo.used_share(u) or 0) >= 1
+        reset = mymemo._date(when) if used_up else ""
+        typer.echo("Usage:  " + (f"{bar}  " if bar else "") + cost
+                   + (f": used up, resets {reset}" if reset else ": used up" if used_up else ""))
+        if offer:
+            typer.echo(f"        {offer}")
     if any(u[k] is not None for k in ("input_tokens", "output_tokens", "input_tokens_included",
                                       "output_tokens_included", "requests")):
         def part(used: int | None, included: int | None, what: str) -> str:
             return f"{used or 0:,}" + (f" of {included:,}" if included is not None else "") + f" {what}"
-        typer.echo(("        " if cost else "Usage:  ") + ", ".join([
+        typer.echo(("        " if cost and plan["active"] else "Usage:  ") + ", ".join([
             part(u["input_tokens"], u["input_tokens_included"], "input tokens"),
             part(u["output_tokens"], u["output_tokens_included"], "output tokens"), f"{u['requests'] or 0:,} requests"]))
     h = mymemo.hold(s)

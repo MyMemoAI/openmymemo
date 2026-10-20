@@ -125,7 +125,8 @@ describe("AssistantSettings", () => {
       plan: { status: "active", active: true, period_start: "2026-10-01T00:00:00Z", period_end: "2026-11-01T00:00:00Z",
         resets_at: "2026-11-01T00:00:00Z", cancel_at_period_end: false, plan_url: "https://app.mymemo.ai/openmymemo/assistant" },
       usage: { input_tokens: 1200, output_tokens: 340, input_tokens_included: 10000, output_tokens_included: 2000, requests: 7,
-        cost_usd: 1.234, cost_usd_included: 10 as number | null },
+        cost_usd: 1.234, cost_usd_included: 10 as number | null, cost_usd_regular_included: 5 as number | null,
+        offer_ends_at: null as string | null },
       limits: { requests_per_minute: 10, requests_per_day: 100 },
     };
     let opened: string[] = [];
@@ -159,8 +160,13 @@ describe("AssistantSettings", () => {
       expect(w.get('[data-test="mm-account"]').text()).toBe("Signed in as Sam (s***@example.com) with this computer's OpenMyMemo Cloud link");
       expect(w.get('[data-test="mm-model"]').text()).toBe("Model: Claude Haiku 5.5 by Anthropic");
       expect(w.get('[data-test="mm-plan"]').text()).toBe("OpenMyMemo Assistant plan: active");
-      expect(w.get('[data-test="mm-cost"]').text()).toBe("$1.23 of $10.00 used this month. Resets November 1.");
-      expect(w.get('[data-test="mm-usage"]').text()).toBe("1,200 of 10,000 input tokens, 340 of 2,000 output tokens, 7 requests.");
+      const meter = w.get('[data-test="mm-meter"]');
+      expect(meter.get('[data-test="mm-cost"]').text()).toBe("$1.23 of $10.00 used this month.");
+      expect(meter.get('[data-test="mm-percent"]').text()).toBe("12%");
+      expect(meter.get('[role="progressbar"]').attributes("aria-valuenow")).toBe("12");
+      expect(meter.get('[data-test="mm-usage"]').text()).toBe("1,200 of 10,000 input tokens, 340 of 2,000 output tokens, 7 requests.");
+      expect(meter.get('[data-test="mm-resets"]').text()).toBe("Resets November 1.");
+      expect(w.get('[data-test="mm-offer"]').text()).toBe("Limited-time offer: $10.00 of use this month instead of the regular $5.00.");
       expect(w.find('[data-test="mm-includes"]').exists()).toBe(false); // the plan is active: the figures say it
       const link = w.get('[data-test="mm-plan-link"]');
       expect(link.text()).toBe("Manage");
@@ -182,13 +188,51 @@ describe("AssistantSettings", () => {
       expect(w.get('[data-test="mm-usage"]').text()).toBe(tokens);
     });
 
+    it.each([
+      [6.2, "62%", "62%", "bg-accent", "Resets November 1."],
+      [9.96, "99%", "99%", "bg-wait", "Resets November 1."], // full only once it is used up
+      [10.02, "100%, used up", "100%", "bg-danger", "Used up. Resets November 1."],
+    ])("fills the meter at $%s of $10.00", async (used, label, width, color, resets) => {
+      const signed = on(mymemo({ signed_in: true, via: "browser" }));
+      api.assistant.mockResolvedValue(signed);
+      api.assistantAccount.mockResolvedValue({ account: { ...account, usage: { ...account.usage, cost_usd: used } }, assistant: signed });
+      const w = await mountIt();
+      const meter = w.get('[data-test="mm-meter"]');
+      expect(meter.get('[data-test="mm-percent"]').text()).toBe(label);
+      const fill = meter.get('[data-test="mm-fill"]');
+      expect(fill.attributes("style")).toContain(`width: ${width}`);
+      expect(fill.classes()).toContain(color);
+      expect(meter.get('[data-test="mm-resets"]').text()).toBe(resets);
+      expect(meter.get('[data-test="mm-usage"]').text()).toContain("1,200 of 10,000 input tokens"); // the detail line
+    });
+
+    it("names a limited-time offer only while the month includes more than the regular use", async () => {
+      const signed = on(mymemo({ signed_in: true, via: "browser" }));
+      api.assistant.mockResolvedValue(signed);
+      api.assistantAccount.mockResolvedValue({
+        account: { ...account, usage: { ...account.usage, offer_ends_at: "2026-11-30T00:00:00Z" } }, assistant: signed });
+      let w = await mountIt();
+      expect(w.get('[data-test="mm-offer"]').text())
+        .toBe("Limited-time offer: $10.00 of use this month instead of the regular $5.00, until November 30.");
+      w.unmount();
+      api.assistantAccount.mockResolvedValue({
+        account: { ...account, usage: { ...account.usage, cost_usd_included: 5, cost_usd_regular_included: 5 } }, assistant: signed });
+      w = await mountIt();
+      expect(w.find('[data-test="mm-offer"]').exists()).toBe(false);
+      expect(w.get('[data-test="mm-cost"]').text()).toBe("$1.23 of $5.00 used this month.");
+      expect(w.text()).not.toContain("offer");
+    });
+
     it("shows tokens only from a service that sends no dollars", async () => {
       const signed = on(mymemo({ signed_in: true, via: "browser" }));
       api.assistant.mockResolvedValue(signed);
       api.assistantAccount.mockResolvedValue({
-        account: { ...account, usage: { ...account.usage, cost_usd: null, cost_usd_included: null } }, assistant: signed });
+        account: { ...account, usage: { ...account.usage, cost_usd: null, cost_usd_included: null,
+          cost_usd_regular_included: null, offer_ends_at: null } }, assistant: signed });
       const w = await mountIt();
       expect(w.find('[data-test="mm-cost"]').exists()).toBe(false);
+      expect(w.find('[data-test="mm-meter"]').exists()).toBe(false);
+      expect(w.find('[data-test="mm-offer"]').exists()).toBe(false);
       expect(w.get('[data-test="mm-usage"]').text())
         .toBe("This period: 1,200 of 10,000 input tokens, 340 of 2,000 output tokens, 7 requests. Resets November 1.");
     });
@@ -211,8 +255,10 @@ describe("AssistantSettings", () => {
         await flushPromises();
         expect(w.get('[data-test="mm-account"]').text()).toBe("Signed in to MyMemo at api.mymemo.ai");
         expect(w.get('[data-test="mm-plan"]').text()).toContain("No OpenMyMemo Assistant plan yet");
-        // What the plan includes, as the service answered it.
-        expect(w.get('[data-test="mm-includes"]').text()).toBe("The plan includes up to $10.00 of Claude Haiku 5.5 use a month.");
+        // What the plan includes, as the service answered it: its regular use, and the launch offer on top.
+        expect(w.get('[data-test="mm-includes"]').text()).toBe("The plan includes up to $5.00 of Claude Haiku 5.5 use a month.");
+        expect(w.get('[data-test="mm-offer"]').text()).toBe("Limited-time offer: $10.00 of use this month instead of the regular $5.00.");
+        expect(w.find('[data-test="mm-meter"]').exists()).toBe(false); // nothing to measure before the plan
         expect(w.get('[data-test="mm-plan-link"]').text()).toBe("Get the plan");
       } finally {
         vi.useRealTimers();

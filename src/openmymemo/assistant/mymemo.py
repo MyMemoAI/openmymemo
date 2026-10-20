@@ -653,12 +653,57 @@ def _models_shape(data: Mapping[str, Any], service: str) -> dict[str, Any]:
                  "resets_at": text(plan.get("resets_at")), "cancel_at_period_end": plan.get("cancel_at_period_end") is True,
                  "plan_url": _plan_url(plan.get("plan_url"), service)},
         # This period's use. `cost_usd` and `cost_usd_included` (None: no cap) come from services that meter in
-        # dollars; an older service sends only the token counts, and then they are None too.
+        # dollars; an older service sends only the token counts, and then they are None too. A limited-time offer
+        # includes more than the plan's regular use (`cost_usd_regular_included`), until `offer_ends_at` if announced.
         "usage": {**{k: num(usage.get(k)) for k in ("input_tokens", "output_tokens", "input_tokens_included",
                                                     "output_tokens_included", "requests")},
-                  **{k: money(usage.get(k)) for k in ("cost_usd", "cost_usd_included")}},
+                  **{k: money(usage.get(k)) for k in ("cost_usd", "cost_usd_included", "cost_usd_regular_included")},
+                  "offer_ends_at": _iso(ends) if (ends := _parse(usage.get("offer_ends_at"))) else None},
         "limits": {k: num(limits.get(k)) for k in ("requests_per_minute", "requests_per_day")},
     }
+
+
+def _usd(n: float) -> str:
+    return f"${n:,.2f}"
+
+
+def offer_text(usage: Mapping[str, Any]) -> str | None:
+    """ "Limited-time offer: $10.00 of use this month instead of the regular $5.00, until November 30." when the
+    service includes more than the plan's regular use this month; None otherwise (no offer wording at all)."""
+    included, regular = usage.get("cost_usd_included"), usage.get("cost_usd_regular_included")
+    if included is None or regular is None or not included > regular:
+        return None
+    until = _date(usage.get("offer_ends_at"))
+    return (f"Limited-time offer: {_usd(included)} of use this month instead of the regular {_usd(regular)}"
+            + (f", until {until}." if until else "."))
+
+
+def includes_text(usage: Mapping[str, Any], model: str | None) -> str | None:
+    """What the plan includes, before it is bought, from the service's figures only (the regular amount during an
+    offer, which ``offer_text`` adds to); None when the service names no dollar allowance or no model."""
+    regular = usage.get("cost_usd_regular_included")
+    included = regular if offer_text(usage) else usage.get("cost_usd_included")
+    if included is None or not model:
+        return None
+    return f"The plan includes up to {_usd(included)} of {model} use a month."
+
+
+def used_share(usage: Mapping[str, Any]) -> float | None:
+    """How much of this month's included use is used, 0 to 1 (1: used up); None without a dollar cap."""
+    used, included = usage.get("cost_usd"), usage.get("cost_usd_included")
+    if used is None or included is None:
+        return None
+    return 1.0 if used >= included else used / included
+
+
+def usage_bar(usage: Mapping[str, Any], width: int = 10) -> str | None:
+    """ "[██████░░░░] 62%" for the CLI; full only once it is used up, so 99.6% still shows 99%. None without a cap."""
+    share = used_share(usage)
+    if share is None:
+        return None
+    percent = 100 if share >= 1 else min(99, round(share * 100))
+    filled = width if share >= 1 else min(width - 1, round(share * width))
+    return f"[{'█' * filled}{'░' * (width - filled)}] {percent}%"
 
 
 def cost_text(usage: Mapping[str, Any]) -> str | None:
@@ -668,9 +713,9 @@ def cost_text(usage: Mapping[str, Any]) -> str | None:
     if used is None:
         return None
     if included is not None:
-        return f"${used:,.2f} of ${included:,.2f} used this month"
+        return f"{_usd(used)} of {_usd(included)} used this month"
     capped = any(usage.get(k) is not None for k in ("input_tokens_included", "output_tokens_included"))
-    return f"${used:,.2f} used this month" + ("" if capped else ", no cap")
+    return f"{_usd(used)} used this month" + ("" if capped else ", no cap")
 
 
 def account(s: Settings) -> dict[str, Any]:
@@ -702,7 +747,7 @@ def account(s: Settings) -> dict[str, Any]:
 
 __all__ = [
     "CHANGED", "EXCHANGE_MESSAGES", "MYMEMO_PATH", "SIGNED_OUT", "Session", "SignIn", "access_token", "account", "clear_hold",
-    "cost_text", "exchange",
+    "cost_text", "exchange", "includes_text", "offer_text", "usage_bar", "used_share",
     "hold", "hold_message", "keep", "keep_signin", "note_failure", "public_status", "refresh", "resource",
     "service_of", "session", "sign_in_with_browser", "sign_out",
 ]

@@ -313,13 +313,79 @@ def test_cli_plan_shows_the_month_s_use_and_a_used_up_allowance(vault, fake):
     assert ask(Assistant.from_settings(vault), "t") is None
     out = CliRunner().invoke(app, ["--vault", str(vault.root), "assistant", "plan"]).stdout
     lines = out.splitlines()
-    assert "Usage:  $10.02 of $10.00 used this month" in lines
+    assert "Usage:  [██████████] 100%  $10.02 of $10.00 used this month: used up, resets November 1" in lines
+    assert "        Limited-time offer: $10.00 of use this month instead of the regular $5.00." in lines  # models.json
     assert "        1,200 of 10,000 input tokens, 340 of 2,000 output tokens, 7 requests" in lines
     assert "Paused: This month's included use is used up; it resets November 1." in out
-    del fake.models["usage"]["cost_usd"], fake.models["usage"]["cost_usd_included"]  # an older service
+
+    fake.models["usage"] |= {"cost_usd": 6.2, "cost_usd_included": 5.0, "cost_usd_regular_included": 5.0}
+    out = CliRunner().invoke(app, ["--vault", str(vault.root), "assistant", "plan"]).stdout
+    assert "Usage:  [██████████] 100%  $6.20 of $5.00 used this month: used up, resets November 1" in out.splitlines()
+    assert "offer" not in out  # the regular allowance: no offer wording
+    fake.models["usage"] |= {"cost_usd": 3.1}
+    out = CliRunner().invoke(app, ["--vault", str(vault.root), "assistant", "plan"]).stdout
+    assert "Usage:  [██████░░░░] 62%  $3.10 of $5.00 used this month" in out.splitlines()
+
+    for k in ("cost_usd", "cost_usd_included", "cost_usd_regular_included", "offer_ends_at"):  # an older service
+        del fake.models["usage"][k]
     out = CliRunner().invoke(app, ["--vault", str(vault.root), "assistant", "plan"]).stdout
     assert "Usage:  1,200 of 10,000 input tokens, 340 of 2,000 output tokens, 7 requests" in out.splitlines()
-    assert "used this month" not in out
+    assert "used this month" not in out and "[" not in out and "offer" not in out
+
+
+def test_cli_plan_before_buying_says_what_it_includes(vault, fake):
+    signed_in(vault, fake)
+    fake.models["plan"] = {**fake.models["plan"], "active": False, "status": "none"}
+    fake.models["usage"] |= {"cost_usd": 0, "offer_ends_at": "2026-11-30T00:00:00Z"}
+    out = CliRunner().invoke(app, ["--vault", str(vault.root), "assistant", "plan"]).stdout
+    lines = out.splitlines()
+    assert "        The plan includes up to $5.00 of Claude Haiku 5.5 use a month." in lines
+    assert "        Limited-time offer: $10.00 of use this month instead of the regular $5.00, until November 30." in lines
+    assert "Get the plan:" in out and "[" not in out
+    fake.models["usage"] |= {"cost_usd_regular_included": None}  # no regular amount named: no offer
+    out = CliRunner().invoke(app, ["--vault", str(vault.root), "assistant", "plan"]).stdout
+    assert "        The plan includes up to $10.00 of Claude Haiku 5.5 use a month." in out.splitlines()
+    assert "offer" not in out
+
+
+@pytest.mark.parametrize(("usage", "offer"), [
+    ({"cost_usd_included": 10.0, "cost_usd_regular_included": 5.0, "offer_ends_at": None},
+     "Limited-time offer: $10.00 of use this month instead of the regular $5.00."),
+    ({"cost_usd_included": 10, "cost_usd_regular_included": 5, "offer_ends_at": "2026-11-30T23:59:59Z"},
+     "Limited-time offer: $10.00 of use this month instead of the regular $5.00, until November 30."),
+    ({"cost_usd_included": 5.0, "cost_usd_regular_included": 5.0}, None),  # the regular allowance
+    ({"cost_usd_included": 4.0, "cost_usd_regular_included": 5.0}, None),
+    ({"cost_usd_included": None, "cost_usd_regular_included": 5.0}, None),  # no cap
+    ({"cost_usd_included": 10.0, "cost_usd_regular_included": None}, None),
+    ({"cost_usd_included": 10.0, "cost_usd_regular_included": -5, "offer_ends_at": "soon"}, None),
+    ({"cost_usd_included": 10.0, "cost_usd_regular_included": "5"}, None),
+    ({}, None),  # an older service
+])
+def test_a_limited_time_offer_is_named_only_when_the_service_includes_more_than_the_regular_use(
+        vault, fake, api, usage, offer):
+    signed_in(vault, fake)
+    fake.models["usage"] = {**{k: v for k, v in fake.models["usage"].items()
+                               if k not in ("cost_usd_included", "cost_usd_regular_included", "offer_ends_at")}, **usage}
+    acct = api.get("/api/assistant/mymemo", headers=H).json()["account"]
+    assert mymemo.offer_text(acct["usage"]) == offer
+    ends = acct["usage"]["offer_ends_at"]
+    assert ends in (None, "2026-11-30T23:59:59+00:00") and (ends is None) == (usage.get("offer_ends_at") in (None, "soon"))
+    regular = acct["usage"]["cost_usd_regular_included"]
+    assert regular is None or isinstance(regular, float) and regular >= 0
+
+
+@pytest.mark.parametrize(("used", "included", "bar"), [
+    (6.2, 10.0, "[██████░░░░] 62%"),
+    (0.0003, 10.0, "[░░░░░░░░░░] 0%"),
+    (9.96, 10.0, "[█████████░] 99%"),  # full only once it is used up
+    (10.0, 10.0, "[██████████] 100%"),
+    (12.5, 10.0, "[██████████] 100%"),
+    (1.0, 0.0, "[██████████] 100%"),
+    (1.0, None, None),  # no cap: no bar
+    (None, 10.0, None),  # no dollars: no bar
+])
+def test_the_usage_bar(used, included, bar):
+    assert mymemo.usage_bar({"cost_usd": used, "cost_usd_included": included}) == bar
 
 
 def test_offered_by_default_and_turned_off_by_the_environment(vault, fake, monkeypatch):
@@ -418,7 +484,7 @@ def test_the_fixtures_name_no_prices():
     # Only the use the service meters in dollars (`cost_usd`, `cost_usd_included`); nothing names a price.
     models = fixture("assistant/models.json")
     usage = models["response"]["usage"]
-    assert isinstance(usage.pop("cost_usd"), float) and isinstance(usage.pop("cost_usd_included"), float)
+    assert all(isinstance(usage.pop(k), float) for k in ("cost_usd", "cost_usd_included", "cost_usd_regular_included"))
     text = json.dumps([models, fixture("assistant/errors.json")]).lower()
     assert "$" not in text and "usd" not in text and "price" not in text
 

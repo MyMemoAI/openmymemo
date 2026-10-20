@@ -102,7 +102,7 @@ The OpenMyMemo Assistant uses a model to help with imports, sorting and search, 
 
 ### MyMemo's hosted model
 
-You can choose MyMemo's hosted model in Settings → Assistant, or with `openmymemo assistant signin`. It is a MyMemo service with its own plan, the OpenMyMemo Assistant plan, separate from MyMemo memberships: $5 a month, including up to $10 of Claude Haiku 5.5 use a month. Nothing is sent to MyMemo until you choose it and sign in. (Setting `OPENMYMEMO_ASSISTANT_MYMEMO=0` on a computer removes the choice there.)
+You can choose MyMemo's hosted model in Settings → Assistant, or with `openmymemo assistant signin`. It is a MyMemo service with its own plan, the OpenMyMemo Assistant plan, separate from MyMemo memberships: $5 a month, including $5 of Claude Haiku 5.5 use a month (for a limited time after the launch, $10). Nothing is sent to MyMemo until you choose it and sign in. (Setting `OPENMYMEMO_ASSISTANT_MYMEMO=0` on a computer removes the choice there.)
 
 - **Signing in.** If this computer is linked to OpenMyMemo Cloud, OpenMyMemo trades the link's device token for a sign-in that can only reach the model, with no browser. Otherwise your browser opens MyMemo's sign-in page with this computer's name. The service returns an access token and a refresh token. They are kept on your computer like an API key (in the Keychain on a Mac, otherwise in `assistant.json`), never in your memory folder, and sent only to that service.
 - **For each request,** OpenMyMemo sends the service the text a task works on (as above) and the task's name, such as `import.split` or `sort`. Private topics are never sent, as for any model outside your computer.

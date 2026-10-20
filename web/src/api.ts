@@ -518,6 +518,10 @@ export type AssistantAccount =
         /** This month's use in US dollars and what the plan includes (null: no cap); both null from an older
          * service, which reports tokens only. */
         cost_usd: number | null; cost_usd_included: number | null;
+        /** The plan's regular monthly use in dollars. A limited-time offer is on while cost_usd_included is more. */
+        cost_usd_regular_included: number | null;
+        /** When that offer ends, if announced (ISO 8601, UTC). */
+        offer_ends_at: string | null;
       };
       limits: { requests_per_minute: number | null; requests_per_day: number | null };
     }
