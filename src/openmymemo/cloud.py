@@ -870,6 +870,7 @@ class Bridge:
         self._bye_ms: float | None = None
         self._result_cap = RESULT_MAX_BYTES
         self._heartbeat = 25.0
+        self._ignored_items = False  # logged once: the service sent queued changes this computer didn't ask for
 
     # -- what the service is told --
 
@@ -1079,7 +1080,13 @@ class Bridge:
             if kind == "call":
                 self._spawn(self._call(ws, msg))
             elif kind == "item":
-                items.put_nowait(msg)  # one at a time, in the order the service sends them
+                # Only once this computer asked for the queue (FEATURES); otherwise it isn't filed or acknowledged,
+                # so it stays with the service, which sends it again once the queue is on here.
+                if queue_enabled():
+                    items.put_nowait(msg)  # one at a time, in the order the service sends them
+                elif not self._ignored_items:
+                    self._ignored_items = True
+                    log.info("OpenMyMemo Cloud: ignoring queued changes; this computer doesn't take the offline queue")
             elif kind == "ping":
                 await self._send(ws, {"type": "pong", "t": msg.get("t")})
             elif kind == "bye":

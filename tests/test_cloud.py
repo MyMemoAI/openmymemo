@@ -1003,6 +1003,17 @@ def queue_on(monkeypatch):
     monkeypatch.setattr(cloud, "FEATURES", ("queue",))
 
 
+def test_queued_changes_this_computer_didnt_ask_for_are_left_with_the_service(vault, fake, clouds, queue_clock):
+    """At launch (no `queue` in hello): an `item` the service sends anyway is neither filed nor acknowledged, so it
+    stays with the service, which sends it again once this computer takes the queue."""
+    c, conn = online(vault, fake, clouds)
+    conn.send(fixture("bridge/item.json"))
+    assert call(conn, fixture("bridge/call.json"))["result"]["isError"] is False  # handled after the item
+    time.sleep(0.2)
+    assert not [f for f in conn.frames if f.get("type") == "ack"]
+    assert Proposals(vault).list(connector_id="cloud-chatgpt") == [] and c.status()["online"]
+
+
 def test_queued_proposals_are_filed_as_their_web_app_with_their_time_and_acknowledged(vault, fake, clouds, queue_clock,
                                                                                     queue_on):
     c, conn = online(vault, fake, clouds)
@@ -1025,7 +1036,7 @@ def test_queued_proposals_are_filed_as_their_web_app_with_their_time_and_acknowl
     assert len(Proposals(vault).list(connector_id="cloud-chatgpt")) == 1
 
 
-def test_queued_items_that_cant_be_opened_or_filed(vault, fake, clouds):
+def test_queued_items_that_cant_be_opened_or_filed(vault, fake, clouds, queue_on):
     _, conn = online(vault, fake, clouds)
     good = VECTOR["plaintext"]
     broken = fixture("bridge/item.json")
@@ -1063,7 +1074,7 @@ def test_queued_items_that_cant_be_opened_or_filed(vault, fake, clouds):
     assert refused[0]["queue_id"] == "q-revoked" and refused[0]["connector"] == "cloud-chatgpt"
 
 
-def test_a_queued_write_retried_live_is_one_proposal_and_traceable(vault, fake, clouds, queue_clock):
+def test_a_queued_write_retried_live_is_one_proposal_and_traceable(vault, fake, clouds, queue_clock, queue_on):
     _, conn = online(vault, fake, clouds)
     good = VECTOR["plaintext"]
     args = {"op": "add", "content": "Keeps bees on the roof.", "topic": "goals", "idempotency_key": "ai-k1"}
@@ -1093,7 +1104,8 @@ def test_a_queued_write_retried_live_is_one_proposal_and_traceable(vault, fake, 
     assert next(p for p in Proposals(vault).list() if p.queue_id == "q-plain").idempotency_key == "q-plain"
 
 
-def test_a_passing_failure_stops_the_queue_until_it_is_sent_again_in_order(vault, fake, clouds, queue_clock, monkeypatch):
+def test_a_passing_failure_stops_the_queue_until_it_is_sent_again_in_order(vault, fake, clouds, queue_clock, monkeypatch,
+                                                                           queue_on):
     m = vault.add("how-to-work-with-me", "Drinks coffee.")
     _, conn = online(vault, fake, clouds)
     Connectors(vault).ensure("cloud-chatgpt", "ChatGPT (web)", kind="cloud")
@@ -1129,7 +1141,8 @@ def test_a_passing_failure_stops_the_queue_until_it_is_sent_again_in_order(vault
 
 
 @pytest.mark.parametrize("live_first", [True, False])
-def test_the_queued_receipt_is_kept_whichever_copy_arrives_first(live_first, vault, fake, clouds, queue_clock):
+def test_the_queued_receipt_is_kept_whichever_copy_arrives_first(live_first, vault, fake, clouds, queue_clock,
+                                                                 queue_on):
     _, conn = online(vault, fake, clouds)
     args = {"op": "add", "content": "Keeps bees on the roof.", "topic": "goals", "idempotency_key": "retry-key"}
     relayed = {**fixture("bridge/call.json"), "client": {"slug": "chatgpt", "name": "ChatGPT", "verified": True}}
@@ -1148,7 +1161,7 @@ def test_the_queued_receipt_is_kept_whichever_copy_arrives_first(live_first, vau
     assert p.queue_id == "q-race" and p.idempotency_key == "retry-key"
 
 
-def test_a_long_idempotency_key_keeps_its_identity(vault, fake, clouds, queue_clock):
+def test_a_long_idempotency_key_keeps_its_identity(vault, fake, clouds, queue_clock, queue_on):
     vault.update_settings(require_approval=True)
     _, conn = online(vault, fake, clouds)
     args = {"op": "add", "content": "Keeps bees on the roof.", "topic": "goals", "idempotency_key": "a" * 201}
@@ -1164,7 +1177,7 @@ def test_a_long_idempotency_key_keeps_its_identity(vault, fake, clouds, queue_cl
     assert len(Proposals(vault).list(connector_id="cloud-chatgpt")) == 1
 
 
-def test_text_no_file_can_hold_is_rejected_and_the_queue_goes_on(vault, fake, clouds, queue_clock):
+def test_text_no_file_can_hold_is_rejected_and_the_queue_goes_on(vault, fake, clouds, queue_clock, queue_on):
     _, conn = online(vault, fake, clouds)
     good = VECTOR["plaintext"]
     bad = json.dumps({**good, "qid": "q-bad", "params": {"name": "memory_propose", "arguments": {
@@ -1177,7 +1190,7 @@ def test_text_no_file_can_hold_is_rejected_and_the_queue_goes_on(vault, fake, cl
     assert not conn.closed.is_set() and [p.content for p in Proposals(vault).list()] == ["Likes rainy mornings."]
 
 
-def test_queued_items_are_filed_in_the_order_they_arrive(vault, fake, clouds):
+def test_queued_items_are_filed_in_the_order_they_arrive(vault, fake, clouds, queue_on):
     _, conn = online(vault, fake, clouds)
     good = VECTOR["plaintext"]
     texts = ["Is learning Japanese", "Plays the cello on weekends", "Wants to run a marathon in Tokyo",
@@ -1192,7 +1205,8 @@ def test_queued_items_are_filed_in_the_order_they_arrive(vault, fake, clouds):
     assert [p.content for p in Proposals(vault).list()][::-1] == texts
 
 
-def test_queued_items_name_unknown_web_apps_as_unverified_and_keep_times_in_range(vault, fake, clouds, queue_clock):
+def test_queued_items_name_unknown_web_apps_as_unverified_and_keep_times_in_range(vault, fake, clouds, queue_clock,
+                                                                                  queue_on):
     _, conn = online(vault, fake, clouds)
     good = VECTOR["plaintext"]
 
