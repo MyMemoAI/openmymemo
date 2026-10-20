@@ -54,7 +54,8 @@ KEYCHAIN_SERVICE = "OpenMyMemo Assistant"
 SECRETS = {"api_key": "api-key", "mymemo_token": "mymemo-token", "mymemo_refresh": "mymemo-refresh"}  # → Keychain
 _SAFE_SECRET = re.compile(r"[A-Za-z0-9._~+/=:-]{1,512}")
 ENV = "OPENMYMEMO_ASSISTANT_"
-MYMEMO_HIDDEN = "MyMemo's hosted model isn't available yet. Use a model on this computer or your own API key."
+MYMEMO_HIDDEN = ("MyMemo's hosted model is turned off on this computer (OPENMYMEMO_ASSISTANT_MYMEMO). Use a model "
+                 "on this computer or your own API key.")
 
 
 class SettingsError(Exception):
@@ -279,10 +280,11 @@ def _budget(value: float) -> float:
 
 
 def mymemo_offered(kind: str = "", environ: Mapping[str, str] | None = None) -> bool:
-    """Whether MyMemo's hosted model is offered (§17.8). It stays hidden until MyMemo opens its plan:
-    ``OPENMYMEMO_ASSISTANT_MYMEMO=1`` shows it, and settings that already use it (``kind``) keep it."""
+    """Whether MyMemo's hosted model is offered (§17.8): yes, unless ``OPENMYMEMO_ASSISTANT_MYMEMO`` is 0, false, no
+    or off on this computer; settings that already use it (``kind``) keep it even then. Offering it sends nothing:
+    the person still chooses it and signs in."""
     env = os.environ if environ is None else environ
-    return kind == "mymemo" or _truthy(env.get(ENV + "MYMEMO", ""))
+    return kind == "mymemo" or not _falsy(env.get(ENV + "MYMEMO", ""))
 
 
 def _env_kind() -> str:
@@ -294,6 +296,10 @@ def _env_kind() -> str:
 
 def _truthy(text: str) -> bool:
     return text.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _falsy(text: str) -> bool:
+    return text.strip().lower() in ("0", "false", "no", "off")
 
 
 def _from_raw(data: Mapping[str, Any]) -> Settings:

@@ -22,7 +22,8 @@ import SemanticSettings from "./SemanticSettings.vue";
  */
 type Choice = "off" | AssistantKind;
 const CHOICES: Choice[] = ["off", "local", "key", "mymemo"];
-// A kind the server doesn't offer isn't shown: MyMemo's hosted model stays hidden until its plan opens (§17.8).
+// A kind the server doesn't offer isn't shown: MyMemo's hosted model is offered unless turned off on this computer
+// (OPENMYMEMO_ASSISTANT_MYMEMO=0, §17.8).
 const choices = computed(() => CHOICES.filter((c) => c === "off" || status.value?.kinds[c]));
 const FEATURES: AssistantFeature[] = ["import", "sort", "recall", "check", "session", "tidy"];
 
@@ -165,15 +166,34 @@ const day = (iso: string | null | undefined) => {
 };
 const ok = computed(() => (account.value?.ok ? account.value : null));
 const planUrl = computed(() => ok.value?.plan.plan_url ?? mm.value?.hold?.plan_url ?? null);
+const usd = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+/** This month's use in dollars, as the service meters it ("$1.23 of $10.00 used this month."); "" from an older
+ * service that reports tokens only. No dollar cap and no token caps: no cap. */
+const costText = computed(() => {
+  const u = ok.value?.usage;
+  if (u?.cost_usd == null) return "";
+  if (u.cost_usd_included != null) return t("ast.mm.cost", { used: usd(u.cost_usd), included: usd(u.cost_usd_included) });
+  const capped = u.input_tokens_included != null || u.output_tokens_included != null;
+  return t(capped ? "ast.mm.costUncapped" : "ast.mm.costNoCap", { used: usd(u.cost_usd) });
+});
+/** The token counts: the whole usage line from an older service, secondary under the dollars otherwise. */
 const usageText = computed(() => {
   const u = ok.value?.usage;
-  if (!u || Object.values(u).every((v) => v == null)) return "";
+  const counts = u && [u.input_tokens, u.output_tokens, u.input_tokens_included, u.output_tokens_included, u.requests];
+  if (!u || !counts || counts.every((v) => v == null)) return "";
   const of = (used: number | null, included: number | null) =>
     included == null ? fmt(used ?? 0) : t("ast.mm.usageOf", { used: fmt(used ?? 0), included: fmt(included) });
-  return t("ast.mm.usage", {
+  return t(costText.value ? "ast.mm.tokens" : "ast.mm.usage", {
     input: of(u.input_tokens, u.input_tokens_included), output: of(u.output_tokens, u.output_tokens_included),
     requests: fmt(u.requests ?? 0),
   });
+});
+/** What the plan includes, from the service's answer (never a figure of OpenMyMemo's own). */
+const includesText = computed(() => {
+  const a = ok.value;
+  const included = a?.usage.cost_usd_included;
+  const model = a?.display_name ?? a?.model;
+  return included != null && model ? t("ast.mm.includes", { included: usd(included), model }) : "";
 });
 
 const choice = computed<Choice>(() => (status.value?.enabled ? status.value.kind : "off"));
@@ -293,9 +313,16 @@ const fmt = (n: number) => n.toLocaleString("en-US");
                 : ok.plan.cancel_at_period_end && ok.plan.period_end ? t("ast.mm.planEnds", { date: day(ok.plan.period_end) })
                 : t("ast.mm.planActive") }}
             </p>
+            <p v-if="!ok.plan.active && includesText" class="text-[13px] text-muted" data-test="mm-includes">{{ includesText }}</p>
+            <p v-if="costText" class="text-[13px]" data-test="mm-cost">
+              {{ costText }}
+              <template v-if="ok.plan.active && (ok.plan.resets_at || ok.plan.period_end)">
+                {{ t("ast.mm.resets", { date: day(ok.plan.resets_at ?? ok.plan.period_end) }) }}
+              </template>
+            </p>
             <p v-if="usageText" class="text-[13px] text-muted" data-test="mm-usage">
               {{ usageText }}
-              <template v-if="ok.plan.active && (ok.plan.resets_at || ok.plan.period_end)">
+              <template v-if="!costText && ok.plan.active && (ok.plan.resets_at || ok.plan.period_end)">
                 {{ t("ast.mm.resets", { date: day(ok.plan.resets_at ?? ok.plan.period_end) }) }}
               </template>
             </p>

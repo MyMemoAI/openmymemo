@@ -36,12 +36,6 @@ H = {"X-OpenMyMemo": "1"}
 SECRET = "Takes sumatriptan for cluster headaches every Thursday morning"
 
 
-@pytest.fixture(autouse=True)
-def _offered(monkeypatch):
-    """MyMemo's hosted model is hidden until its plan opens (§17.8); these tests are about using it."""
-    monkeypatch.setenv("OPENMYMEMO_ASSISTANT_MYMEMO", "1")
-
-
 @pytest.fixture
 def fake(monkeypatch):
     service = FakeAssistantService().start()
@@ -249,9 +243,9 @@ def test_a_used_up_allowance_pauses_until_it_resets(vault, fake):
     a = signed_in(vault, fake)
     fake.fail("quota_exceeded")
     assert ask(a, "t") is None
-    assert a.last_error.startswith("This month's allowance is used up, resets November 1")
+    assert a.last_error.startswith("This month's included use is used up; it resets November 1")
     a = Assistant.from_settings(vault)
-    assert a.unavailable_reason("sort").startswith("This month's allowance is used up, resets November 1")
+    assert a.unavailable_reason("sort").startswith("This month's included use is used up; it resets November 1")
     assert ask(a, "t") is None and len(fake.tasks) == 1
     h = mymemo.hold(a.settings)
     assert h["code"] == "quota_exceeded" and h["resets_at"] == "2026-11-01T00:00:00+00:00"
@@ -283,14 +277,60 @@ def test_the_plan_view_shows_what_the_service_answers(vault, fake, api):
     acct = api.get("/api/assistant/mymemo", headers=H).json()["account"]
     want = MODELS["response"]
     assert acct["display_name"] == want["display_name"] and acct["provider"] == want["provider"]
-    # The panel shows the token counts and requests; the service's cost figures (`cost_usd`, …) are left out.
-    assert acct["usage"] == {k: want["usage"][k] for k in acct["usage"]} and acct["limits"] == want["limits"]
-    assert set(acct["usage"]) == {"input_tokens", "output_tokens", "input_tokens_included", "output_tokens_included",
-                                  "requests"} and {"cost_usd", "cost_usd_included"} <= set(want["usage"])
+    assert acct["usage"] == want["usage"] and acct["limits"] == want["limits"]  # dollars and tokens, as answered
+    assert isinstance(acct["usage"]["cost_usd"], float) and acct["usage"]["cost_usd_included"] == 10.0
+    assert mymemo.cost_text(acct["usage"]) == "$0.00 of $10.00 used this month"
     assert acct["plan"]["status"] == "active" and acct["plan"]["plan_url"] == f"{fake.base}/openmymemo/assistant"
     fake.expire_access()  # refreshed once on 401, here too
     assert api.get("/api/assistant/mymemo", headers=H).json()["account"]["ok"]
     assert sum(f["grant_type"] == "refresh_token" for f in fake.token_forms) == 1
+
+
+@pytest.mark.parametrize(("usage", "text"), [
+    ({"cost_usd": 3.456, "cost_usd_included": 10}, "$3.46 of $10.00 used this month"),
+    ({"cost_usd": 12, "cost_usd_included": None, "input_tokens_included": None, "output_tokens_included": None},
+     "$12.00 used this month, no cap"),
+    ({"cost_usd": 1.5, "cost_usd_included": None}, "$1.50 used this month"),  # the token caps say what is included
+    ({}, None),  # an older service: tokens only
+    ({"cost_usd": "1.50", "cost_usd_included": True}, None),
+    ({"cost_usd": -1, "cost_usd_included": 10}, None),
+])
+def test_the_month_s_use_in_dollars(vault, fake, api, usage, text):
+    signed_in(vault, fake)
+    base = {k: v for k, v in fake.models["usage"].items() if not k.startswith("cost_")}
+    fake.models["usage"] = {**base, **usage}
+    acct = api.get("/api/assistant/mymemo", headers=H).json()["account"]
+    assert acct["ok"] and mymemo.cost_text(acct["usage"]) == text
+    assert acct["usage"]["input_tokens"] == base["input_tokens"]  # the tokens stay, as secondary
+    if not usage:
+        assert acct["usage"]["cost_usd"] is None and acct["usage"]["cost_usd_included"] is None
+
+
+def test_cli_plan_shows_the_month_s_use_and_a_used_up_allowance(vault, fake):
+    signed_in(vault, fake)
+    fake.models["usage"] = {**fake.models["usage"], "cost_usd": 10.02}
+    fake.fail("quota_exceeded")
+    assert ask(Assistant.from_settings(vault), "t") is None
+    out = CliRunner().invoke(app, ["--vault", str(vault.root), "assistant", "plan"]).stdout
+    lines = out.splitlines()
+    assert "Usage:  $10.02 of $10.00 used this month" in lines
+    assert "        1,200 of 10,000 input tokens, 340 of 2,000 output tokens, 7 requests" in lines
+    assert "Paused: This month's included use is used up; it resets November 1." in out
+    del fake.models["usage"]["cost_usd"], fake.models["usage"]["cost_usd_included"]  # an older service
+    out = CliRunner().invoke(app, ["--vault", str(vault.root), "assistant", "plan"]).stdout
+    assert "Usage:  1,200 of 10,000 input tokens, 340 of 2,000 output tokens, 7 requests" in out.splitlines()
+    assert "used this month" not in out
+
+
+def test_offered_by_default_and_turned_off_by_the_environment(vault, fake, monkeypatch):
+    from openmymemo.assistant import mymemo_offered
+
+    assert mymemo_offered() and mymemo_offered(environ={"OPENMYMEMO_ASSISTANT_MYMEMO": "1"})
+    for off in ("0", "false", "No", " off "):
+        assert not mymemo_offered(environ={"OPENMYMEMO_ASSISTANT_MYMEMO": off})
+        assert mymemo_offered("mymemo", environ={"OPENMYMEMO_ASSISTANT_MYMEMO": off})  # already chosen: kept
+    # Offered is not chosen: nothing goes to MyMemo until the person picks it and signs in.
+    assert load_settings().kind != "mymemo" and not fake.tasks and not fake.token_forms
 
 
 def test_a_plan_url_that_isnt_a_web_page_is_dropped():
@@ -375,8 +415,7 @@ def test_private_memories_never_reach_mymemo(vault, fake):
 
 
 def test_the_fixtures_name_no_prices():
-    # Only the usage figures the service reports in dollars (`cost_usd`, `cost_usd_included`), which the panel doesn't
-    # show; nothing else names a price.
+    # Only the use the service meters in dollars (`cost_usd`, `cost_usd_included`); nothing names a price.
     models = fixture("assistant/models.json")
     usage = models["response"]["usage"]
     assert isinstance(usage.pop("cost_usd"), float) and isinstance(usage.pop("cost_usd_included"), float)

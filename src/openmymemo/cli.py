@@ -1280,7 +1280,8 @@ def assistant_status(ctx: typer.Context) -> None:
 def assistant_set(
     ctx: typer.Context,
     kind: Annotated[str | None, typer.Option(
-        help="local (a model on this computer) or key (your own API key).")] = None,
+        help="local (a model on this computer), key (your own API key) or mymemo (MyMemo's hosted model; then "
+             "`openmymemo assistant signin`).")] = None,
     protocol: Annotated[str | None, typer.Option(help="openai (OpenAI-compatible) or anthropic.")] = None,
     base_url: Annotated[str | None, typer.Option(help="The endpoint's base URL; empty for the default.")] = None,
     model: Annotated[str | None, typer.Option(help="The model's name, e.g. llama3.2 or claude-haiku-5-5.")] = None,
@@ -1335,16 +1336,17 @@ def assistant_set(
         raise typer.Exit(1)
 
 
-# MyMemo's hosted model is hidden until its plan opens (product-design.md §17.8), so are its commands.
-@assistant_app.command("signin", hidden=True)
+# MyMemo's hosted model (product-design.md §17.8). OPENMYMEMO_ASSISTANT_MYMEMO=0 turns it off on a computer; then
+# `signin` refuses it, and `signout` and `plan` have nothing to do.
+@assistant_app.command("signin")
 def assistant_signin(
     ctx: typer.Context,
     browser: Annotated[bool, typer.Option("--browser", help="Sign in with the browser even when this computer is "
                                                            "linked to OpenMyMemo Cloud.")] = False,
     open_browser: Annotated[bool, typer.Option("--open/--no-open", help="Open the browser.")] = True,
 ) -> None:
-    """Sign in to MyMemo to use its hosted model, and choose it for the Assistant. A computer linked to OpenMyMemo Cloud
-    needs no browser."""
+    """Sign in to MyMemo to use its hosted model, and choose it for the Assistant. A computer linked to
+    OpenMyMemo Cloud needs no browser."""
     import webbrowser
 
     from . import cloud
@@ -1387,7 +1389,7 @@ def assistant_signin(
     _assistant_status(vault)
 
 
-@assistant_app.command("signout", hidden=True)
+@assistant_app.command("signout")
 def assistant_signout() -> None:
     """Sign out of MyMemo: the sign-in is revoked at MyMemo and forgotten here; the Assistant uses its rules."""
     from .assistant import mymemo
@@ -1395,9 +1397,9 @@ def assistant_signout() -> None:
     typer.echo(mymemo.sign_out())
 
 
-@assistant_app.command("plan", hidden=True)
+@assistant_app.command("plan")
 def assistant_plan(ctx: typer.Context) -> None:
-    """Show MyMemo's hosted model, your OpenMyMemo Assistant plan and this period's usage, as MyMemo reports them."""
+    """Show MyMemo's hosted model, your OpenMyMemo Assistant plan and this month's use, as MyMemo reports them."""
     from .assistant import load_settings, mymemo
 
     s = load_settings()
@@ -1417,12 +1419,19 @@ def assistant_plan(ctx: typer.Context) -> None:
     if when:
         typer.echo(f"        this period ends {when}")
     u = a["usage"]
-    if any(v is not None for v in u.values()):
+    cost = mymemo.cost_text(u)
+    if cost:
+        typer.echo(f"Usage:  {cost}")
+    if any(u[k] is not None for k in ("input_tokens", "output_tokens", "input_tokens_included",
+                                      "output_tokens_included", "requests")):
         def part(used: int | None, included: int | None, what: str) -> str:
             return f"{used or 0:,}" + (f" of {included:,}" if included is not None else "") + f" {what}"
-        typer.echo("Usage:  " + ", ".join([part(u["input_tokens"], u["input_tokens_included"], "input tokens"),
-                                           part(u["output_tokens"], u["output_tokens_included"], "output tokens"),
-                                           f"{u['requests'] or 0:,} requests"]))
+        typer.echo(("        " if cost else "Usage:  ") + ", ".join([
+            part(u["input_tokens"], u["input_tokens_included"], "input tokens"),
+            part(u["output_tokens"], u["output_tokens_included"], "output tokens"), f"{u['requests'] or 0:,} requests"]))
+    h = mymemo.hold(s)
+    if h:
+        typer.secho(f"Paused: {mymemo.hold_message(h)}", fg="yellow")
     if plan["plan_url"]:
         typer.echo(f"{'Manage' if plan['active'] else 'Get'} the plan: {plan['plan_url']}")
 

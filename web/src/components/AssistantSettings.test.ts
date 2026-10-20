@@ -124,7 +124,8 @@ describe("AssistantSettings", () => {
       ok: true as const, model: "claude-haiku-5-5", display_name: "Claude Haiku 5.5", provider: "Anthropic",
       plan: { status: "active", active: true, period_start: "2026-10-01T00:00:00Z", period_end: "2026-11-01T00:00:00Z",
         resets_at: "2026-11-01T00:00:00Z", cancel_at_period_end: false, plan_url: "https://app.mymemo.ai/openmymemo/assistant" },
-      usage: { input_tokens: 1200, output_tokens: 340, input_tokens_included: 10000, output_tokens_included: 2000, requests: 7 },
+      usage: { input_tokens: 1200, output_tokens: 340, input_tokens_included: 10000, output_tokens_included: 2000, requests: 7,
+        cost_usd: 1.234, cost_usd_included: 10 as number | null },
       limits: { requests_per_minute: 10, requests_per_day: 100 },
     };
     let opened: string[] = [];
@@ -158,12 +159,38 @@ describe("AssistantSettings", () => {
       expect(w.get('[data-test="mm-account"]').text()).toBe("Signed in as Sam (s***@example.com) with this computer's OpenMyMemo Cloud link");
       expect(w.get('[data-test="mm-model"]').text()).toBe("Model: Claude Haiku 5.5 by Anthropic");
       expect(w.get('[data-test="mm-plan"]').text()).toBe("OpenMyMemo Assistant plan: active");
-      expect(w.get('[data-test="mm-usage"]').text()).toContain("1,200 of 10,000 input tokens, 340 of 2,000 output tokens, 7 requests.");
-      expect(w.get('[data-test="mm-usage"]').text()).toContain("Resets November 1.");
+      expect(w.get('[data-test="mm-cost"]').text()).toBe("$1.23 of $10.00 used this month. Resets November 1.");
+      expect(w.get('[data-test="mm-usage"]').text()).toBe("1,200 of 10,000 input tokens, 340 of 2,000 output tokens, 7 requests.");
+      expect(w.find('[data-test="mm-includes"]').exists()).toBe(false); // the plan is active: the figures say it
       const link = w.get('[data-test="mm-plan-link"]');
       expect(link.text()).toBe("Manage");
       await link.trigger("click");
       expect(opened).toEqual(["https://app.mymemo.ai/openmymemo/assistant"]);
+    });
+
+    it.each([
+      ["no cap", { cost_usd: 12, cost_usd_included: null, input_tokens_included: null, output_tokens_included: null },
+        "$12.00 used this month, no cap. Resets November 1.", "1,200 input tokens, 340 output tokens, 7 requests."],
+      ["token caps only", { cost_usd: 0.5, cost_usd_included: null },
+        "$0.50 used this month. Resets November 1.", "1,200 of 10,000 input tokens, 340 of 2,000 output tokens, 7 requests."],
+    ])("shows the month's use in dollars with %s", async (_, usage, cost, tokens) => {
+      const signed = on(mymemo({ signed_in: true, via: "browser" }));
+      api.assistant.mockResolvedValue(signed);
+      api.assistantAccount.mockResolvedValue({ account: { ...account, usage: { ...account.usage, ...usage } }, assistant: signed });
+      const w = await mountIt();
+      expect(w.get('[data-test="mm-cost"]').text()).toBe(cost);
+      expect(w.get('[data-test="mm-usage"]').text()).toBe(tokens);
+    });
+
+    it("shows tokens only from a service that sends no dollars", async () => {
+      const signed = on(mymemo({ signed_in: true, via: "browser" }));
+      api.assistant.mockResolvedValue(signed);
+      api.assistantAccount.mockResolvedValue({
+        account: { ...account, usage: { ...account.usage, cost_usd: null, cost_usd_included: null } }, assistant: signed });
+      const w = await mountIt();
+      expect(w.find('[data-test="mm-cost"]').exists()).toBe(false);
+      expect(w.get('[data-test="mm-usage"]').text())
+        .toBe("This period: 1,200 of 10,000 input tokens, 340 of 2,000 output tokens, 7 requests. Resets November 1.");
     });
 
     it("signs in with the browser and waits for it", async () => {
@@ -184,6 +211,8 @@ describe("AssistantSettings", () => {
         await flushPromises();
         expect(w.get('[data-test="mm-account"]').text()).toBe("Signed in to MyMemo at api.mymemo.ai");
         expect(w.get('[data-test="mm-plan"]').text()).toContain("No OpenMyMemo Assistant plan yet");
+        // What the plan includes, as the service answered it.
+        expect(w.get('[data-test="mm-includes"]').text()).toBe("The plan includes up to $10.00 of Claude Haiku 5.5 use a month.");
         expect(w.get('[data-test="mm-plan-link"]').text()).toBe("Get the plan");
       } finally {
         vi.useRealTimers();
@@ -192,14 +221,14 @@ describe("AssistantSettings", () => {
 
     it("shows a pause calmly and signs out", async () => {
       const held = on(mymemo({ signed_in: true, via: "browser", hold: {
-        code: "quota_exceeded", message: "This month's allowance is used up, resets November 1. Until then, OpenMyMemo uses its rules.",
+        code: "quota_exceeded", message: "This month's included use is used up; it resets November 1. Until then, OpenMyMemo uses its rules.",
         plan_url: "https://app.mymemo.ai/openmymemo/assistant", resets_at: "2026-11-01T00:00:00Z", until: "2026-11-01T00:00:00Z" } }));
       api.assistant.mockResolvedValue(held);
       api.assistantAccount.mockResolvedValue({ account: { ok: false, error: "MyMemo couldn't show your plan right now.", signed_out: false }, assistant: held });
       api.assistantSignOut.mockResolvedValue({ message: "Signed out of MyMemo.", assistant: on(mymemo()) });
       const w = await mountIt();
       const hold = w.get('[data-test="mm-hold"]');
-      expect(hold.text()).toContain("allowance is used up, resets November 1");
+      expect(hold.text()).toContain("included use is used up; it resets November 1");
       expect(hold.classes()).not.toContain("text-danger");
       expect(w.get('[data-test="mm-plan-link"]').text()).toBe("Get the plan");
       await button(w, "Sign out")!.trigger("click");

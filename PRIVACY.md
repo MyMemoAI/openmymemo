@@ -102,12 +102,12 @@ The OpenMyMemo Assistant uses a model to help with imports, sorting and search, 
 
 ### MyMemo's hosted model
 
-MyMemo's hosted model isn't offered yet: Settings → Assistant doesn't list it. Once MyMemo opens its plan, you will be able to choose it in Settings → Assistant, or with `openmymemo assistant signin`. It is a MyMemo service with its own monthly plan, the OpenMyMemo Assistant plan. Nothing is sent until you choose it and sign in.
+You can choose MyMemo's hosted model in Settings → Assistant, or with `openmymemo assistant signin`. It is a MyMemo service with its own plan, the OpenMyMemo Assistant plan, separate from MyMemo memberships: $5 a month, including up to $10 of Claude Haiku 5.5 use a month. Nothing is sent to MyMemo until you choose it and sign in. (Setting `OPENMYMEMO_ASSISTANT_MYMEMO=0` on a computer removes the choice there.)
 
 - **Signing in.** If this computer is linked to OpenMyMemo Cloud, OpenMyMemo trades the link's device token for a sign-in that can only reach the model, with no browser. Otherwise your browser opens MyMemo's sign-in page with this computer's name. The service returns an access token and a refresh token. They are kept on your computer like an API key (in the Keychain on a Mac, otherwise in `assistant.json`), never in your memory folder, and sent only to that service.
-- **For each request,** OpenMyMemo sends the service the text a feature works on (as above) and the feature's name, such as "import" or "sort". The service passes the text to Anthropic's Claude models to answer and returns the answer. Private topics are never sent, as for any model outside your computer.
-- **What MyMemo keeps.** The service doesn't keep the text or the answer after answering. It keeps metadata only: your account, the feature, the model, token counts, the time and whether it worked, which it uses for your plan's usage and limits. It shows OpenMyMemo your plan and this period's usage, and OpenMyMemo shows them in Settings → Assistant.
-- **Anthropic** processes the text to answer it, under its terms as MyMemo's provider.
+- **For each request,** OpenMyMemo sends the service the text a task works on (as above) and the task's name, such as `import.split` or `sort`. Private topics are never sent, as for any model outside your computer.
+- **Who processes it.** Two processors handle the text sent for a task: MyMemo, which runs the service, and Anthropic, to which the service passes the text so that its Claude model can answer, under Anthropic's terms as MyMemo's provider. The answer comes back to your computer through the service.
+- **What MyMemo keeps.** The service keeps no request or answer text. It keeps metadata only: your account, the task, the model, token counts, what the request cost at Anthropic's list price, the time and the outcome. It uses them to count your plan's monthly use and limits, and it reports your plan and this month's use to OpenMyMemo, which shows them in Settings → Assistant and with `openmymemo assistant plan`.
 - **Signing out** asks the service to revoke the sign-in and deletes both tokens from your computer. OpenMyMemo Cloud, if linked, stays linked.
 
 How MyMemo handles your account and its metadata is governed by [MyMemo's privacy policy](https://mymemo.ai/privacy-policy/).

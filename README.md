@@ -134,9 +134,12 @@ OpenMyMemo needs no model. If you want help with the work rules do badly, turn o
 ```bash
 openmymemo assistant set --kind local --model llama3.2          # Ollama or another server on this computer
 openmymemo assistant set --kind key --protocol anthropic --model claude-haiku-5-5 --key   # your own API key
+openmymemo assistant signin                                      # MyMemo's hosted model (a MyMemo plan, below)
 openmymemo assistant test                                        # one tiny request: which model, how fast
 openmymemo assistant status | off
 ```
+
+**MyMemo's hosted model** is the choice for no keys and no model to run: choose "MyMemo" in Settings → Assistant (or `openmymemo assistant signin`) and sign in with a MyMemo account. It runs Claude Haiku 5.5 through MyMemo's service, on the OpenMyMemo Assistant plan: $5 a month, which includes up to $10 of Claude Haiku 5.5 use a month (`openmymemo assistant plan` shows what you've used). When the month's included use runs out, OpenMyMemo goes back to its rules until it resets. Nothing goes to MyMemo until you choose it and sign in; MyMemo and Anthropic process the text of each request to answer it, and MyMemo's service keeps none of that text ([PRIVACY.md](https://github.com/MyMemoAI/openmymemo/blob/main/PRIVACY.md#mymemos-hosted-model)).
 
 With it on, imports are split into memories by the model (the preview flags any line it left out), and "Sort into topics" gets the model's suggestions. AI apps' searches and `openmymemo recall` get related words and translations added and the best matches put first. It also:
 

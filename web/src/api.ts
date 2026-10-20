@@ -512,6 +512,9 @@ export type AssistantAccount =
       usage: {
         input_tokens: number | null; output_tokens: number | null; input_tokens_included: number | null;
         output_tokens_included: number | null; requests: number | null;
+        /** This month's use in US dollars and what the plan includes (null: no cap); both null from an older
+         * service, which reports tokens only. */
+        cost_usd: number | null; cost_usd_included: number | null;
       };
       limits: { requests_per_minute: number | null; requests_per_day: number | null };
     }

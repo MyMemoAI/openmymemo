@@ -19,7 +19,7 @@ change what the Assistant does. The endpoint itself is OpenAI-compatible and cal
   exchanged, or a masked ``member`` in the service's token or ``/models`` answer. A browser sign-in is otherwise
   "signed in to MyMemo at <host>".
 * **Pauses.** MyMemo answers 402 when the account has no Assistant plan (``plan_required``) or this month's
-  allowance is used up (``quota_exceeded``), and 429 or 503 with ``Retry-After`` when busy. Each is kept as a
+  included use is used up (``quota_exceeded``), and 429 or 503 with ``Retry-After`` when busy. Each is kept as a
   ``hold`` with an end time; until then the Assistant makes no request and every feature takes its rule-based path
   quietly. The panel's plan view (``account``) lifts a ``plan_required`` hold as soon as the plan is active.
 * **Signing out** revokes the grant at MyMemo and forgets the tokens.
@@ -33,6 +33,7 @@ import contextlib
 import functools
 import hashlib
 import logging
+import math
 import secrets
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
@@ -506,8 +507,8 @@ def hold_message(h: Mapping[str, Any]) -> str:
         return "Needs the OpenMyMemo Assistant plan. Until then, OpenMyMemo uses its rules."
     if code == "quota_exceeded":
         when = _date(h.get("resets_at"))
-        return (f"This month's allowance is used up, resets {when}. Until then, OpenMyMemo uses its rules." if when
-                else "This month's allowance is used up. Until it resets, OpenMyMemo uses its rules.")
+        return (f"This month's included use is used up; it resets {when}. Until then, OpenMyMemo uses its rules."
+                if when else "This month's included use is used up. Until it resets, OpenMyMemo uses its rules.")
     if code == "unavailable":
         return "MyMemo's model is briefly unavailable. OpenMyMemo uses its rules and tries again shortly."
     return "MyMemo asked OpenMyMemo to slow down. It uses its rules and tries again shortly."
@@ -637,6 +638,10 @@ def _models_shape(data: Mapping[str, Any], service: str) -> dict[str, Any]:
     def num(v: Any) -> int | None:
         return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else None
 
+    def money(v: Any) -> float | None:  # US dollars, as the service meters them (`cost_usd`, `cost_usd_included`)
+        ok = isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v >= 0
+        return float(v) if ok else None
+
     plan = data.get("plan") if isinstance(data.get("plan"), dict) else {}
     usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
     limits = data.get("limits") if isinstance(data.get("limits"), dict) else {}
@@ -647,10 +652,25 @@ def _models_shape(data: Mapping[str, Any], service: str) -> dict[str, Any]:
                  "period_start": text(plan.get("period_start")), "period_end": text(plan.get("period_end")),
                  "resets_at": text(plan.get("resets_at")), "cancel_at_period_end": plan.get("cancel_at_period_end") is True,
                  "plan_url": _plan_url(plan.get("plan_url"), service)},
-        "usage": {k: num(usage.get(k)) for k in ("input_tokens", "output_tokens", "input_tokens_included",
-                                                 "output_tokens_included", "requests")},
+        # This period's use. `cost_usd` and `cost_usd_included` (None: no cap) come from services that meter in
+        # dollars; an older service sends only the token counts, and then they are None too.
+        "usage": {**{k: num(usage.get(k)) for k in ("input_tokens", "output_tokens", "input_tokens_included",
+                                                    "output_tokens_included", "requests")},
+                  **{k: money(usage.get(k)) for k in ("cost_usd", "cost_usd_included")}},
         "limits": {k: num(limits.get(k)) for k in ("requests_per_minute", "requests_per_day")},
     }
+
+
+def cost_text(usage: Mapping[str, Any]) -> str | None:
+    """ "$1.23 of $10.00 used this month" from ``_models_shape``'s usage; None when the service sent no cost. With no
+    dollar cap and no token caps either, it says there is no cap."""
+    used, included = usage.get("cost_usd"), usage.get("cost_usd_included")
+    if used is None:
+        return None
+    if included is not None:
+        return f"${used:,.2f} of ${included:,.2f} used this month"
+    capped = any(usage.get(k) is not None for k in ("input_tokens_included", "output_tokens_included"))
+    return f"${used:,.2f} used this month" + ("" if capped else ", no cap")
 
 
 def account(s: Settings) -> dict[str, Any]:
@@ -681,7 +701,8 @@ def account(s: Settings) -> dict[str, Any]:
 
 
 __all__ = [
-    "CHANGED", "EXCHANGE_MESSAGES", "MYMEMO_PATH", "SIGNED_OUT", "Session", "SignIn", "access_token", "account", "clear_hold", "exchange",
+    "CHANGED", "EXCHANGE_MESSAGES", "MYMEMO_PATH", "SIGNED_OUT", "Session", "SignIn", "access_token", "account", "clear_hold",
+    "cost_text", "exchange",
     "hold", "hold_message", "keep", "keep_signin", "note_failure", "public_status", "refresh", "resource",
     "service_of", "session", "sign_in_with_browser", "sign_out",
 ]
