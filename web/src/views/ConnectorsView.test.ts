@@ -17,7 +17,7 @@ function cloudStatus(): CloudStatus {
     pending: false, link_error: null, folder: server.linked ? "/Users/sam/OpenMyMemo" : null, this_folder: server.linked,
     account: server.linked ? { display_name: "Sam", email_masked: "s***@example.com" } : null, plan: null, linked_at: null,
     state: server.linked ? "online" : "stopped", reason: null, online: server.linked, close_code: null, last_call_at: null,
-    queued: null, apps: [],
+    queued: null, queue_enabled: false, apps: [],
   };
 }
 

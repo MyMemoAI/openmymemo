@@ -1129,7 +1129,7 @@ def cloud_status(ctx: typer.Context,
         state = BRIDGE_STATES.get(status["reason"] if status["state"] != "online" and status["reason"]
                                   else status["state"], status["state"])
         typer.echo(f"Connection: {state}")
-        if status.get("queued"):
+        if status.get("queue_enabled") and status.get("queued"):
             typer.echo(f"Waiting in OpenMyMemo Cloud: {status['queued']}")
     else:
         typer.echo("Connection: not running. OpenMyMemo Cloud works while OpenMyMemo runs on this computer: the Mac app, "

@@ -467,7 +467,8 @@ def test_a_new_install_signs_in_from_the_listed_row_with_no_settings_or_environm
     conn = fake.connection()
     assert "features" not in conn.hello  # the offline queue isn't offered: the service queues nothing for us
     status = wait_until(lambda: (s := api.get("/api/cloud", headers=H).json())["online"] and s)
-    assert status["plan"] == live_only and status["queued"] == 0 and status["endpoint"] == f"{fake.base}/openmymemo/mcp"
+    assert status["plan"] == live_only and status["queued"] is None and status["queue_enabled"] is False
+    assert status["endpoint"] == f"{fake.base}/openmymemo/mcp"
     assert next(a for a in api.get("/api/clients", headers=H).json()["apps"] if a["id"] == clients.CLOUD)["connected"]
     assert not cloud.settings_path().exists()  # signing in changes no preference
 
@@ -563,7 +564,31 @@ def test_relayed_calls_run_the_local_tools_as_the_web_apps_connector(vault, fake
                         "params": {"name": "memory_search", "arguments": {"query": "short"}}, "deadline_ms": 20000})
     assert found["result"]["structuredContent"]["results"][0]["id"] == m.id
     status = c.status()
-    assert status["last_call_at"] and status["queued"] == WELCOME["queued"]
+    # welcome.json says 1 is queued, but this computer didn't ask for the queue: nothing about it is shown.
+    assert status["last_call_at"] and WELCOME["queued"] == 1 and status["queued"] is None
+    assert status["queue_enabled"] is False
+
+
+def test_a_service_that_reports_a_queue_this_computer_didnt_ask_for_shows_none(vault, fake, clouds):
+    """At launch the computer advertises no `queue` (cloud.FEATURES), so whatever the service says about one, its
+    count and its plan mode, nothing promises it: not the panel's status, nor the CLI's plan line."""
+    fake.welcome = {**fake.welcome, "queued": 3, "plan": {"tier": "ultra", "live": True, "queue": True}}
+    c, conn = online(vault, fake, clouds)
+    assert "features" not in conn.hello and not cloud.queue_enabled()
+    status = wait_until(lambda: (s := c.status())["online"] and s)
+    assert status["queued"] is None and status["queue_enabled"] is False
+    assert status["plan"]["queue"] is True  # kept as MyMemo said it; the panel goes by queue_enabled
+    assert cloud.plan_label(status["plan"]) == "Ultra · live relay"
+    assert cloud.plan_label({"tier": "pro", "live": True, "queue": True}) == "Pro · live relay"
+
+
+def test_the_queue_shows_once_this_computer_asks_for_it(vault, fake, clouds, queue_on):
+    fake.welcome = {**fake.welcome, "queued": 3}
+    c, conn = online(vault, fake, clouds)
+    assert conn.hello["features"] == ["queue"]
+    status = c.status()
+    assert status["queued"] == 3 and status["queue_enabled"] is True
+    assert cloud.plan_label(status["plan"]) == "Ultra · live relay and offline queue"
 
 
 def test_a_revoked_web_app_is_told_so(vault, fake, clouds):
@@ -960,8 +985,16 @@ def queue_clock(monkeypatch):
     return QUEUE_NOW
 
 
-def test_queued_proposals_are_filed_as_their_web_app_with_their_time_and_acknowledged(vault, fake, clouds, queue_clock):
+@pytest.fixture
+def queue_on(monkeypatch):
+    """The offline queue as it works once this computer asks for it (`cloud.FEATURES`; not offered at launch)."""
+    monkeypatch.setattr(cloud, "FEATURES", ("queue",))
+
+
+def test_queued_proposals_are_filed_as_their_web_app_with_their_time_and_acknowledged(vault, fake, clouds, queue_clock,
+                                                                                    queue_on):
     c, conn = online(vault, fake, clouds)
+    assert conn.hello["features"] == ["queue"] and c.status()["queue_enabled"]
     assert c.status()["queued"] == 1  # welcome.json
     qid = VECTOR["qid"]
     conn.send(fixture("bridge/item.json"))
@@ -1206,7 +1239,8 @@ def test_cli_links_shows_status_and_unlinks(vault, fake, monkeypatch):
     base = ["--vault", str(vault.root), "cloud"]
     out = runner.invoke(cli, [*base, "link", "--port", str(port)])
     assert out.exit_code == 0, out.output
-    assert "Linked to Sam (s***@example.com) · Ultra · live relay and offline queue." in out.output
+    # The service's plan says it has the queue (link/response.json), but this computer doesn't take it yet.
+    assert "Linked to Sam (s***@example.com) · Ultra · live relay." in out.output and "queue" not in out.output
     assert "If that isn't your MyMemo account, run `openmymemo cloud unlink` now." in out.output
     assert [(a["action"], a["email_masked"]) for a in vault.activity("mymemo-cloud")] == [("link", "s***@example.com")]
     assert f"{fake.base}/openmymemo/mcp" in out.output and "Developer Mode" in out.output
@@ -1215,8 +1249,8 @@ def test_cli_links_shows_status_and_unlinks(vault, fake, monkeypatch):
     assert cloud.load_link().vault == str(vault.root)
 
     out = runner.invoke(cli, [*base, "status", "--port", str(port)])
-    assert out.exit_code == 0 and "Linked to Sam (s***@example.com) · Ultra" in out.output
-    assert "not running" in out.output
+    assert out.exit_code == 0 and "Linked to Sam (s***@example.com) · Ultra · live relay\n" in out.output
+    assert "not running" in out.output and "queue" not in out.output
 
     out = runner.invoke(cli, [*base, "unlink", "--yes", "--port", str(port)])
     assert out.exit_code == 0 and "Unlinked" in out.output and cloud.load_link() is None

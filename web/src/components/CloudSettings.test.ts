@@ -12,7 +12,7 @@ function status(extra: Partial<CloudStatus> = {}, prefs: Partial<Prefs> = {}): C
   return {
     linked: false, shown: settings.show, settings, service, endpoint: `${service}/openmymemo/mcp`, pending: false,
     link_error: null, folder: null, this_folder: false, account: null, plan: null, linked_at: null, state: "stopped",
-    reason: null, online: false, close_code: null, last_call_at: null, queued: null, apps: [], ...extra,
+    reason: null, online: false, close_code: null, last_call_at: null, queued: null, queue_enabled: false, apps: [], ...extra,
   };
 }
 

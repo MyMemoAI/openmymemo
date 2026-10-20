@@ -13,7 +13,7 @@ function status(extra: Partial<CloudStatus> = {}): CloudStatus {
     linked: false, shown: true, service: "https://api.mymemo.ai", endpoint: ENDPOINT,
     settings: { show: true, service: "", default_service: "https://api.mymemo.ai", service_from_env: null }, pending: false, link_error: null,
     folder: null, this_folder: false, account: null, plan: null, linked_at: null, state: "stopped", reason: null,
-    online: false, close_code: null, last_call_at: null, queued: null, apps: [], ...extra,
+    online: false, close_code: null, last_call_at: null, queued: null, queue_enabled: false, apps: [], ...extra,
   };
 }
 
@@ -90,7 +90,8 @@ describe("CloudRow", () => {
     await flushPromises();
     await (w.vm as unknown as { reload: () => Promise<void> }).reload(); // the browser came back
     await flushPromises();
-    expect(w.text()).toContain("OpenMyMemo Cloud · Ultra · live relay + offline queue");
+    expect(w.text()).toContain("OpenMyMemo Cloud · Ultra · live relay");
+    expect(w.text()).not.toContain("offline queue"); // the plan has it, but this OpenMyMemo doesn't take it yet
     expect(w.text()).toContain("Online · Signed in as Sam · s***@example.com"); // whose account, unmistakably
     expect(w.find("[data-endpoint]").text()).toBe(ENDPOINT); // exactly, no trailing slash
     expect(w.text()).toContain("Developer Mode");
@@ -163,12 +164,25 @@ describe("CloudRow", () => {
     expect(moved.find("[data-endpoint]").exists()).toBe(false);
   });
 
-  it("says how many changes wait in the offline queue", async () => {
-    api.cloud.mockResolvedValue(linked({ queued: 3 }));
+  it("promises no offline queue this OpenMyMemo didn't ask for, whatever the service reports", async () => {
+    // A service that counts queued changes and a plan that has the queue, while queue_enabled is false (the launch).
+    api.cloud.mockResolvedValue(linked({ queued: 3, plan: { tier: "ultra", live: true, queue: true } }));
     const w = mountRow();
     await flushPromises();
+    await button(w, "Set up")!.trigger("click");
+    expect(w.find("[data-queued]").exists()).toBe(false);
+    expect(w.text()).toContain("OpenMyMemo Cloud · Ultra · live relay");
+    expect(w.text()).toContain("Works while OpenMyMemo runs on this computer.");
+    expect(w.text()).not.toMatch(/offline queue|waiting in OpenMyMemo Cloud|wait in MyMemo|encrypted/);
+  });
+
+  it("says how many changes wait in the offline queue once this OpenMyMemo takes it", async () => {
+    api.cloud.mockResolvedValue(linked({ queued: 3, queue_enabled: true }));
+    const w = mountRow();
+    await flushPromises();
+    expect(w.text()).toContain("OpenMyMemo Cloud · Ultra · live relay + offline queue");
     expect(w.find("[data-queued]").text()).toContain("3 changes from the web, made while this computer was offline");
-    api.cloud.mockResolvedValue(linked({ queued: 0 }));
+    api.cloud.mockResolvedValue(linked({ queued: 0, queue_enabled: true }));
     await (w.vm as unknown as { reload: () => Promise<void> }).reload();
     await flushPromises();
     expect(w.find("[data-queued]").exists()).toBe(false);

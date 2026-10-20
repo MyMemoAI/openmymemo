@@ -297,8 +297,11 @@ export interface CloudStatus {
   online: boolean;
   close_code: number | null;
   last_call_at: string | null;
-  /** Proposals waiting in OpenMyMemo Cloud's encrypted queue, as of the last connection. */
+  /** Proposals waiting in OpenMyMemo Cloud's encrypted queue, as of the last connection; null unless queue_enabled. */
   queued: number | null;
+  /** Whether this OpenMyMemo takes the offline queue (it asked for it in `hello`). False since the launch, which offers
+   * the live relay only: then nothing about the queue is shown, whatever `plan.queue` says. */
+  queue_enabled: boolean;
   apps: CloudApp[];
 }
 

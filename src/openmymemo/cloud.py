@@ -86,6 +86,15 @@ QUEUE_MAX_AGE = timedelta(days=31)
 # The web apps whose slug the service derives from a verified redirect host (its design note, §1.3). The sealed
 # plaintext carries no `verified` flag, so a queued item from any other slug is named as unverified.
 VERIFIED_WEB_APPS = {"chatgpt": "ChatGPT", "claude": "Claude"}
+# What this OpenMyMemo asks the service for in `hello.features`. Empty since the launch (product-design.md §16.11):
+# the live relay only. The offline queue is this computer's to ask for, so until "queue" is here nothing about it is
+# shown (the service's `welcome.queued` and a plan's `queue`, in the panel and the CLI), whatever the service reports.
+FEATURES: tuple[str, ...] = ()
+
+
+def queue_enabled() -> bool:
+    """Whether this OpenMyMemo takes the offline queue: it advertised ``queue`` in ``hello.features``."""
+    return "queue" in FEATURES
 
 
 class CloudError(Exception):
@@ -874,8 +883,11 @@ class Bridge:
     async def hello(self) -> dict:
         from .mcp_server import INSTRUCTIONS
 
-        return {"type": "hello", "v": 1, "app_version": __version__, "key_id": self.link.key_id,
-                "max_inflight": MAX_INFLIGHT, "tools": await self.tools(), "instructions": INSTRUCTIONS}
+        frame = {"type": "hello", "v": 1, "app_version": __version__, "key_id": self.link.key_id,
+                 "max_inflight": MAX_INFLIGHT, "tools": await self.tools(), "instructions": INSTRUCTIONS}
+        if FEATURES:  # none at launch: the frame is exactly bridge/hello.json's
+            frame["features"] = list(FEATURES)
+        return frame
 
     # -- lifecycle --
 
@@ -1033,8 +1045,8 @@ class Bridge:
             self._result_cap = int(limits.get("result_max_bytes") or RESULT_MAX_BYTES)
         with contextlib.suppress(TypeError, ValueError):
             self._heartbeat = float(msg.get("heartbeat_s") or 25)
-        queued = msg.get("queued")
-        self.queued = queued if isinstance(queued, int) and queued >= 0 else None
+        queued = msg.get("queued")  # only counted when this computer asked for the queue (FEATURES)
+        self.queued = queued if queue_enabled() and isinstance(queued, int) and queued >= 0 else None
         member = member_fields(msg.get("member"))
         plan = msg.get("plan") if isinstance(msg.get("plan"), dict) else None
         changes: dict[str, Any] = {}
@@ -1334,7 +1346,7 @@ class Cloud:
             "pending": self.linker.pending(), "link_error": self.linker.error,
             "folder": None, "this_folder": False, "account": None, "plan": None, "linked_at": None,
             "state": "stopped", "reason": None, "online": False, "close_code": None, "last_call_at": None,
-            "queued": None,
+            "queued": None, "queue_enabled": queue_enabled(),
         }
         if link is None:
             return out
@@ -1424,11 +1436,12 @@ def listen_for_callback(linker: Linker, begin: Callable[[str], str], keep: Calla
 
 
 def plan_label(plan: Mapping[str, Any] | None) -> str:
-    """ "Ultra · live relay and offline queue" for the CLI."""
+    """ "Ultra · live relay" for the CLI ("… and offline queue" only once this computer takes the queue)."""
     if not plan:
         return ""
     tier = str(plan.get("tier") or "").replace("_", " ")
     tier = {"pro": "Pro", "ultra": "Ultra", "free": "Free", "appsumo tier 3": "AppSumo tier 3"}.get(tier, tier.title())
-    modes = [m for m, on in (("live relay", plan.get("live")), ("offline queue", plan.get("queue"))) if on]
+    queue = bool(plan.get("queue")) and queue_enabled()
+    modes = [m for m, on in (("live relay", plan.get("live")), ("offline queue", queue)) if on]
     return " · ".join(x for x in (tier, " and ".join(modes)) if x)
 
