@@ -21,7 +21,7 @@ from cloud_fake import FakeService, fixture, wait_until
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
-from openmymemo import __version__, clients, cloud
+from openmymemo import __version__, clients, cloud, mcp_server
 from openmymemo.cli import app as cli
 from openmymemo.cloud import Bridge, Cloud, Link, Timing
 from openmymemo.connectors import Connectors
@@ -156,12 +156,24 @@ def test_hello_carries_the_cloud_variant_of_this_installations_tools(vault):
     assert ours["type"] == "hello" and ours["v"] == 1 and ours["app_version"] == __version__
     assert ours["key_id"] == hello["key_id"] == VECTOR["key_id"] and ours["max_inflight"] == hello["max_inflight"]
     assert ours["tools"] == hello["tools"] and ours["instructions"] == hello["instructions"]
-    # Only memory_propose differs from the local tools: it mentions "queued", which only the cloud returns.
-    local = {t.name: t for t in anyio.run(build_server(vault).list_tools)}
-    for tool in ours["tools"]:
-        description = inspect.cleandoc(local[tool["name"]].description)
-        assert (tool["description"] != description) == (tool["name"] == "memory_propose")
-    assert '"queued"' in next(t for t in ours["tools"] if t["name"] == "memory_propose")["description"]
+    # At launch (live relay only, cloud.FEATURES empty) the descriptors are the local tools' own: the service keeps
+    # them and shows them to ChatGPT and Claude, so nothing in them may promise the offline queue.
+    local = {t.name: inspect.cleandoc(t.description) for t in anyio.run(build_server(vault).list_tools)}
+    assert {t["name"]: t["description"] for t in ours["tools"]} == local
+    assert "queue" not in json.dumps(ours["tools"]) and "features" not in ours
+
+
+def test_the_queue_is_described_to_web_apps_once_this_computer_takes_it(vault, queue_on):
+    link = linked(vault, "http://127.0.0.1:9")
+    ours = anyio.run(Bridge(vault, link).hello)
+    assert ours["features"] == ["queue"]
+    local = {t.name: inspect.cleandoc(t.description) for t in anyio.run(build_server(vault).list_tools)}
+    cloud_tools = {t["name"]: t["description"] for t in ours["tools"]}
+    assert {n for n in cloud_tools if cloud_tools[n] != local[n]} == {"memory_propose", "memory_proposals"}
+    assert cloud_tools["memory_propose"] == local["memory_propose"] + mcp_server.CLOUD_QUEUED
+    assert cloud_tools["memory_proposals"] == local["memory_proposals"] + "\n" + mcp_server.CLOUD_QUEUE_ID
+    assert '"queued"' in cloud_tools["memory_propose"] and "`queue_id`" in cloud_tools["memory_proposals"]
+    assert all("queue" not in d for d in local.values())  # apps on this computer never hear of it
 
 
 def test_backoff_is_exponential_with_full_jitter():
