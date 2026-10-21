@@ -1174,7 +1174,9 @@ def cloud_settings(
         raise typer.Exit(1) from None
     linked = cloud.load_link() is not None
     typer.echo(f"Listed: {'yes' if prefs['show'] else 'yes, while linked' if linked else 'no'}")
-    typer.echo(f"Service: {cloud.service_url()}" + ("" if prefs["service"] else " (MyMemo's own)"))
+    source = (" (set by OPENMYMEMO_CLOUD_URL)" if os.environ.get("OPENMYMEMO_CLOUD_URL", "").strip()
+              else "" if prefs["service"] else " (MyMemo's own)")
+    typer.echo(f"Service: {cloud.service_url()}{source}")
 
 
 # ---- setup ------------------------------------------------------------------------------------------
