@@ -485,7 +485,7 @@ def test_hook_only_reads_transcripts_where_the_app_keeps_them(vault, tmp_path):
     codex_file = place_transcript("codex_rollout.jsonl", "codex")
     out = sessions.hook(vault.root, "codex", json.dumps({"session_id": "0199-abcd", "hook_event_name": "Stop"}),
                         spawn=False)
-    assert str(codex_file) in out and "Stop" in out
+    assert str(codex_file) in json.loads(out.removeprefix("spawn:")) and "Stop" in out
 
 
 def test_worker_files_what_the_app_didnt_save_with_evidence(vault, fake):

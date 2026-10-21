@@ -25,7 +25,8 @@ def main() -> None:
     names = [f"{c.get('classname', '')}::{c.get('name', '')}" for c in root.iter("testcase")
              if c.find("failure") is not None or c.find("error") is not None]
     if names:  # GitHub shows only the first ten error annotations of a step: this one lists them all
-        print(f"::error title={len(names)} failed::{esc(chr(10).join(names))}")
+        short = [n if len(n) <= 160 else n[:157] + "..." for n in names]  # one long parametrize id hid the rest
+        print(f"::error title={len(names)} failed::{esc(chr(10).join(short))}")
     for case in root.iter("testcase"):
         for kind in ("failure", "error"):
             node = case.find(kind)

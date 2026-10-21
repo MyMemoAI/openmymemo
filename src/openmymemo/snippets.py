@@ -41,7 +41,7 @@ def command_for(vault_root: Path) -> list[str]:
             return [str(Path(uv).resolve()), "tool", "run", "openmymemo", "--vault", str(vault_root)]
     exe = shutil.which("openmymemo")
     argv0 = Path(sys.argv[0]) if sys.argv and sys.argv[0] else None
-    if argv0 and argv0.name == "openmymemo" and argv0.exists():
+    if argv0 and argv0.stem == "openmymemo" and argv0.exists():
         exe = str(argv0.resolve())
     base = [exe] if exe else [sys.executable, "-m", "openmymemo"]
     return [*base, "--vault", str(vault_root)]

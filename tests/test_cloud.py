@@ -112,7 +112,7 @@ def test_cloud_json_lives_per_computer_never_in_the_folder(tmp_path):
 def test_cloud_json_is_private_from_the_first_byte_and_written_atomically(vault):
     link = linked(vault, "http://127.0.0.1:9")
     path = cloud.link_path()
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600 and stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+    assert (os.name == "nt" or stat.S_IMODE(path.stat().st_mode) == 0o600) and (os.name == "nt" or stat.S_IMODE(path.parent.stat().st_mode) == 0o700)
     data = json.loads(path.read_text())
     assert {"service", "device_id", "device_token", "private_key", "key_id", "vault", "member", "plan"} <= set(data)
     assert cloud.load_link() == link
@@ -415,7 +415,7 @@ def test_openmymemo_cloud_is_listed_until_hidden_and_always_while_linked(vault, 
     assert cloud_rows(vault) == []  # hidden again: the person's choice stays
     assert api.patch("/api/cloud/settings", json={"show": True}, headers=H).json()["shown"] is True
     assert len(cloud_rows(vault)) == 1
-    assert stat.S_IMODE(cloud.settings_path().stat().st_mode) == 0o600
+    assert (os.name == "nt" or stat.S_IMODE(cloud.settings_path().stat().st_mode) == 0o600)
 
 
 @pytest.mark.parametrize("old", [

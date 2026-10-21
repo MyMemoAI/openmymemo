@@ -38,9 +38,14 @@ def fake_cli(env, name, script="", code=0):
     """An app's command that logs its arguments (and runs `script`, a line of Python, with them as `args`)."""
     path = env.bin_dirs[0] / name
     log = env.home / f"{name}.log"
-    path.write_text(f"#!{sys.executable}\nimport json, sys\nargs = sys.argv[1:]\n"
-                    f"open({str(log)!r}, 'a').write(json.dumps(args) + '\\n')\n{script}\nsys.exit({code})\n")
-    path.chmod(0o755)
+    code_text = (f"#!{sys.executable}\nimport json, sys\nargs = sys.argv[1:]\n"
+                 f"open({str(log)!r}, 'a').write(json.dumps(args) + '\\n')\n{script}\nsys.exit({code})\n")
+    if os.name == "nt":  # Windows finds commands by extension (PATHEXT), not by a shebang
+        path.with_suffix(".py").write_text(code_text)
+        path.with_suffix(".cmd").write_text(f'@"{sys.executable}" "{path.with_suffix(".py")}" %*\r\n')
+    else:
+        path.write_text(code_text)
+        path.chmod(0o755)
     return log
 
 
@@ -85,11 +90,11 @@ def test_a_backup_is_private_while_written_and_never_left_half_done(tmp_path, mo
     monkeypatch.setattr(appfiles.shutil, "copyfileobj", copy_then_fail)
     with pytest.raises(OSError):
         appfiles.backup(path)
-    assert modes == [0o600] and list(tmp_path.iterdir()) == [path]  # no backup, no temporary file
+    assert (os.name == "nt" or modes == [0o600]) and list(tmp_path.iterdir()) == [path]  # no backup, no temporary file
     monkeypatch.setattr(appfiles.shutil, "copyfileobj", real)
     appfiles.backup(path)
     copy = tmp_path / "mcp.json.openmymemo-backup"
-    assert copy.read_text() == '{"key": "secret"}' and stat.S_IMODE(copy.stat().st_mode) == 0o600
+    assert copy.read_text() == '{"key": "secret"}' and (os.name == "nt" or stat.S_IMODE(copy.stat().st_mode) == 0o600)
     # A config others may read still gets a private backup: it may be tightened later, the copy would not be.
     loose = tmp_path / "settings.json"
     loose.write_text('{"key": "secret"}')
@@ -97,7 +102,7 @@ def test_a_backup_is_private_while_written_and_never_left_half_done(tmp_path, mo
     os.utime(loose, (1_700_000_000, 1_700_000_000))
     appfiles.backup(loose)
     loose_copy = tmp_path / "settings.json.openmymemo-backup"
-    assert stat.S_IMODE(loose_copy.stat().st_mode) == 0o600 and loose_copy.stat().st_mtime == 1_700_000_000
+    assert (os.name == "nt" or stat.S_IMODE(loose_copy.stat().st_mode) == 0o600) and loose_copy.stat().st_mtime == 1_700_000_000
 
 
 def test_json_writer_changes_only_our_entry_keeps_a_backup_once_and_round_trips(tmp_path):
@@ -111,7 +116,7 @@ def test_json_writer_changes_only_our_entry_keeps_a_backup_once_and_round_trips(
     data = json.loads(path.read_text())
     assert data == {"theme": "dark", "mcpServers": {"other": {"command": "x"}, "openmymemo": entry}}
     assert path.read_text().startswith('{\n    "theme"')  # the file's own indentation
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600  # a file with secrets stays private
+    assert (os.name == "nt" or stat.S_IMODE(path.stat().st_mode) == 0o600)  # a file with secrets stays private
     backup = tmp_path / "mcp.json.openmymemo-backup"
     assert json.loads(backup.read_text()) == original
 
@@ -164,7 +169,7 @@ def test_the_temporary_file_is_private_from_the_start_and_cleaned_up_on_failure(
     path.chmod(0o600)
     monkeypatch.setattr(os, "chmod", lambda *a, **k: None)  # what the temporary file is born with is what counts
     appfiles.replace(path, '{"a": 1}')
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600 and path.read_text() == '{"a": 1}'
+    assert (os.name == "nt" or stat.S_IMODE(path.stat().st_mode) == 0o600) and path.read_text() == '{"a": 1}'
     with pytest.raises(UnicodeEncodeError):
         appfiles.replace(path, "\ud800")  # can't be written as UTF-8
     monkeypatch.setattr(os, "fsync", lambda fd: (_ for _ in ()).throw(OSError(28, "No space left on device")))
@@ -699,7 +704,7 @@ def test_codex_hooks_file_is_written_like_any_other_apps_file(vault, env, tmp_pa
 
     clients.connect(vault, "codex", env)
     assert hooks.is_symlink() and codex.is_ours(json.loads(real.read_text())["hooks"]["SessionStart"][0]["hooks"][0])
-    assert stat.S_IMODE(real.stat().st_mode) == 0o600
+    assert (os.name == "nt" or stat.S_IMODE(real.stat().st_mode) == 0o600)
     assert json.loads((env.home / ".codex/hooks.json.openmymemo-backup").read_text()) == original
     clients.disconnect(vault, "codex", env)
     assert hooks.is_symlink() and json.loads(real.read_text())["hooks"] == original["hooks"]
@@ -955,7 +960,7 @@ def test_a_backup_left_readable_by_an_older_version_is_made_private(tmp_path):
     copy.write_text('{"key": "old secret"}')
     copy.chmod(0o644)
     appfiles.backup(path)
-    assert stat.S_IMODE(copy.stat().st_mode) == 0o600 and copy.read_text() == '{"key": "old secret"}'
+    assert (os.name == "nt" or stat.S_IMODE(copy.stat().st_mode) == 0o600) and copy.read_text() == '{"key": "old secret"}'
 
     # A symlink in its place is never followed: what it points to keeps its mode.
     other = tmp_path / "elsewhere.txt"
@@ -965,7 +970,7 @@ def test_a_backup_left_readable_by_an_older_version_is_made_private(tmp_path):
     link_target.write_text("{}")
     (tmp_path / "settings.json.openmymemo-backup").symlink_to(other)
     appfiles.backup(link_target)
-    assert stat.S_IMODE(other.stat().st_mode) == 0o644
+    assert (os.name == "nt" or stat.S_IMODE(other.stat().st_mode) == 0o644)
 
 
 def test_install_links_open_the_app_and_never_send_paths_to_a_website():

@@ -111,6 +111,7 @@ def test_read_only_opens_what_find_would_offer(tmp_path):
 
 def test_panel_finds_previews_and_imports_a_memory_file(tmp_path, vault, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))  # Path.home() and ~
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     api = TestClient(create_api(vault, 8787), base_url="http://127.0.0.1:8787")
     write(tmp_path, {"proj/AGENTS.md": "# Conventions\n- Runs ruff before every commit\n", ".ssh/id_rsa": "KEY"})
     listed = api.get("/api/import/files", params={"path": str(tmp_path / "proj")}, headers=H).json()
