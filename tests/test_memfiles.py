@@ -1,5 +1,6 @@
 import os
 import time
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -85,7 +86,7 @@ def test_find_looks_where_each_app_keeps_its_files(tmp_path, vault):
         "big/memory.md": "x", "memory.json": "", ".clinerules/rules.md": "- k",
     })
     write(home, {"MEMORY.txt": "a" * (memfiles.MAX_BYTES + 1)})
-    found = {os.path.relpath(f.path, home): f.source for f in memfiles.find(home)}
+    found = {Path(os.path.relpath(f.path, home)).as_posix(): f.source for f in memfiles.find(home)}
     assert found == {
         ".claude/CLAUDE.md": "claude-code", ".claude/projects/-work-app/memory/MEMORY.md": "claude-code",
         ".claude/projects/-work-app/memory/user_role.md": "claude-code", ".codex/AGENTS.md": "codex",
@@ -172,7 +173,7 @@ def test_a_file_reads_as_the_same_app_whether_found_or_opened(tmp_path):
              ".github/instructions/py.instructions.md": "copilot", ".kiro/steering/memory.md": "kiro",
              "memory.md": "file", "AGENTS.md": "codex"}
     write(tmp_path, {rel: "- something to remember" for rel in files})
-    found = {os.path.relpath(f.path, tmp_path): f.source for f in memfiles.find(tmp_path)}
+    found = {Path(os.path.relpath(f.path, tmp_path)).as_posix(): f.source for f in memfiles.find(tmp_path)}
     assert found == files
     assert all(memfiles.read(tmp_path / rel)[0] == source for rel, source in files.items())
     assert all(memfiles.find(tmp_path / rel)[0].source == source for rel, source in files.items())

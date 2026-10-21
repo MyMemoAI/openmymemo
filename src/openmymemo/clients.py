@@ -129,7 +129,10 @@ class Env:
     def child_env(self, exe: Path) -> dict[str, str]:
         """Environment for an app's own CLI: our search path (node scripts need `node`) and this home."""
         path = os.pathsep.join(dict.fromkeys([str(exe.parent), *(str(d) for d in self.bin_dirs)]))
-        return {**os.environ, "PATH": path, "HOME": str(self.home)}
+        home = {"HOME": str(self.home)}
+        if sys.platform == "win32":  # where programs there look for the home folder
+            home["USERPROFILE"] = str(self.home)
+        return {**os.environ, "PATH": path, **home}
 
 
 # ---- the catalog ---------------------------------------------------------------------------------------

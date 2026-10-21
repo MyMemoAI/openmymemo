@@ -774,6 +774,7 @@ def test_detection_finds_bundles_commands_in_bundles_and_config_folders(vault, e
     code = apps / "Visual Studio Code.app/Contents/Resources/app/bin/code"
     codex_cli = apps / "ChatGPT.app/Contents/Resources/codex-cli/bin/codex"
     for exe in (code, codex_cli):
+        exe = exe.with_name(exe.name + ".exe") if os.name == "nt" else exe  # found by extension there
         exe.parent.mkdir(parents=True)
         exe.write_text("#!/bin/sh\n")
         exe.chmod(0o755)
@@ -822,7 +823,7 @@ def test_env_current_looks_beyond_the_shell_path(tmp_path, monkeypatch):
     (tmp_path / ".nvm/versions/node/v22.0.0/bin").mkdir(parents=True)
     env = clients.Env.current(tmp_path)
     dirs = [str(d) for d in env.bin_dirs]
-    assert dirs[0] == "/usr/bin"
+    assert dirs[0] == str(Path("/usr/bin"))
     for d in (tmp_path / ".local/bin", Path("/opt/homebrew/bin"), tmp_path / ".bun/bin",
               tmp_path / ".nvm/versions/node/v22.0.0/bin"):
         assert str(d) in dirs
@@ -831,7 +832,7 @@ def test_env_current_looks_beyond_the_shell_path(tmp_path, monkeypatch):
 
 def test_manual_apps_get_a_snippet_and_their_install_link(vault, env):
     goose = clients.connect(vault, "goose", env)
-    assert goose.status == "manual" and goose.path.endswith(".config/goose/config.yaml")
+    assert goose.status == "manual" and Path(goose.path).as_posix().endswith(".config/goose/config.yaml")
     import yaml
 
     entry = yaml.safe_load(goose.snippet)["extensions"]["openmymemo"]
@@ -867,7 +868,7 @@ def test_in_use_comes_from_activity(vault, env):
 def test_an_entry_whose_program_is_gone_is_broken(vault, env):
     path = env.home / ".cursor/mcp.json"
     path.parent.mkdir()
-    path.write_text(json.dumps({"mcpServers": {"openmymemo": {"command": "/gone/openmymemo", "args": []}}}))
+    path.write_text(json.dumps({"mcpServers": {"openmymemo": {"command": str(env.home / "gone/openmymemo"), "args": []}}}))
     assert clients.app_status(vault, clients.get("cursor"), env)["broken"]
     clients.connect(vault, "cursor", env)
     assert not clients.app_status(vault, clients.get("cursor"), env)["broken"]
@@ -897,7 +898,7 @@ def test_api_lists_connects_and_disconnects_apps(vault, env, api):
     assert (env.home / ".cursor/mcp.json").exists()
 
     setup = api.get("/api/clients/zed/setup", headers=H).json()
-    assert setup["path"].endswith(".config/zed/settings.json") and "context_servers" in setup["snippet"]
+    assert Path(setup["path"]).as_posix().endswith(".config/zed/settings.json") and "context_servers" in setup["snippet"]
 
     r = api.post("/api/clients/cursor/disconnect", headers=H).json()
     assert r["result"]["status"] == "done" and not r["app"]["connected"] and r["app"]["revoked"]

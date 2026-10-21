@@ -74,6 +74,10 @@ jobs:
         with:
           python-version: "3.12"
       - name: Tests (a failing test is also printed as an annotation)
+        # The tests read and write their fixtures in the platform's default encoding, which on Windows isn't
+        # UTF-8; the package itself always names its encoding.
+        env:
+          PYTHONUTF8: "1"
         run: |
           status=0
           uv run --frozen pytest --junitxml=report.xml || status=$?
