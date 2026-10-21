@@ -103,7 +103,7 @@ function onKey(e: KeyboardEvent) {
     </div>
 
     <div v-else class="space-y-2 pt-1">
-      <textarea ref="input" v-model="draft" rows="2" class="input text-[15px]" @keydown="onKey" />
+      <textarea ref="input" v-model="draft" rows="2" class="input text-[15px]" :aria-label="t('mem.text')" @keydown="onKey" />
       <div class="flex flex-wrap items-center gap-2">
         <select v-model="draftTopic" class="input select w-auto max-w-full" :aria-label="t('mem.topics')">
           <option v-for="tp in store.state?.topics" :key="tp.slug" :value="tp.slug">{{ tp.title }}</option>

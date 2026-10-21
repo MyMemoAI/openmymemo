@@ -79,7 +79,7 @@ const undo = () => run(() => api.undo(p.value.id), t("chg.undone"));
         <span class="min-w-0 break-words" :class="p.status === 'rejected' || p.status === 'expired' || p.status === 'undone' ? 'text-muted' : ''">{{ text }}</span>
       </div>
       <div v-if="editing" class="space-y-2 pt-1">
-        <textarea v-model="draft" class="input min-h-20 bg-surface text-[15px]" />
+        <textarea v-model="draft" class="input min-h-20 bg-surface text-[15px]" :aria-label="t('mem.text')" />
         <select v-model="draftTopic" class="input select w-auto max-w-full bg-surface" :aria-label="t('mem.topics')">
           <option v-for="tp in store.state?.topics" :key="tp.slug" :value="tp.slug">{{ tp.title }}</option>
         </select>

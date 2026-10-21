@@ -36,6 +36,7 @@ const strings: Record<string, string> = {
   "source.import": "Imported from {name}",
 
   "mem.topics": "Topics",
+  "mem.text": "Memory text",
   "mem.kinds": "Kind",
   "mem.sources": "Source",
   "mem.status": "Status",
