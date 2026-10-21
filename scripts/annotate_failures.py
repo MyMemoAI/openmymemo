@@ -22,6 +22,10 @@ def main() -> None:
         print(f"::error::No test report ({type(e).__name__})")
         sys.exit(1)
     failed = 0
+    names = [f"{c.get('classname', '')}::{c.get('name', '')}" for c in root.iter("testcase")
+             if c.find("failure") is not None or c.find("error") is not None]
+    if names:  # GitHub shows only the first ten error annotations of a step: this one lists them all
+        print(f"::error title={len(names)} failed::{esc(chr(10).join(names))}")
     for case in root.iter("testcase"):
         for kind in ("failure", "error"):
             node = case.find(kind)

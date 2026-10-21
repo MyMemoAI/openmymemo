@@ -454,7 +454,7 @@ def test_hook_asks_first_and_does_nothing_without_consent(vault, fake):
     assert sessions.hook(vault.root, "claude-code", hook_json(path), spawn=False) == "declined"
     save_settings(session_apps={"claude-code": "allowed"})
     out = sessions.hook(vault.root, "claude-code", hook_json(path), spawn=False)
-    assert out.startswith("spawn:") and "--worker" in out and str(path) in out
+    assert out.startswith("spawn:") and "--worker" in out and str(path) in json.loads(out.removeprefix("spawn:"))
     assert not fake.requests  # the hook itself never calls the model
 
 

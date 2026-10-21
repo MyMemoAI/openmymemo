@@ -95,7 +95,8 @@ def test_settings_are_per_computer_private_and_keep_unknown_keys(vault):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"format": 1, "from_the_future": {"x": 1}}))
     s = save_settings(enabled=True, kind="key", protocol="anthropic", model="claude-haiku-5-5", api_key="sk-test-1")
-    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+    if os.name != "nt":  # Windows has no permission bits; the file is in the user's own profile there
+        assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
     raw = json.loads(path.read_text())
     assert raw["from_the_future"] == {"x": 1} and raw["api_key_in"] == "file"
     assert s.endpoint == "https://api.anthropic.com" and s.key_store == "file" and s.api_key == "sk-test-1"

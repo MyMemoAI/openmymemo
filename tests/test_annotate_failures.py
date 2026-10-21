@@ -23,9 +23,10 @@ line 100%</failure></testcase>
       <testcase classname="tests.test_b" name="test_setup"><error message="fixture broke"/></testcase>
     </testsuite></testsuites>""")
     lines = r.stdout.splitlines()
-    assert r.returncode == 1 and len(lines) == 2
-    assert lines[0] == "::error title=tests.test_a::test_bad::assert 1 == 2%0Aline one%0Aline 100%25"
-    assert lines[1].startswith("::error title=tests.test_b::test_setup::fixture broke")
+    assert r.returncode == 1 and len(lines) == 3
+    assert lines[0] == "::error title=2 failed::tests.test_a::test_bad%0Atests.test_b::test_setup"
+    assert lines[1] == "::error title=tests.test_a::test_bad::assert 1 == 2%0Aline one%0Aline 100%25"
+    assert lines[2].startswith("::error title=tests.test_b::test_setup::fixture broke")
 
 
 def test_a_report_without_failures_or_without_a_report(tmp_path):
