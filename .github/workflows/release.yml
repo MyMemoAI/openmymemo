@@ -5,6 +5,11 @@ name: Release
 # must already be bumped everywhere (tests/test_packaging.py).
 # The release is created once every file is built, so it never lacks the disk image; if a job fails, nothing
 # is published and "Re-run failed jobs" picks up from there.
+# The apps update themselves from latest.json (scripts/update_manifest.py), whose files are signed with the
+# updater key in these repository secrets; tauri.conf.json holds its public key. Without them (a fork) the apps
+# are built without update files and no latest.json is published.
+#   TAURI_SIGNING_PRIVATE_KEY           the private key from `pnpm tauri signer generate`
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  its password
 on:
   push:
     tags: ["v*"]
@@ -53,6 +58,12 @@ jobs:
             exit 1
           fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
+      - name: The updater's public key is set
+        run: |
+          if grep -q '"UPDATER_PUBLIC_KEY"' desktop/src-tauri/tauri.conf.json; then
+            echo "::error::Put the updater's public key in tauri.conf.json (plugins.updater.pubkey) before releasing."
+            exit 1
+          fi
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7; stage_desktop.py bundles this uv
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6
         with:
@@ -78,6 +89,8 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           # A missing secret arrives as an empty variable, which Tauri would take as set.
           for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_API_ISSUER \
@@ -98,7 +111,13 @@ jobs:
             unset APPLE_ID APPLE_PASSWORD APPLE_API_ISSUER APPLE_API_KEY
           fi
           unset APPLE_API_PRIVATE_KEY
-          pnpm tauri build --bundles app,dmg
+          updates=()
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            echo "::warning::No updater key in the secrets: the app is built without update files."
+            unset TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+            updates=(--config '{"bundle":{"createUpdaterArtifacts":false}}')
+          fi
+          pnpm tauri build --bundles app,dmg "${updates[@]}"
       - name: Check the signature and architecture, and name the disk image
         env:
           ARCH: ${{ matrix.arch }}
@@ -123,10 +142,15 @@ jobs:
           mkdir -p dist
           cp "${dmgs[0]}" "dist/OpenMyMemo-${VERSION}-${ARCH}.dmg"
           hdiutil verify "dist/OpenMyMemo-${VERSION}-${ARCH}.dmg"
+          # The signed update, when the updater key was there.
+          if [ -f "$bundle/macos/OpenMyMemo.app.tar.gz.sig" ]; then
+            cp "$bundle/macos/OpenMyMemo.app.tar.gz" "dist/OpenMyMemo-${VERSION}-${ARCH}.app.tar.gz"
+            cp "$bundle/macos/OpenMyMemo.app.tar.gz.sig" "dist/OpenMyMemo-${VERSION}-${ARCH}.app.tar.gz.sig"
+          fi
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: openmymemo-dmg-${{ matrix.arch }}
-          path: dist/*.dmg
+          path: dist/*
           if-no-files-found: error
 
   windows:
@@ -151,6 +175,12 @@ jobs:
             exit 1
           fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
+      - name: The updater's public key is set
+        run: |
+          if grep -q '"UPDATER_PUBLIC_KEY"' desktop/src-tauri/tauri.conf.json; then
+            echo "::error::Put the updater's public key in tauri.conf.json (plugins.updater.pubkey) before releasing."
+            exit 1
+          fi
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7; stage_desktop.py bundles this uv
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6
         with:
@@ -164,7 +194,17 @@ jobs:
         working-directory: desktop
       - name: Build the app and the installer
         working-directory: desktop
-        run: pnpm tauri build --bundles nsis
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          updates=()
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            echo "::warning::No updater key in the secrets: the app is built without update files."
+            unset TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+            updates=(--config '{"bundle":{"createUpdaterArtifacts":false}}')
+          fi
+          pnpm tauri build --bundles nsis "${updates[@]}"
       - name: Name the installer
         run: |
           installers=(desktop/src-tauri/target/release/bundle/nsis/OpenMyMemo_"${VERSION}"_*-setup.exe)
@@ -174,10 +214,13 @@ jobs:
           fi
           mkdir -p dist
           cp "${installers[0]}" "dist/OpenMyMemo-${VERSION}-x64-setup.exe"
+          if [ -f "${installers[0]}.sig" ]; then
+            cp "${installers[0]}.sig" "dist/OpenMyMemo-${VERSION}-x64-setup.exe.sig"
+          fi
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: openmymemo-windows
-          path: dist/*.exe
+          path: dist/*
           if-no-files-found: error
 
   release:
@@ -213,18 +256,24 @@ jobs:
         with:
           name: openmymemo-windows
           path: dist
+      - name: The update manifest
+        run: python3 scripts/update_manifest.py dist "${GITHUB_REF_NAME#v}"
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/*.dmg dist/*.exe dist/*.mcpb dist/*.whl dist/*.tar.gz \
-            --title "OpenMyMemo ${GITHUB_REF_NAME#v}" --generate-notes
+          # The signatures are inside latest.json; the update files and latest.json exist only with the updater key.
+          shopt -s nullglob
+          updates=(dist/*.app.tar.gz dist/latest.json)
+          shopt -u nullglob
+          gh release create "$GITHUB_REF_NAME" dist/*.dmg dist/*.exe dist/*.mcpb dist/*.whl dist/openmymemo-*.tar.gz \
+            "${updates[@]}" --title "OpenMyMemo ${GITHUB_REF_NAME#v}" --generate-notes
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: openmymemo-python
           path: |
             dist/*.whl
-            dist/*.tar.gz
+            dist/openmymemo-*.tar.gz
           if-no-files-found: error
 
   pypi:

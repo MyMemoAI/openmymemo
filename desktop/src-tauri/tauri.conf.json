@@ -25,9 +25,17 @@
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
     "resources": { "core/": "core/" },
     "externalBin": ["binaries/uv"],
+    "createUpdaterArtifacts": true,
     "macOS": {
       "minimumSystemVersion": "12.0",
       "signingIdentity": "-"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "UPDATER_PUBLIC_KEY",
+      "endpoints": ["https://github.com/MyMemoAI/openmymemo/releases/latest/download/latest.json"],
+      "windows": { "installMode": "passive" }
     }
   }
 }

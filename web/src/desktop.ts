@@ -21,6 +21,8 @@ export interface AppSettings {
   appearance: Appearance;
   /** A notification when an AI app changes something or something starts waiting. */
   notifications: boolean;
+  /** Look for a new version shortly after starting and once a day; an update is installed only when asked. */
+  check_updates: boolean;
   version: string;
   /** The `openmymemo` command the app installs; AI apps' MCP configs run it. */
   launcher: string;
@@ -36,6 +38,9 @@ export const shell = {
   /** The whole app follows it: windows, this panel (its CSS follows the window), menus and dialogs. */
   setAppearance: (appearance: Appearance) => internals?.invoke("set_appearance", { appearance }),
   setNotifications: (enabled: boolean) => internals?.invoke("set_notifications", { enabled }),
+  setCheckUpdates: (enabled: boolean) => internals?.invoke("set_check_updates", { enabled }),
+  /** Check now; the app answers in a dialog of its own (up to date, or install the new version?). */
+  checkForUpdates: () => internals?.invoke("check_for_updates"),
   /** Ask for another memory folder; the app restarts its server on it and reloads. */
   chooseVault: () => internals?.invoke("choose_vault"),
 };

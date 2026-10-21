@@ -35,7 +35,7 @@ For everyone: no terminal, no config files, no Python to install.
 4. The first start downloads Python and the libraries OpenMyMemo runs on, about 25 MB and usually under a minute, into `~/Library/Application Support/ai.mymemo.openmymemo/`. It happens once; after that the app starts in a couple of seconds, also offline.
 5. A short guide connects the AI apps on your Mac with one click each and brings over the memory ChatGPT, Claude or Gemini already have. Your memories live in `~/OpenMyMemo`.
 
-The app shows the panel in its own window, puts the number of changes to review in the menu bar, and notifies you when an AI app changes something. To update, download the new disk image and drag it to Applications again; your memory folder isn't touched.
+The app shows the panel in its own window, puts the number of changes to review in the menu bar, and notifies you when an AI app changes something. It looks for a new version once a day and asks before installing it (Settings → General turns that off; "Check for Updates…" in the OpenMyMemo menu checks at once). An update replaces the app and restarts it; your memory folder isn't touched. Versions up to 0.2.9 can't update themselves: download the new disk image once more and drag it to Applications.
 
 The app also installs an `openmymemo` command, which the AI apps it connects run (Settings → Advanced shows where). It is the full command line below, so you can use it in Terminal too.
 
@@ -47,7 +47,7 @@ The same app for Windows 10 and 11 (64-bit, x64).
 2. The first start downloads Python and the libraries OpenMyMemo runs on, about 25 MB and usually under a minute, into `%LOCALAPPDATA%\ai.mymemo.openmymemo\`. After that the app starts in a couple of seconds, also offline.
 3. The same guide connects your AI apps and brings over the memory other assistants have. Your memories live in `%USERPROFILE%\OpenMyMemo`.
 
-The app keeps running in the notification area when you close its window; quit it from there. Its `openmymemo` command is `%LOCALAPPDATA%\ai.mymemo.openmymemo\bin\openmymemo.exe`. To update, run the new installer; to remove the app, use Settings → Apps. Your memory folder isn't touched either way.
+The app keeps running in the notification area when you close its window; quit it from there. Its `openmymemo` command is `%LOCALAPPDATA%\ai.mymemo.openmymemo\bin\openmymemo.exe`. It updates itself like the Mac app, asking first; to remove it, use Settings → Apps. Your memory folder isn't touched either way.
 
 ### The command line
 
@@ -248,7 +248,7 @@ pnpm tauri dev                         # run it; OPENMYMEMO_HOME=/tmp/omm-demo t
 CI=true pnpm tauri build --bundles app,dmg  # → desktop/src-tauri/target/release/bundle/
 ```
 
-On Windows, the same commands build an installer (`pnpm tauri build --bundles nsis`, needs Python and the Visual Studio C++ build tools that Rust uses); `scripts/stage_desktop.py` also builds `desktop/launcher`, the `openmymemo.exe` the app installs for AI apps, since Windows has no `sh` for the Mac app's launcher script.
+Release builds sign their update files with the updater key in the repository secrets (`.github/workflows/release.yml`); without the key, add `--config '{"bundle":{"createUpdaterArtifacts":false}}'` to `pnpm tauri build`. On Windows, the same commands build an installer (`pnpm tauri build --bundles nsis`, needs Python and the Visual Studio C++ build tools that Rust uses); `scripts/stage_desktop.py` also builds `desktop/launcher`, the `openmymemo.exe` the app installs for AI apps, since Windows has no `sh` for the Mac app's launcher script.
 
 Local builds are signed ad hoc, so macOS asks once before opening them (see [The Mac app](#the-mac-app)); the release workflow signs and notarizes when the Apple Developer secrets are set (`.github/workflows/release.yml` lists them). `CI=true` makes Tauri skip the Finder scripting that lays out the disk image window, which otherwise asks for permission to control Finder. On every start the app writes the `openmymemo` launcher AI apps run to `~/Library/Application Support/ai.mymemo.openmymemo/bin/`; it keeps working when the app is moved. The server's log is in `~/Library/Logs/ai.mymemo.openmymemo/core.log`.
 

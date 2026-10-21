@@ -11,7 +11,7 @@ import ModalDialog from "./ModalDialog.vue";
 
 /**
  * The Mac app's settings (⌘,), in small groups: General (the memory folder, opening at login,
- * notifications), Appearance, AI changes (the approval switch), the OpenMyMemo Assistant, OpenMyMemo Cloud (shown or not, and its service), Help, and Advanced (the `openmymemo`
+ * notifications, updates), Appearance, AI changes (the approval switch), the OpenMyMemo Assistant, OpenMyMemo Cloud (shown or not, and its service), Help, and Advanced (the `openmymemo`
  * command the app installs, desktop/src-tauri/src/launcher.rs). In a browser preview only the parts the
  * panel itself provides show.
  */
@@ -41,6 +41,8 @@ function openGuide() {
   emit("close");
 }
 const toggleNotifications = () => run(() => shell.setNotifications(!app.value?.notifications));
+const toggleUpdates = () => run(() => shell.setCheckUpdates(!app.value?.check_updates));
+const checkNow = () => run(() => shell.checkForUpdates());
 const setAppearance = (a: Appearance) => run(() => shell.setAppearance(a));
 const revealLog = () => app.value && run(() => shell.reveal(app.value!.log));
 </script>
@@ -82,6 +84,22 @@ const revealLog = () => app.value && run(() => shell.reveal(app.value!.log));
               :aria-checked="app.notifications"
               :aria-label="t('desk.notificationsHelp')"
               @click="toggleNotifications"
+            >
+              <span class="switch-knob" />
+            </button>
+          </div>
+          <div v-if="native && app" class="flex items-center gap-4 px-4.5 py-3">
+            <div class="min-w-0 flex-1 space-y-0.5">
+              <div class="font-semibold">{{ t("desk.updates") }}</div>
+              <p class="text-[13px] text-muted">{{ t("desk.updatesHelp") }}</p>
+            </div>
+            <button type="button" class="btn btn-sm" @click="checkNow">{{ t("desk.checkNow") }}</button>
+            <button
+              role="switch"
+              class="switch"
+              :aria-checked="app.check_updates"
+              :aria-label="t('desk.updates')"
+              @click="toggleUpdates"
             >
               <span class="switch-knob" />
             </button>
