@@ -33,7 +33,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "UPDATER_PUBLIC_KEY",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkwMzQ5M0UzODM2MjY0QTgKUldTb1pHS0Q0NU0wa0ZKTStwTVY3YUxHOGZhVnFTY2x3MlI1ZFE1TkxXcjkzNzBaeGNHbW1XUXQK",
       "endpoints": ["https://github.com/MyMemoAI/openmymemo/releases/latest/download/latest.json"],
       "windows": { "installMode": "passive" }
     }
