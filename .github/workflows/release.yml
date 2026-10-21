@@ -264,8 +264,9 @@ jobs:
         run: |
           # The signatures are inside latest.json; the update files and latest.json exist only with the updater key.
           shopt -s nullglob
-          updates=(dist/*.app.tar.gz dist/latest.json)
+          updates=(dist/*.app.tar.gz)
           shopt -u nullglob
+          if [ -f dist/latest.json ]; then updates+=(dist/latest.json); fi
           gh release create "$GITHUB_REF_NAME" dist/*.dmg dist/*.exe dist/*.mcpb dist/*.whl dist/openmymemo-*.tar.gz \
             "${updates[@]}" --title "OpenMyMemo ${GITHUB_REF_NAME#v}" --generate-notes
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7

@@ -14,6 +14,13 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 pub const FIRST_CHECK: Duration = Duration::from_secs(60);
 pub const EVERY: Duration = Duration::from_secs(24 * 3600);
 
+/// How long a check may take, a connection may take to open, and a download may sit without data or take in
+/// all: a network that accepts the request and then goes quiet must not hold the checks or the install forever.
+const CHECK_TIMEOUT: Duration = Duration::from_secs(30);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const STALL_TIMEOUT: Duration = Duration::from_secs(60);
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+
 /// The release page, for when an update can't be installed from the app.
 pub const RELEASES: &str = "https://github.com/MyMemoAI/openmymemo/releases/latest";
 
@@ -26,10 +33,20 @@ pub enum Check {
 pub fn check(app: &AppHandle) -> Check {
     let found = tauri::async_runtime::block_on(async {
         // On Windows the installer takes over and the app exits from inside the updater: stop the server first.
-        app.updater_builder().on_before_exit(crate::core::stop_child).build()?.check().await
+        app.updater_builder()
+            .on_before_exit(crate::core::stop_child)
+            .timeout(CHECK_TIMEOUT)
+            .configure_client(|client| client.connect_timeout(CONNECT_TIMEOUT).read_timeout(STALL_TIMEOUT))
+            .build()?
+            .check()
+            .await
     });
     match found {
-        Ok(Some(update)) => Check::Available(Box::new(update)),
+        Ok(Some(mut update)) => {
+            // The update doesn't keep the check's timeout (tauri-plugin-updater 2.14): give the download its own.
+            update.timeout = Some(DOWNLOAD_TIMEOUT);
+            Check::Available(Box::new(update))
+        }
         Ok(None) => Check::Current,
         Err(e) => Check::Failed(e.to_string()),
     }
