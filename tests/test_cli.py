@@ -278,6 +278,33 @@ def test_a_process_from_a_mac_app_environment_holds_its_lock(tmp_path, monkeypat
         os.close(cli._env_lock)
 
 
+def test_a_process_from_a_windows_app_environment_keeps_its_file_open(tmp_path, monkeypatch):
+    import pytest
+
+    if os.name != "nt":
+        pytest.skip("Windows only")
+    import ctypes
+    from ctypes import wintypes
+
+    from openmymemo import cli
+
+    env = tmp_path / "venvs/9.0.0-1"
+    env.mkdir(parents=True)
+    monkeypatch.setattr(cli, "_env_lock", None)
+    cli._hold_environment(str(env))
+    create = ctypes.WinDLL("kernel32", use_last_error=True).CreateFileW
+    create.restype = wintypes.HANDLE
+    create.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD,
+                       wintypes.DWORD, wintypes.HANDLE]
+    try:
+        assert cli._env_lock is not None
+        # What the app's clean-up tries (core.rs): open it with no sharing.
+        handle = create(str(env / cli.ENV_LOCK), 0x80000000, 0, None, 3, 0, None)
+        assert handle == wintypes.HANDLE(-1).value and ctypes.get_last_error() == 32  # a sharing violation
+    finally:
+        os.close(cli._env_lock)
+
+
 def test_openmymemo_command_is_what_configs_get_when_the_mac_app_sets_it(tmp_path, monkeypatch):
     """The Mac app runs the server from a versioned venv that is cleaned up later; configs must name its launcher."""
     from openmymemo.snippets import command_for, stdio_command

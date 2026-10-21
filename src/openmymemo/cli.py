@@ -1602,17 +1602,22 @@ _env_lock: int | None = None
 
 
 def _hold_environment(prefix: str | None = None) -> None:
-    """Hold the shared lock on ENV_LOCK in the Mac app's environment this process runs from, if it does."""
+    """Hold the shared lock on ENV_LOCK in the desktop app's environment this process runs from, if it does.
+    On Windows the file just stays open: the app removes an environment only when it can open the file with
+    no sharing (desktop/src-tauri/src/core.rs)."""
     global _env_lock
     env = Path(prefix if prefix is not None else sys.prefix)
     if (prefix is None and sys.prefix == sys.base_prefix) or env.parent.name != "venvs":
         return
     try:
-        import fcntl
-
         fd = os.open(env / ENV_LOCK, os.O_RDONLY | os.O_CREAT, 0o644)
-    except (ImportError, OSError):
+    except OSError:
         return
+    if os.name == "nt":
+        _env_lock = fd
+        return
+    import fcntl
+
     try:
         fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
     except OSError:  # the app is removing this environment right now

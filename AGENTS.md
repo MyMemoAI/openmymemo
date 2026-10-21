@@ -22,7 +22,7 @@ uv run python scripts/demo_vault.py /tmp/d  # demo data
 cd web && pnpm install && pnpm build        # panel → src/openmymemo/static/ (commit the build output)
 cd web && pnpm test                         # panel tests (vitest)
 cd desktop && pnpm install && pnpm tauri dev # Mac app (needs Rust); `pnpm tauri build` for the .app
-python3 scripts/stage_desktop.py && (cd desktop/src-tauri && cargo test)  # Mac app tests
+python3 scripts/stage_desktop.py && (cd desktop/src-tauri && cargo test)  # Mac or Windows app tests (`python` on Windows)
 ```
 
 ## Code map
@@ -53,7 +53,7 @@ python3 scripts/stage_desktop.py && (cd desktop/src-tauri && cargo test)  # Mac 
 | `web/` | Vue 3 + Tailwind v4 panel source; all copy lives in `web/src/i18n.ts` |
 | `web/src/components/ConnectApps.vue` | The app list with Connect / Disconnect / Set up, used by the Connectors page and the first-run guide; `ConnectNote` shows what's left to do, `ConnectorPanel` a connected app's permissions, `CloudRow` the OpenMyMemo Cloud row (sign-in, status, setup for ChatGPT and claude.ai, its web apps) |
 | `web/src/desktop.ts` | The Mac layout switch (`?desktop=1`), the shell's commands and shortcuts; `MemoriesDesktopView`, `MemoryInspector`, `DesktopSidebar`, `DesktopToolbar` are its screens; `memorySaves.ts` queues the inspector's saves per memory. `PageHeader` becomes the window toolbar there |
-| `desktop/` | Mac app (Tauri 2, product-design.md §14, §15.2): `src-tauri/src/core.rs` installs the core (non-editable) and finds or starts the server for the folder, `launcher.rs` writes the `openmymemo` launcher AI apps run, `install.rs` moves the app from the disk image to Applications, `main.rs` has the window, menus, menu-bar item, notifications, settings and link handling; `scripts/stage_desktop.py` stages the core and `uv` before each build |
+| `desktop/` | Mac and Windows app (Tauri 2, product-design.md §14, §15.2): `src-tauri/src/core.rs` installs the core (non-editable) and finds or starts the server for the folder, `launcher.rs` writes the `openmymemo` launcher AI apps run on a Mac, `winlauncher.rs` installs `desktop/launcher` (a small program, since Windows has no `sh`) as that command on Windows, `install.rs` moves the app from the disk image to Applications, `main.rs` has the window, menus, menu-bar item, notifications, settings and link handling; `tauri.windows.conf.json` makes the Windows installer (NSIS, per user); `scripts/stage_desktop.py` stages the core, `uv` and on Windows the launcher before each build |
 | `.claude-plugin/` | Claude Code plugin manifest and marketplace (the repo root is the plugin) |
 | `plugin.json`, `mcp.json`, `.agents/plugins/` | Codex plugin (Agent Plugins format) and its marketplace |
 | `skills/` | Skills shared by the Claude Code and Codex plugins |

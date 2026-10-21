@@ -39,6 +39,16 @@ The app shows the panel in its own window, puts the number of changes to review 
 
 The app also installs an `openmymemo` command, which the AI apps it connects run (Settings → Advanced shows where). It is the full command line below, so you can use it in Terminal too.
 
+### The Windows app (preview)
+
+The same app for Windows 10 and 11 (64-bit, x64).
+
+1. Download `OpenMyMemo-<version>-x64-setup.exe` from the [latest release](https://github.com/MyMemoAI/openmymemo/releases/latest) and run it. It installs for your user only and doesn't ask for an administrator. It isn't signed yet, so Windows SmartScreen may say it protected your PC: click **More info**, then **Run anyway**.
+2. The first start downloads Python and the libraries OpenMyMemo runs on, about 25 MB and usually under a minute, into `%LOCALAPPDATA%\ai.mymemo.openmymemo\`. After that the app starts in a couple of seconds, also offline.
+3. The same guide connects your AI apps and brings over the memory other assistants have. Your memories live in `%USERPROFILE%\OpenMyMemo`.
+
+The app keeps running in the notification area when you close its window; quit it from there. Its `openmymemo` command is `%LOCALAPPDATA%\ai.mymemo.openmymemo\bin\openmymemo.exe`. To update, run the new installer; to remove the app, use Settings → Apps. Your memory folder isn't touched either way.
+
 ### The command line
 
 For developers, and anyone who prefers a terminal. Nothing is fenced in: everything the app does is a command, and the folder format ([docs/MEMORY_FORMAT.md](https://github.com/MyMemoAI/openmymemo/blob/main/docs/MEMORY_FORMAT.md)) is the interface. Requires [uv](https://docs.astral.sh/uv/):
@@ -237,6 +247,8 @@ cd desktop && pnpm install
 pnpm tauri dev                         # run it; OPENMYMEMO_HOME=/tmp/omm-demo to use another folder
 CI=true pnpm tauri build --bundles app,dmg  # → desktop/src-tauri/target/release/bundle/
 ```
+
+On Windows, the same commands build an installer (`pnpm tauri build --bundles nsis`, needs Python and the Visual Studio C++ build tools that Rust uses); `scripts/stage_desktop.py` also builds `desktop/launcher`, the `openmymemo.exe` the app installs for AI apps, since Windows has no `sh` for the Mac app's launcher script.
 
 Local builds are signed ad hoc, so macOS asks once before opening them (see [The Mac app](#the-mac-app)); the release workflow signs and notarizes when the Apple Developer secrets are set (`.github/workflows/release.yml` lists them). `CI=true` makes Tauri skip the Finder scripting that lays out the disk image window, which otherwise asks for permission to control Finder. On every start the app writes the `openmymemo` launcher AI apps run to `~/Library/Application Support/ai.mymemo.openmymemo/bin/`; it keeps working when the app is moved. The server's log is in `~/Library/Logs/ai.mymemo.openmymemo/core.log`.
 

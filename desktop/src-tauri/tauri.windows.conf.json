@@ -1,0 +1,19 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "beforeDevCommand": "python ../scripts/stage_desktop.py",
+    "beforeBuildCommand": "python ../scripts/stage_desktop.py"
+  },
+  "bundle": {
+    "targets": ["nsis"],
+    "longDescription": "OpenMyMemo keeps what AI assistants know about you in a folder of Markdown files on your computer. Claude, Codex, Cursor and other apps read it and write what they learn; you see every change and can undo it.",
+    "externalBin": ["binaries/uv", "binaries/openmymemo-launcher"],
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
+      "nsis": {
+        "installMode": "currentUser",
+        "installerIcon": "icons/icon.ico"
+      }
+    }
+  }
+}
