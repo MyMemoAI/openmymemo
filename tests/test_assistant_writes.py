@@ -458,7 +458,7 @@ def test_hook_asks_first_and_does_nothing_without_consent(vault, fake):
     assert not fake.requests  # the hook itself never calls the model
 
 
-@pytest.mark.parametrize("stdin", ["", "not json", "[1, 2]", "{" * 70_000])
+@pytest.mark.parametrize("stdin", ["", "not json", "[1, 2]", "{" * 70_000], ids=["empty", "text", "list", "huge"])
 def test_hook_is_silent_and_never_fails(vault, stdin):
     turn_on(vault)
     save_settings(features={"session": True}, session_apps={"claude-code": "allowed"})

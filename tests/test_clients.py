@@ -786,7 +786,8 @@ def test_detection_finds_bundles_commands_in_bundles_and_config_folders(vault, e
     assert found == {"cursor", "jetbrains", "vscode", "codex", "opencode"}
     fake_cli(env, "gemini")
     assert clients.app_status(vault, clients.get("gemini-cli"), env)["installed"]
-    assert clients.find_command(clients.get("vscode"), env) == code
+    found = clients.find_command(clients.get("vscode"), env)
+    assert os.path.normcase(found) == os.path.normcase(f"{code}{'.exe' if os.name == 'nt' else ''}")
 
 
 def test_settings_left_behind_by_an_uninstall_dont_count_as_installed(vault, env, tmp_path):
@@ -824,8 +825,8 @@ def test_env_current_looks_beyond_the_shell_path(tmp_path, monkeypatch):
     env = clients.Env.current(tmp_path)
     dirs = [str(d) for d in env.bin_dirs]
     assert dirs[0] == str(Path("/usr/bin"))
-    for d in (tmp_path / ".local/bin", Path("/opt/homebrew/bin"), tmp_path / ".bun/bin",
-              tmp_path / ".nvm/versions/node/v22.0.0/bin"):
+    homebrew = () if os.name == "nt" else (Path("/opt/homebrew/bin"),)
+    for d in (tmp_path / ".local/bin", *homebrew, tmp_path / ".bun/bin", tmp_path / ".nvm/versions/node/v22.0.0/bin"):
         assert str(d) in dirs
     assert env.codex_home == tmp_path / ".codex"
 
@@ -841,8 +842,9 @@ def test_manual_apps_get_a_snippet_and_their_install_link(vault, env):
 
     trae = clients.connect(vault, "trae", env)
     assert trae.link["url"].startswith("trae://trae.ai-ide/mcp-import?type=stdio&name=openmymemo&config=")
-    assert clients._no_spaces(["/Library/Application Support/x/openmymemo", "mcp"]) == {
-        "command": "/bin/sh", "args": ["-c", 'exec "$0" "$@"', "/Library/Application Support/x/openmymemo", "mcp"]}
+    spaced = ["/Library/Application Support/x/openmymemo", "mcp"]
+    assert clients._no_spaces(spaced) == ({"command": spaced[0], "args": ["mcp"]} if os.name == "nt" else {
+        "command": "/bin/sh", "args": ["-c", 'exec "$0" "$@"', *spaced]})  # Windows has no /bin/sh
 
     cursor = clients.setup(vault, "cursor", env)
     assert cursor["link"]["url"].startswith("cursor://anysphere.cursor-deeplink/mcp/install?name=openmymemo&config=")
