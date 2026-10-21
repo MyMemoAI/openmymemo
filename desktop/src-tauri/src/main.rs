@@ -1,4 +1,5 @@
-//! OpenMyMemo for Mac: a window with the panel, a menu-bar item, and the Python core behind both.
+//! OpenMyMemo for Mac and Windows: a window with the panel, a menu-bar (or notification area) item, and the
+//! Python core behind both.
 //!
 //! The window first shows the bundled setup page (../splash), then the panel from the local server at
 //! `http://127.0.0.1:<port>/?desktop=1`, which switches the panel to its Mac layout. A monitor thread
@@ -6,11 +7,19 @@
 //! menu-bar icon, and notifies when an AI app changes something or something starts waiting.
 //! Closing the window keeps the app in the menu bar; it quits from the menu. On every start it writes the
 //! `openmymemo` launcher AI apps run (launcher.rs), and opened from its disk image it offers to move itself
-//! to Applications (install.rs).
+//! to Applications (install.rs). On Windows it installs the launcher program instead (winlauncher.rs), and
+//! the installer puts the app in place.
+
+// A release build on Windows is a windowed program, with no console window of its own.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod core;
+#[cfg(not(windows))]
 mod install;
+#[cfg(not(windows))]
 mod launcher;
+#[cfg(windows)]
+mod winlauncher;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -20,12 +29,18 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tauri::image::Image;
-use tauri::menu::{Menu, MenuBuilder, MenuItem, MenuItemBuilder, SubmenuBuilder};
+use tauri::menu::{MenuBuilder, MenuItem, MenuItemBuilder};
+#[cfg(target_os = "macos")]
+use tauri::menu::{Menu, SubmenuBuilder};
 use tauri::tray::{TrayIcon, TrayIconBuilder};
 use tauri::webview::{DownloadEvent, NewWindowResponse};
-use tauri::{AppHandle, LogicalPosition, Manager, RunEvent, TitleBarStyle, Url, WebviewUrl, WebviewWindow, WindowEvent};
+use tauri::{AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindow, WindowEvent};
+#[cfg(target_os = "macos")]
+use tauri::{LogicalPosition, TitleBarStyle};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
-use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+use tauri_plugin_dialog::DialogExt;
+#[cfg(not(windows))]
+use tauri_plugin_dialog::{MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_notification::NotificationExt;
 
 use crate::core::{Core, Counts, Paths, Proposal};
@@ -121,7 +136,8 @@ fn default_vault() -> PathBuf {
 }
 
 fn dirs_home() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
+    let var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    std::env::var_os(var).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
 }
 
 fn load_settings(path: &Path) -> Settings {
@@ -225,8 +241,26 @@ fn splash_status(app: &AppHandle, status: &str, detail: &str, kind: &str) {
 
 #[tauri::command]
 fn reveal_path(path: String) -> Result<(), String> {
-    let shown = to_reveal(Path::new(&path))?;
-    std::process::Command::new("/usr/bin/open").arg("-R").arg(shown).status().map(|_| ()).map_err(|e| e.to_string())
+    reveal(&to_reveal(Path::new(&path))?)
+}
+
+/// Show `path` selected in the Finder (`open -R`) or File Explorer (`/select,`), never opening it.
+fn reveal(path: &Path) -> Result<(), String> {
+    #[cfg(not(windows))]
+    let shown = std::process::Command::new("/usr/bin/open").arg("-R").arg(path).status();
+    // Explorer takes `/select,"<path>"` as one argument, quoted its own way; it exits with 1 even when it worked.
+    #[cfg(windows)]
+    let shown = {
+        use std::os::windows::process::CommandExt;
+        std::process::Command::new(windows_program("explorer.exe")).raw_arg(format!("/select,\"{}\"", path.display())).status()
+    };
+    shown.map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// A program in the Windows folder, by its full path so a file of the same name elsewhere is never run.
+#[cfg(windows)]
+fn windows_program(name: &str) -> PathBuf {
+    std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows")).join(name)
 }
 
 /// What `open -R` selects in the Finder for `path`: the item itself, or for a file not written yet (the log
@@ -389,9 +423,16 @@ fn update_badge(app: &AppHandle, counts: &Counts) {
 
 // ---- moving to Applications -------------------------------------------------------------------------
 
+/// On Windows the installer puts the app in place.
+#[cfg(windows)]
+fn offer_move(_app: &AppHandle) -> bool {
+    false
+}
+
 /// Opened from its disk image or a translocated copy, offer to move the app to Applications. Returns true
 /// when the app is quitting to reopen from there. Only when macOS opened it as an app (the Finder, the Dock,
 /// `open`), which says so in __CFBundleIdentifier: running the binary from a terminal is left alone.
+#[cfg(not(windows))]
 fn offer_move(app: &AppHandle) -> bool {
     if std::env::var_os("__CFBundleIdentifier").map_or(true, |id| id != launcher::BUNDLE_ID) {
         return false;
@@ -529,6 +570,7 @@ fn monitor(app: AppHandle, paths: Paths) {
 
 // ---- menus ------------------------------------------------------------------------------------------
 
+#[cfg(target_os = "macos")]
 fn app_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let item = |id: &str, label: &str, accel: &str| {
         MenuItemBuilder::with_id(id, label).accelerator(accel).build(app)
@@ -582,7 +624,9 @@ fn on_menu(app: &AppHandle, id: &str) {
             }
         }
         "help" => {
-            let _ = std::process::Command::new("/usr/bin/open").arg("https://github.com/MyMemoAI/openmymemo").status();
+            if let Ok(url) = Url::parse("https://github.com/MyMemoAI/openmymemo") {
+                open_outside(&url);
+            }
         }
         "open" => show_window(app),
         "review" => open_panel_at(app, "#/changes"),
@@ -599,9 +643,14 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
         .separator()
         .text("quit", "Quit OpenMyMemo")
         .build()?;
+    // A template image on a Mac, which the menu bar tints; the app icon in the Windows notification area.
+    #[cfg(not(windows))]
+    let icon = Image::from_bytes(include_bytes!("../icons/tray.png"))?;
+    #[cfg(windows)]
+    let icon = Image::from_bytes(include_bytes!("../icons/32x32.png"))?;
     let tray = TrayIconBuilder::with_id("main")
-        .icon(Image::from_bytes(include_bytes!("../icons/tray.png"))?)
-        .icon_as_template(true)
+        .icon(icon)
+        .icon_as_template(cfg!(not(windows)))
         .tooltip("OpenMyMemo")
         .menu(&menu)
         .show_menu_on_left_click(true)
@@ -649,8 +698,14 @@ fn link(url: &Url, splash: Option<&Url>, port: u16) -> Link {
     if opens_outside(url) { Link::Open } else { Link::Block }
 }
 
+/// Hand a link to the system: the browser, the mail app, or the AI app that installs it. Only links that
+/// `opens_outside` allows get here, so File Explorer never gets a path or a program to start.
 fn open_outside(url: &Url) {
-    let _ = std::process::Command::new("/usr/bin/open").arg(url.as_str()).stdin(std::process::Stdio::null()).spawn();
+    #[cfg(not(windows))]
+    let program = PathBuf::from("/usr/bin/open");
+    #[cfg(windows)]
+    let program = windows_program("explorer.exe");
+    let _ = std::process::Command::new(program).arg(url.as_str()).stdin(std::process::Stdio::null()).spawn();
 }
 
 /// Only the setup page and the panel load in the window; links out open in the browser or the AI app.
@@ -678,24 +733,27 @@ fn on_new_window(url: &Url) -> NewWindowResponse<tauri::Wry> {
 fn build_window(app: &AppHandle, visible: bool) -> tauri::Result<WebviewWindow> {
     let shared = app.state::<Arc<Shared>>().inner().clone();
     let theme = shared.settings.lock().unwrap().appearance.theme();
-    let window = tauri::WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+    let builder = tauri::WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         .title("OpenMyMemo")
         // Applied as the window is created, before it shows, so a chosen appearance doesn't flash.
         .theme(theme)
         .inner_size(1280.0, 860.0)
-        .min_inner_size(900.0, 560.0)
+        .min_inner_size(900.0, 560.0);
+    #[cfg(target_os = "macos")]
+    let builder = builder
         .title_bar_style(TitleBarStyle::Overlay)
         .hidden_title(true)
         // tao sizes the title bar to the buttons' height + y and keeps their bottom offset, so y = 28 puts
         // their centre at 26 pt, the middle of the 52 pt toolbar and sidebar strip.
-        .traffic_light_position(LogicalPosition::new(20.0, 28.0))
+        .traffic_light_position(LogicalPosition::new(20.0, 28.0));
+    let window = builder
         .visible(visible)
         .on_navigation(move |url| allow_navigation(&shared, url))
         .on_new_window(|url, _| on_new_window(&url))
-        // Export → Download: saved to ~/Downloads under the suggested name, then shown in Finder.
+        // Export → Download: saved to Downloads under the suggested name, then shown in the Finder or Explorer.
         .on_download(|_, event| {
             if let DownloadEvent::Finished { path: Some(path), success: true, .. } = event {
-                let _ = std::process::Command::new("/usr/bin/open").arg("-R").arg(path).status();
+                let _ = reveal(&path);
             }
             true
         })
@@ -714,7 +772,29 @@ fn build_window(app: &AppHandle, visible: bool) -> tauri::Result<WebviewWindow> 
     Ok(window)
 }
 
+/// Install the launcher program AI apps run, with how to set up this build when no environment is ready.
+#[cfg(windows)]
+fn write_launcher(paths: &Paths, exe_dir: &Path) {
+    let written = paths.build_env().and_then(|(_, environment)| {
+        let uv_env = core::uv_env(paths);
+        winlauncher::Launcher {
+            path: &paths.launcher,
+            program: &exe_dir.join("openmymemo-launcher.exe"),
+            uv: &paths.uv,
+            project: &paths.project,
+            environment: &environment,
+            uv_env: &uv_env,
+            uv_args: &core::UV_ARGS,
+        }
+        .write()
+    });
+    if let Err(e) = written {
+        eprintln!("OpenMyMemo: {e}");
+    }
+}
+
 /// Write the launcher AI apps run. It looks for this app where it is now, then in the Applications folders.
+#[cfg(not(windows))]
 fn write_launcher(app: &AppHandle, paths: &Paths, bundle: Option<&Path>) {
     let search = [Path::new("/Applications").join(launcher::APP_NAME), dirs_home().join("Applications").join(launcher::APP_NAME)];
     let version = app.package_info().version.to_string();
@@ -736,6 +816,7 @@ fn write_launcher(app: &AppHandle, paths: &Paths, bundle: Option<&Path>) {
 }
 
 /// A quit by signal (kill, Ctrl-C in a terminal) skips RunEvent::Exit; stop the server there too.
+#[cfg(unix)]
 extern "C" fn on_signal(sig: libc::c_int) {
     core::stop_child();
     unsafe {
@@ -745,12 +826,17 @@ extern "C" fn on_signal(sig: libc::c_int) {
 }
 
 fn main() {
+    #[cfg(unix)]
     for sig in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP] {
         unsafe {
             libc::signal(sig, on_signal as extern "C" fn(libc::c_int) as libc::sighandler_t);
         }
     }
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // macOS opens an app once; on Windows, starting it again shows the window of the one already running.
+    #[cfg(windows)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| show_window(app)));
+    let builder = builder
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec![HIDDEN_ARG])))
@@ -762,26 +848,43 @@ fn main() {
             set_notifications,
             choose_vault,
             retry_start
-        ])
-        .menu(|app| app_menu(app))
-        .on_menu_event(|app, event| on_menu(app, event.id().as_ref()))
+        ]);
+    // The Mac menu bar. On Windows the window has no menu bar: the panel is the app, and its shortcuts work
+    // without one.
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(|app| app_menu(app)).on_menu_event(|app, event| on_menu(app, event.id().as_ref()));
+    builder
         .setup(|app| {
             let handle = app.handle().clone();
             let path = app.path();
-            let support = path.app_data_dir()?;
+            // Windows: everything in Local AppData, which isn't copied between computers with a roaming
+            // profile, and uv's cache in a folder of its own there (the app's cache folder is the same folder).
+            #[cfg(windows)]
+            let (support, cache) = {
+                let local = path.app_local_data_dir()?;
+                (local.clone(), local.join("cache"))
+            };
+            #[cfg(not(windows))]
+            let (support, cache) = (path.app_data_dir()?, path.app_cache_dir()?);
             let settings_path = support.join("settings.json");
 
             // The bundled uv sits next to the executable; the package source is a resource.
             let exe = std::env::current_exe()?;
             let exe_dir = exe.parent().map(PathBuf::from).unwrap_or_default();
             let paths = Paths {
-                uv: exe_dir.join("uv"),
+                uv: exe_dir.join(format!("uv{}", std::env::consts::EXE_SUFFIX)),
                 project: path.resource_dir()?.join("core"),
+                #[cfg(windows)]
+                launcher: winlauncher::path(&support),
+                #[cfg(not(windows))]
                 launcher: support.join("bin/openmymemo"),
                 support,
-                cache: path.app_cache_dir()?,
+                cache,
                 log: path.app_log_dir()?.join("core.log"),
             };
+            #[cfg(windows)]
+            write_launcher(&paths, &exe_dir);
+            #[cfg(not(windows))]
             write_launcher(&handle, &paths, launcher::bundle_of(&exe).as_deref());
 
             let shared = Arc::new(Shared::new(settings_path, paths.launcher.clone(), paths.log.clone()));
@@ -798,9 +901,10 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("error while building OpenMyMemo")
-        .run(|app, event| match event {
+        .run(|_app, event| match event {
             // Clicking the Dock icon brings the window back.
-            RunEvent::Reopen { .. } => show_window(app),
+            #[cfg(target_os = "macos")]
+            RunEvent::Reopen { .. } => show_window(_app),
             RunEvent::Exit => core::stop_child(),
             _ => {}
         });

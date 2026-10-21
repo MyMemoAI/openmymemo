@@ -2,6 +2,11 @@
 
 What changed in each release, for people who use OpenMyMemo. Every release is also on [GitHub](https://github.com/MyMemoAI/openmymemo/releases).
 
+## Unreleased
+
+- **The app on Windows (preview).** Each release has an installer for Windows 10 and 11, `OpenMyMemo-<version>-x64-setup.exe`. It installs for your user without an administrator, keeps OpenMyMemo in the notification area, and connects your AI apps like the Mac app. It isn't signed yet, so SmartScreen asks once before it runs.
+- `uvx openmymemo`, `uv tool install openmymemo` and the AI apps' plugins work on Windows, and every change is now tested there.
+
 ## 0.2.9 — 2026-10-19
 
 - **OpenMyMemo Cloud: your memory in ChatGPT and claude.ai on the web.** MyMemo Cloud is now called OpenMyMemo Cloud, and it is listed on the Connectors page, under "On the web", for everyone. With MyMemo Pro, Ultra or Lifetime, sign in there (or run `openmymemo cloud link`), then add the URL it shows as a custom connector in claude.ai or in ChatGPT. MyMemo relays their calls to OpenMyMemo on your computer: your memory stays there, and the web apps reach it only while OpenMyMemo is running. Listed, it does nothing and contacts nobody until you sign in, and you can hide it in Settings → OpenMyMemo Cloud. It is listed even if you had turned "Show MyMemo Cloud" off before, because older versions saved off as their default too; turn it off again to hide it. `openmymemo connect mymemo-cloud` and the other commands keep their names.

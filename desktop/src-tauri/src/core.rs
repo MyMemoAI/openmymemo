@@ -20,8 +20,14 @@ use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom};
 use std::ops::Range;
+#[cfg(unix)]
 use std::os::fd::AsRawFd;
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
+#[cfg(windows)]
+use std::os::windows::fs::OpenOptionsExt;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -195,25 +201,35 @@ pub struct Paths {
     pub uv: PathBuf,
     /// The bundled package source (pyproject.toml, uv.lock, src/).
     pub project: PathBuf,
-    /// ~/Library/Application Support/<id>: the virtual environment and Python live here.
+    /// ~/Library/Application Support/<id> (on Windows %LOCALAPPDATA%\<id>): the environments and Python live here.
     pub support: PathBuf,
-    /// ~/Library/Caches/<id>: uv's download cache.
+    /// ~/Library/Caches/<id> (on Windows support\cache): uv's download cache.
     pub cache: PathBuf,
     /// ~/Library/Logs/<id>/core.log: the server's output.
     pub log: PathBuf,
-    /// support/bin/openmymemo, the command AI apps run (launcher.rs); the server gets it as OPENMYMEMO_COMMAND.
+    /// support/bin/openmymemo (openmymemo.exe on Windows), the command AI apps run (launcher.rs, winlauncher.rs);
+    /// the server gets it as OPENMYMEMO_COMMAND.
     pub launcher: PathBuf,
 }
 
 /// Written last into an environment that uv finished, holding the package version.
 pub const READY: &str = ".openmymemo-ready";
 
-impl Paths {
-    /// The link to the current environment, which the launcher runs.
-    pub fn venv(&self) -> PathBuf {
-        self.support.join("venv")
-    }
+/// On Windows, the name of the current environment under venvs/: a file instead of the `venv` link, because
+/// making a symbolic link there takes Developer Mode or an administrator.
+#[cfg(windows)]
+pub const CURRENT: &str = "current-env";
 
+/// A program in an environment: bin/<name> on macOS, Scripts\<name>.exe on Windows.
+pub fn env_bin(dir: &Path, name: &str) -> PathBuf {
+    if cfg!(windows) {
+        dir.join("Scripts").join(format!("{name}.exe"))
+    } else {
+        dir.join("bin").join(name)
+    }
+}
+
+impl Paths {
     /// The bundled build's own environment folder: its version and pyproject.toml's modification time,
     /// which stage_desktop.py sets when it stages a build (the launcher computes the same name).
     pub fn build_env(&self) -> Result<(String, PathBuf), String> {
@@ -233,19 +249,37 @@ impl Paths {
 
     /// The current environment, if it is complete.
     pub fn current(&self) -> Option<PathBuf> {
-        let dir = fs::canonicalize(self.venv()).ok()?;
+        let dir = current_dir(&self.support)?;
         is_ready(&dir).then_some(dir)
     }
 }
 
 /// An environment uv finished: the marker is written after the install succeeded.
 pub fn is_ready(dir: &Path) -> bool {
-    dir.join(READY).is_file() && dir.join("bin/python").exists() && dir.join("bin/openmymemo").is_file()
+    dir.join(READY).is_file() && env_bin(dir, "python").exists() && env_bin(dir, "openmymemo").is_file()
+}
+
+/// The folder the current environment's link points to.
+#[cfg(unix)]
+fn current_dir(support: &Path) -> Option<PathBuf> {
+    fs::canonicalize(support.join("venv")).ok()
+}
+
+/// The folder named in `current-env`, only ever a folder directly under venvs/.
+#[cfg(windows)]
+fn current_dir(support: &Path) -> Option<PathBuf> {
+    let name = fs::read_to_string(support.join(CURRENT)).ok()?;
+    let name = name.trim();
+    if name.is_empty() || name.contains(['/', '\\', ':']) || name.starts_with('.') {
+        return None;
+    }
+    fs::canonicalize(support.join("venvs").join(name)).ok()
 }
 
 /// Make `dir` (under support/venvs) the current environment: a new link renamed over `venv`, so the
 /// launcher sees the old one or the new one. Returns the environment that was current. A `venv` folder
 /// from before environments were per build is moved into venvs/ first.
+#[cfg(unix)]
 fn make_current(support: &Path, dir: &Path) -> std::io::Result<Option<PathBuf>> {
     let link = support.join("venv");
     let previous = match fs::symlink_metadata(&link) {
@@ -270,16 +304,55 @@ fn make_current(support: &Path, dir: &Path) -> std::io::Result<Option<PathBuf>> 
     Ok(previous)
 }
 
+/// Make `dir` current on Windows: its name written to a temporary file renamed over `current-env`.
+#[cfg(windows)]
+fn make_current(support: &Path, dir: &Path) -> std::io::Result<Option<PathBuf>> {
+    let previous = current_dir(support);
+    let name = dir.file_name().and_then(|n| n.to_str()).ok_or_else(|| std::io::Error::other("no environment name"))?;
+    let tmp = support.join(format!(".{CURRENT}.{}.tmp", std::process::id()));
+    fs::write(&tmp, format!("{name}\n"))?;
+    fs::rename(&tmp, support.join(CURRENT))?;
+    Ok(previous)
+}
+
 /// The file every `openmymemo` process started from an environment under venvs/ holds a shared lock on
 /// (`flock`, cli.py's `_hold_environment`) for as long as it runs; the lock goes away with the process.
+/// On Windows the process keeps the file open instead.
 pub const IN_USE: &str = ".openmymemo-in-use";
 
 /// Whether no process runs from `dir`. If so, the returned file (when there is one) holds the lock
 /// exclusively, so a process starting meanwhile doesn't take it, until it is dropped.
+#[cfg(unix)]
 fn unused(dir: &Path) -> Option<Option<File>> {
     let Ok(file) = File::open(dir.join(IN_USE)) else { return Some(None) };
     let free = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0;
     free.then_some(Some(file))
+}
+
+/// On Windows: the file opens without sharing reads or writes only while no process has it open, and then
+/// keeps others from opening it until it is dropped. Deleting is shared, so the folder can be removed with it.
+#[cfg(windows)]
+fn unused(dir: &Path) -> Option<Option<File>> {
+    const FILE_SHARE_DELETE: u32 = 0x4;
+    match OpenOptions::new().read(true).share_mode(FILE_SHARE_DELETE).open(dir.join(IN_USE)) {
+        Ok(file) => Some(Some(file)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(None),
+        Err(_) => None,
+    }
+}
+
+/// Windows: no console window for a program the app starts, and its own process group.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+#[cfg(windows)]
+const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+
+/// Start `cmd` in its own process group, so stop_child can stop it with what it starts (uv and Python).
+fn own_group(cmd: &mut Command) -> &mut Command {
+    #[cfg(unix)]
+    return cmd.process_group(0);
+    #[cfg(windows)]
+    return cmd.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
 }
 
 /// Remove environments other than `keep` (the current one and the one before it) that no process runs
@@ -327,8 +400,21 @@ static CHILD_PGID: AtomicI32 = AtomicI32::new(0);
 pub fn stop_child() {
     let pgid = CHILD_PGID.swap(0, Ordering::SeqCst);
     if pgid > 0 {
+        #[cfg(unix)]
         unsafe {
             libc::kill(-pgid, libc::SIGTERM);
+        }
+        // Windows has no signal for another process group: end the process and everything it started.
+        #[cfg(windows)]
+        {
+            let system = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+            let _ = Command::new(system.join(r"System32\taskkill.exe"))
+                .args(["/T", "/F", "/PID", &pgid.to_string()])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .creation_flags(CREATE_NO_WINDOW)
+                .status();
         }
     }
 }
@@ -451,14 +537,13 @@ impl Core {
             if offline {
                 cmd.arg("--offline");
             }
-            let mut child = cmd
+            let mut child = own_group(&mut cmd)
                 .envs(uv_env(p))
                 .env("UV_PROJECT_ENVIRONMENT", dir)
                 .env_remove("VIRTUAL_ENV")
                 .stdin(Stdio::null())
                 .stdout(log.try_clone().map_err(|e| e.to_string())?)
                 .stderr(log.try_clone().map_err(|e| e.to_string())?)
-                .process_group(0)
                 .spawn()
                 .map_err(|e| format!("Can't start {}: {e}", p.uv.display()))?;
             CHILD_PGID.store(child.id() as i32, Ordering::SeqCst);
@@ -509,7 +594,8 @@ impl Core {
         let log = self.prepare_dirs()?;
         let env = self.ready.as_ref().ok_or("OpenMyMemo isn't installed yet.")?;
         // From the environment's real folder, so the server keeps its version when `venv` moves on.
-        let child = Command::new(env.join("bin/openmymemo"))
+        let mut cmd = Command::new(env_bin(env, "openmymemo"));
+        let child = own_group(&mut cmd)
             .arg("--vault")
             .arg(&self.vault)
             // --init: a first launch creates the vault in a missing or empty folder (and refuses any other).
@@ -523,7 +609,6 @@ impl Core {
             .stdin(Stdio::null())
             .stdout(log.try_clone().map_err(|e| e.to_string())?)
             .stderr(log)
-            .process_group(0)
             .spawn()
             .map_err(|e| format!("Can't start the local server: {e}"))?;
         CHILD_PGID.store(child.id() as i32, Ordering::SeqCst);
@@ -602,7 +687,10 @@ fn has_python(p: &Paths) -> bool {
 }
 
 fn setup_message(p: &Paths) -> (&'static str, &'static str) {
+    #[cfg(not(windows))]
     const FIRST: &str = "The first start downloads Python and the libraries OpenMyMemo runs on (about 25 MB) into your Library folder. It usually takes under a minute and happens only once.";
+    #[cfg(windows)]
+    const FIRST: &str = "The first start downloads Python and the libraries OpenMyMemo runs on (about 25 MB) into your AppData folder. It usually takes under a minute and happens only once.";
     if p.current().is_some() {
         return ("Updating OpenMyMemo…", "Getting this version ready. It takes a few seconds.");
     }
@@ -635,7 +723,8 @@ pub fn check_folder(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(test)]
+// The tests start stand-ins for uv and the server written as shell scripts.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::io::Write;
@@ -1004,3 +1093,57 @@ http.server.HTTPServer(("127.0.0.1", int(sys.argv[2])), State).serve_forever()
     }
 }
 
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    fn support(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("openmymemo-desktop-{}-{name}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("venvs")).unwrap();
+        root
+    }
+
+    fn ready_env(support: &Path, name: &str) -> PathBuf {
+        let dir = support.join("venvs").join(name);
+        fs::create_dir_all(dir.join("Scripts")).unwrap();
+        for program in ["python", "openmymemo"] {
+            fs::write(env_bin(&dir, program), "").unwrap();
+        }
+        fs::write(dir.join(READY), "1.0.0\n").unwrap();
+        dir
+    }
+
+    #[test]
+    fn the_current_environment_is_named_in_a_file() {
+        let support = support("current");
+        let first = ready_env(&support, "1.0.0-1");
+        let second = ready_env(&support, "1.0.1-2");
+        assert_eq!(current_dir(&support), None);
+        assert_eq!(make_current(&support, &first).unwrap(), None);
+        assert_eq!(current_dir(&support), fs::canonicalize(&first).ok());
+        assert_eq!(make_current(&support, &second).unwrap(), fs::canonicalize(&first).ok());
+        assert_eq!(fs::read_to_string(support.join(CURRENT)).unwrap(), "1.0.1-2\n");
+        let names: Vec<_> = fs::read_dir(&support).unwrap().flatten().map(|e| e.file_name()).collect();
+        assert_eq!(names.len(), 2, "no temporary file left: {names:?}");
+        for outside in ["..", "..\\elsewhere", "C:\\Windows", ".hidden", ""] {
+            fs::write(support.join(CURRENT), outside).unwrap();
+            assert_eq!(current_dir(&support), None, "{outside:?}");
+        }
+    }
+
+    #[test]
+    fn an_environment_a_process_holds_open_is_kept() {
+        let support = support("in-use");
+        let old = ready_env(&support, "1.0.0-1");
+        let keep = ready_env(&support, "1.0.1-2");
+        fs::write(old.join(IN_USE), "").unwrap();
+        let held = File::open(old.join(IN_USE)).unwrap(); // as cli.py's _hold_environment does on Windows
+        collect_garbage(&support.join("venvs"), &[&keep]);
+        assert!(old.exists(), "in use");
+        drop(held);
+        collect_garbage(&support.join("venvs"), &[&keep]);
+        assert!(!old.exists() && keep.exists());
+    }
+}

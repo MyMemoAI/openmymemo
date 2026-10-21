@@ -13,7 +13,8 @@ concurrency:
   cancel-in-progress: true
 
 # Linux tests the oldest and newest Python we support, macOS (Apple silicon and Intel) the middle one together with
-# the Mac app, Windows the middle one too, and the panel job checks the committed build and packs the extension.
+# the Mac app, Windows the middle one too (and the Windows app in a job of its own), and the panel job checks the
+# committed build and packs the extension.
 jobs:
   linux:
     name: Python tests (Linux, 3.11 and 3.13)
@@ -85,6 +86,42 @@ jobs:
             uv run --frozen python scripts/annotate_failures.py report.xml || true
           fi
           exit "$status"
+
+  windows-app:
+    # The Windows app: its tests and the launcher's, then the installer (unsigned), kept for a week to try out.
+    name: Windows app
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+      - run: python scripts/stage_desktop.py  # the bundled core, uv and launcher, which the Tauri build checks for
+      - run: cargo test --locked
+        working-directory: desktop/launcher
+      - run: cargo test --locked
+        working-directory: desktop/src-tauri
+      - run: pnpm install --frozen-lockfile
+        working-directory: desktop
+      - run: pnpm tauri build --bundles nsis
+        working-directory: desktop
+      - uses: actions/upload-artifact@v7
+        with:
+          name: openmymemo-windows-installer
+          path: desktop/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+          retention-days: 7
 
   panel:
     name: Panel build and extension

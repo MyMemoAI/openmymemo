@@ -1,6 +1,6 @@
 name: Release
 
-# Push a tag named after the version (v0.2.2) to publish the Mac app, the Claude Desktop extension and the
+# Push a tag named after the version (v0.2.2) to publish the Mac and Windows apps, the Claude Desktop extension and the
 # Python package as a GitHub release, the Python package on PyPI, and server.json on the MCP Registry. The version
 # must already be bumped everywhere (tests/test_packaging.py).
 # The release is created once every file is built, so it never lacks the disk image; if a job fails, nothing
@@ -129,8 +129,59 @@ jobs:
           path: dist/*.dmg
           if-no-files-found: error
 
+  windows:
+    name: Windows app
+    # Builds OpenMyMemo-<version>-x64-setup.exe, an installer for the current user that needs no administrator.
+    # It isn't signed yet, so Windows SmartScreen asks once before it runs (README).
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+      - name: The tag matches the version
+        run: |
+          version=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match version $version in pyproject.toml."
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7; stage_desktop.py bundles this uv
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6
+        with:
+          version: 10
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: desktop
+      - name: Build the app and the installer
+        working-directory: desktop
+        run: pnpm tauri build --bundles nsis
+      - name: Name the installer
+        run: |
+          installers=(desktop/src-tauri/target/release/bundle/nsis/OpenMyMemo_"${VERSION}"_*-setup.exe)
+          if [ "${#installers[@]}" -ne 1 ] || [ ! -f "${installers[0]}" ]; then
+            echo "::error::Expected one installer, found: ${installers[*]}"
+            exit 1
+          fi
+          mkdir -p dist
+          cp "${installers[0]}" "dist/OpenMyMemo-${VERSION}-x64-setup.exe"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
+        with:
+          name: openmymemo-windows
+          path: dist/*.exe
+          if-no-files-found: error
+
   release:
-    needs: mac
+    needs: [mac, windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write  # gh release create
@@ -158,11 +209,15 @@ jobs:
           pattern: openmymemo-dmg-*
           merge-multiple: true
           path: dist
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7
+        with:
+          name: openmymemo-windows
+          path: dist
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/*.dmg dist/*.mcpb dist/*.whl dist/*.tar.gz \
+          gh release create "$GITHUB_REF_NAME" dist/*.dmg dist/*.exe dist/*.mcpb dist/*.whl dist/*.tar.gz \
             --title "OpenMyMemo ${GITHUB_REF_NAME#v}" --generate-notes
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
