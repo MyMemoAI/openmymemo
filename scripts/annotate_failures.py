@@ -3,7 +3,8 @@ run without opening its log:
 
     uv run pytest --junitxml=report.xml || python scripts/annotate_failures.py report.xml
 
-Exits 1 when the report has failures (or can't be read), so the step still fails.
+Exits 1 when the report has failures or can't be read, else 0. A pytest run can fail without either (interrupted,
+or no tests collected), so the CI step exits with pytest's own status, not this one's.
 """
 
 import sys

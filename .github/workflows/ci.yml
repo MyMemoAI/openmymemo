@@ -73,7 +73,14 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
-      - run: uv run --frozen pytest --junitxml=report.xml || uv run --frozen python scripts/annotate_failures.py report.xml
+      - name: Tests (a failing test is also printed as an annotation)
+        run: |
+          status=0
+          uv run --frozen pytest --junitxml=report.xml || status=$?
+          if [ "$status" -ne 0 ]; then
+            uv run --frozen python scripts/annotate_failures.py report.xml || true
+          fi
+          exit "$status"
 
   panel:
     name: Panel build and extension
