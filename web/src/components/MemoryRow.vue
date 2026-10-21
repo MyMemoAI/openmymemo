@@ -71,6 +71,7 @@ const move = (topic: string) => patch({ topic });
         v-model="draft"
         rows="2"
         class="input text-[15px]"
+        :aria-label="t('mem.text')"
         @input="typed++"
         @keydown="onKey"
         @blur="save"

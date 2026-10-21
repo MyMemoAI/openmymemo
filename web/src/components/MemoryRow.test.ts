@@ -40,6 +40,11 @@ describe("editing a memory in the list", () => {
     store.toast = null;
   });
 
+  it("names the edit box for screen readers", async () => {
+    const w = mount(MemoryRow, { props: { memory: memory("A") } });
+    expect((await edit(w)).attributes("aria-label")).toBe("Memory text");
+  });
+
   it("writes nothing when the edit box is left without typing, even if another app changed the memory", async () => {
     const w = mount(MemoryRow, { props: { memory: memory("A") } });
     const box = await edit(w);
