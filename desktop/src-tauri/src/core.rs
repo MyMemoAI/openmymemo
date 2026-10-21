@@ -329,11 +329,12 @@ fn unused(dir: &Path) -> Option<Option<File>> {
     free.then_some(Some(file))
 }
 
-/// On Windows: the file opens with no sharing only while no process has it open, and then keeps others
-/// from opening it until it is dropped.
+/// On Windows: the file opens without sharing reads or writes only while no process has it open, and then
+/// keeps others from opening it until it is dropped. Deleting is shared, so the folder can be removed with it.
 #[cfg(windows)]
 fn unused(dir: &Path) -> Option<Option<File>> {
-    match OpenOptions::new().read(true).share_mode(0).open(dir.join(IN_USE)) {
+    const FILE_SHARE_DELETE: u32 = 0x4;
+    match OpenOptions::new().read(true).share_mode(FILE_SHARE_DELETE).open(dir.join(IN_USE)) {
         Ok(file) => Some(Some(file)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(None),
         Err(_) => None,

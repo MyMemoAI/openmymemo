@@ -1603,8 +1603,8 @@ _env_lock: int | None = None
 
 def _hold_environment(prefix: str | None = None) -> None:
     """Hold the shared lock on ENV_LOCK in the desktop app's environment this process runs from, if it does.
-    On Windows the file just stays open: the app removes an environment only when it can open the file with
-    no sharing (desktop/src-tauri/src/core.rs)."""
+    On Windows the file just stays open: the app removes an environment only when it can open the file
+    without sharing reads or writes (desktop/src-tauri/src/core.rs)."""
     global _env_lock
     env = Path(prefix if prefix is not None else sys.prefix)
     if (prefix is None and sys.prefix == sys.base_prefix) or env.parent.name != "venvs":

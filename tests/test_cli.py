@@ -298,8 +298,8 @@ def test_a_process_from_a_windows_app_environment_keeps_its_file_open(tmp_path, 
                        wintypes.DWORD, wintypes.HANDLE]
     try:
         assert cli._env_lock is not None
-        # What the app's clean-up tries (core.rs): open it with no sharing.
-        handle = create(str(env / cli.ENV_LOCK), 0x80000000, 0, None, 3, 0, None)
+        # What the app's clean-up tries (core.rs): open it sharing only deletion.
+        handle = create(str(env / cli.ENV_LOCK), 0x80000000, 0x4, None, 3, 0, None)
         assert handle == wintypes.HANDLE(-1).value and ctypes.get_last_error() == 32  # a sharing violation
     finally:
         os.close(cli._env_lock)
