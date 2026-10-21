@@ -18,6 +18,7 @@ mod core;
 mod install;
 #[cfg(not(windows))]
 mod launcher;
+mod updates;
 #[cfg(windows)]
 mod winlauncher;
 
@@ -25,7 +26,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use tauri::image::Image;
@@ -79,6 +80,8 @@ struct Settings {
     appearance: Appearance,
     /// A notification when an AI app changes something or something starts waiting.
     notifications: bool,
+    /// Look for a new version shortly after starting and once a day (updates.rs).
+    check_updates: bool,
     /// Keys this version doesn't know (a newer one wrote them), written back as they were.
     #[serde(flatten)]
     other: serde_json::Map<String, serde_json::Value>,
@@ -86,7 +89,13 @@ struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { vault: default_vault(), appearance: Appearance::System, notifications: true, other: Default::default() }
+        Settings {
+            vault: default_vault(),
+            appearance: Appearance::System,
+            notifications: true,
+            check_updates: true,
+            other: Default::default(),
+        }
     }
 }
 
@@ -102,6 +111,9 @@ fn parse_settings(text: &str) -> Settings {
     }
     if let Some(notifications) = map.remove("notifications").and_then(|v| v.as_bool()) {
         settings.notifications = notifications;
+    }
+    if let Some(check_updates) = map.remove("check_updates").and_then(|v| v.as_bool()) {
+        settings.check_updates = check_updates;
     }
     settings.other = map;
     settings
@@ -129,6 +141,14 @@ struct Shared {
     splash_url: Mutex<Option<Url>>,
     tray: Mutex<Option<TrayIcon>>,
     review_item: Mutex<Option<MenuItem<tauri::Wry>>>,
+    /// "Check for Updates…" in the menu-bar item's menu, "Install OpenMyMemo <version>…" once one is found.
+    update_item: Mutex<Option<MenuItem<tauri::Wry>>>,
+    /// The update found last, until it is installed.
+    update: Mutex<Option<tauri_plugin_updater::Update>>,
+    /// Set by "Check for Updates…": the updates thread checks now and says what it found.
+    check_now: AtomicBool,
+    /// Set while an update downloads and installs.
+    installing: AtomicBool,
 }
 
 fn default_vault() -> PathBuf {
@@ -162,6 +182,10 @@ impl Shared {
             splash_url: Mutex::new(None),
             tray: Mutex::new(None),
             review_item: Mutex::new(None),
+            update_item: Mutex::new(None),
+            update: Mutex::new(None),
+            check_now: AtomicBool::new(false),
+            installing: AtomicBool::new(false),
         }
     }
 
@@ -282,6 +306,7 @@ struct AppSettings {
     autostart: bool,
     appearance: Appearance,
     notifications: bool,
+    check_updates: bool,
     version: String,
     /// The `openmymemo` command for terminals and other MCP apps.
     launcher: PathBuf,
@@ -297,6 +322,7 @@ fn app_settings(app: AppHandle, shared: tauri::State<Arc<Shared>>) -> AppSetting
         autostart: app.autolaunch().is_enabled().unwrap_or(false),
         appearance: settings.appearance,
         notifications: settings.notifications,
+        check_updates: settings.check_updates,
         version: app.package_info().version.to_string(),
         launcher: shared.launcher.clone(),
         log: shared.log.clone(),
@@ -313,6 +339,17 @@ fn set_appearance(app: AppHandle, shared: tauri::State<Arc<Shared>>, appearance:
 #[tauri::command]
 fn set_notifications(shared: tauri::State<Arc<Shared>>, enabled: bool) -> Result<(), String> {
     shared.save(|s| s.notifications = enabled)
+}
+
+#[tauri::command]
+fn set_check_updates(shared: tauri::State<Arc<Shared>>, enabled: bool) -> Result<(), String> {
+    shared.save(|s| s.check_updates = enabled)
+}
+
+/// "Check Now" in Settings, like "Check for Updates…" in the menus: the answer comes as a dialog.
+#[tauri::command]
+fn check_for_updates(shared: tauri::State<Arc<Shared>>) {
+    shared.check_now.store(true, Ordering::SeqCst);
 }
 
 /// Retry on the setup page: start again now (the monitor otherwise backs off up to a minute).
@@ -568,6 +605,132 @@ fn monitor(app: AppHandle, paths: Paths) {
     }
 }
 
+// ---- updates ----------------------------------------------------------------------------------------
+
+/// Where to look for the update in the menu-bar item's menu.
+#[cfg(not(windows))]
+const MENU_PLACE: &str = "the menu bar";
+#[cfg(windows)]
+const MENU_PLACE: &str = "the notification area";
+
+fn set_update_item(app: &AppHandle, label: &str, enabled: bool) {
+    let item = app.state::<Arc<Shared>>().update_item.lock().unwrap().clone();
+    if let Some(item) = item {
+        let _ = item.set_text(label);
+        let _ = item.set_enabled(enabled);
+    }
+}
+
+fn dialog_on_window(app: &AppHandle, title: &str, message: &str) -> tauri_plugin_dialog::MessageDialogBuilder<tauri::Wry> {
+    let builder = app.dialog().message(message).title(title);
+    match main_window(app).filter(|w| w.is_visible().unwrap_or(false)) {
+        Some(w) => builder.parent(&w),
+        None => builder,
+    }
+}
+
+/// Ask whether to install the update found, and install it if so. Runs on a thread of its own.
+fn ask_install(app: &AppHandle) {
+    let shared = app.state::<Arc<Shared>>().inner().clone();
+    let Some(update) = shared.update.lock().unwrap().clone() else { return };
+    if shared.installing.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let notes = updates::summary(update.body.as_deref().unwrap_or(""), 700);
+    let message = format!(
+        "You have {}.{}\n\nInstall it now? OpenMyMemo restarts; your memory folder and the AI apps you connected aren't touched.",
+        update.current_version,
+        if notes.is_empty() { String::new() } else { format!(" What's new:\n\n{notes}") }
+    );
+    use tauri_plugin_dialog::{MessageDialogButtons, MessageDialogKind};
+    let yes = dialog_on_window(app, &format!("OpenMyMemo {} is available", update.version), &message)
+        .buttons(MessageDialogButtons::OkCancelCustom("Install and Restart".into(), "Later".into()))
+        .blocking_show();
+    if yes {
+        set_update_item(app, "Downloading the update…", false);
+        let problem = updates::install(app, &update);
+        eprintln!("OpenMyMemo: the update didn't install: {problem}");
+        set_update_item(app, &format!("Install OpenMyMemo {}…", update.version), true);
+        let open = dialog_on_window(
+            app,
+            "OpenMyMemo couldn't be updated",
+            &format!("{problem}\n\nYou can download OpenMyMemo {} from its release page instead.", update.version),
+        )
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom("Open Release Page".into(), "Close".into()))
+        .blocking_show();
+        if open {
+            if let Ok(url) = Url::parse(updates::RELEASES) {
+                open_outside(&url);
+            }
+        }
+    }
+    shared.installing.store(false, Ordering::SeqCst);
+}
+
+/// Check shortly after starting and then daily while "Check for updates automatically" is on, and whenever
+/// asked. An update found is offered once per version: in a dialog when the window is open, else with a
+/// notification, and it stays in the menu-bar item's menu.
+fn check_updates_loop(app: AppHandle, automatic: bool) {
+    let shared = app.state::<Arc<Shared>>().inner().clone();
+    let version = app.package_info().version.to_string();
+    let mut next = Instant::now() + updates::FIRST_CHECK;
+    let mut offered: HashSet<String> = HashSet::new();
+    loop {
+        let asked = shared.check_now.swap(false, Ordering::SeqCst);
+        let due = automatic && Instant::now() >= next && shared.settings.lock().unwrap().check_updates;
+        if (asked || due) && !shared.installing.load(Ordering::SeqCst) {
+            next = Instant::now() + updates::EVERY;
+            use tauri_plugin_dialog::MessageDialogKind;
+            match updates::check(&app) {
+                updates::Check::Available(update) => {
+                    let new = offered.insert(update.version.clone());
+                    set_update_item(&app, &format!("Install OpenMyMemo {}…", update.version), true);
+                    let found = update.version.clone();
+                    *shared.update.lock().unwrap() = Some(*update);
+                    let window_open = main_window(&app).is_some_and(|w| w.is_visible().unwrap_or(false));
+                    if asked || (new && window_open) {
+                        ask_install(&app);
+                    } else if new {
+                        let _ = app
+                            .notification()
+                            .builder()
+                            .title(format!("OpenMyMemo {found} is available"))
+                            .body(format!("Install it from OpenMyMemo's menu in {MENU_PLACE}."))
+                            .show();
+                    }
+                }
+                updates::Check::Current => {
+                    if asked {
+                        dialog_on_window(&app, "OpenMyMemo is up to date", &format!("{version} is the latest version."))
+                            .blocking_show();
+                    }
+                }
+                updates::Check::Failed(e) => {
+                    eprintln!("OpenMyMemo: couldn't check for updates: {e}");
+                    if asked {
+                        dialog_on_window(&app, "OpenMyMemo couldn't check for updates", &format!("{e}\n\nCheck your internet connection and try again."))
+                            .kind(MessageDialogKind::Warning)
+                            .blocking_show();
+                    }
+                }
+            }
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+}
+
+/// "Check for Updates…", or "Install OpenMyMemo <version>…" once an update was found.
+fn on_update_item(app: &AppHandle) {
+    let shared = app.state::<Arc<Shared>>();
+    if shared.update.lock().unwrap().is_some() {
+        let handle = app.clone();
+        std::thread::spawn(move || ask_install(&handle));
+    } else {
+        shared.check_now.store(true, Ordering::SeqCst);
+    }
+}
+
 // ---- menus ------------------------------------------------------------------------------------------
 
 #[cfg(target_os = "macos")]
@@ -577,6 +740,7 @@ fn app_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     };
     let app_sub = SubmenuBuilder::new(app, "OpenMyMemo")
         .about(None)
+        .item(&MenuItemBuilder::with_id("update", "Check for Updates…").build(app)?)
         .separator()
         .item(&item("settings", "Settings…", "CmdOrCtrl+,")?)
         .separator()
@@ -630,6 +794,7 @@ fn on_menu(app: &AppHandle, id: &str) {
         }
         "open" => show_window(app),
         "review" => open_panel_at(app, "#/changes"),
+        "update" => on_update_item(app),
         "quit" => app.exit(0),
         _ => {}
     }
@@ -637,9 +802,12 @@ fn on_menu(app: &AppHandle, id: &str) {
 
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let review = MenuItemBuilder::with_id("review", "Nothing to review").enabled(false).build(app)?;
+    let update = MenuItemBuilder::with_id("update", "Check for Updates…").build(app)?;
     let menu = MenuBuilder::new(app)
         .text("open", "Open OpenMyMemo")
         .item(&review)
+        .separator()
+        .item(&update)
         .separator()
         .text("quit", "Quit OpenMyMemo")
         .build()?;
@@ -659,6 +827,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let shared = app.state::<Arc<Shared>>();
     *shared.tray.lock().unwrap() = Some(tray);
     *shared.review_item.lock().unwrap() = Some(review);
+    *shared.update_item.lock().unwrap() = Some(update);
     Ok(())
 }
 
@@ -839,6 +1008,7 @@ fn main() {
     let builder = builder
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec![HIDDEN_ARG])))
         .invoke_handler(tauri::generate_handler![
             reveal_path,
@@ -846,6 +1016,8 @@ fn main() {
             set_autostart,
             set_appearance,
             set_notifications,
+            set_check_updates,
+            check_for_updates,
             choose_vault,
             retry_start
         ]);
@@ -896,6 +1068,17 @@ fn main() {
             let hidden = std::env::args().any(|a| a == HIDDEN_ARG);
             build_window(&handle, !hidden)?;
             build_tray(&handle)?;
+            // Automatic checks only in a release build that can replace itself: not in development, and on a
+            // Mac not from the disk image or a translocated copy (offer_move moves it first).
+            #[cfg(not(windows))]
+            let replaceable = launcher::bundle_of(&exe).is_some_and(|b| install::transient(&b, install::is_read_only).is_none());
+            #[cfg(windows)]
+            let replaceable = true;
+            let automatic = replaceable && !cfg!(debug_assertions);
+            let updates_handle = handle.clone();
+            std::thread::Builder::new()
+                .name("openmymemo-updates".into())
+                .spawn(move || check_updates_loop(updates_handle, automatic))?;
             std::thread::Builder::new().name("openmymemo-monitor".into()).spawn(move || monitor(handle, paths))?;
             Ok(())
         })
@@ -969,8 +1152,9 @@ mod tests {
     fn settings_from_older_versions_load_with_defaults() {
         let old = parse_settings(r#"{ "vault": "/Users/me/Memory" }"#);
         assert_eq!(old, Settings { vault: PathBuf::from("/Users/me/Memory"), ..Settings::default() });
-        let set = parse_settings(r#"{ "vault": "/m", "appearance": "dark", "notifications": false }"#);
-        assert_eq!((set.appearance, set.notifications), (Appearance::Dark, false));
+        let set = parse_settings(r#"{ "vault": "/m", "appearance": "dark", "notifications": false, "check_updates": false }"#);
+        assert_eq!((set.appearance, set.notifications, set.check_updates), (Appearance::Dark, false, false));
+        assert!(old.check_updates, "on unless turned off");
         // A value from a newer version doesn't lose the folder.
         let newer = parse_settings(r#"{ "vault": "/m", "appearance": "sepia", "zoom": 2 }"#);
         assert_eq!((newer.vault, newer.appearance), (PathBuf::from("/m"), Appearance::System));
@@ -1022,7 +1206,10 @@ mod tests {
         shared.save(|s| s.appearance = Appearance::Dark).unwrap();
         shared.save(|s| s.notifications = false).unwrap();
         let saved: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(saved, serde_json::json!({ "vault": "/Users/me/Memory", "appearance": "dark", "notifications": false }));
+        assert_eq!(
+            saved,
+            serde_json::json!({ "vault": "/Users/me/Memory", "appearance": "dark", "notifications": false, "check_updates": true })
+        );
         assert_eq!(shared.vault(), root.join("dev-vault"));
     }
 

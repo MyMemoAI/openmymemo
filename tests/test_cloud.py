@@ -344,9 +344,9 @@ def test_the_callback_needs_a_state_this_process_started_recently(vault, fake, p
     r = api.get(f"{parts.path}?{urlencode(without_iss)}")
     assert r.status_code == 400 and "didn" in r.text
 
-    c.linker.ttl = 0.0  # ten minutes have passed
+    # Ten minutes have passed. Negative, because Windows' monotonic clock may not move for 15 ms.
+    c.linker.ttl = -1.0
     url = api.post("/api/cloud/link", headers=H).json()["url"]
-    time.sleep(0.01)
     assert api.get(callback_path(fake.authorize(url))).status_code == 400
     assert fake.link_requests == [] and cloud.load_link() is None
 

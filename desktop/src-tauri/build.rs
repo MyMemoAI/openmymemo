@@ -8,6 +8,8 @@ fn main() {
             "set_autostart",
             "set_appearance",
             "set_notifications",
+            "set_check_updates",
+            "check_for_updates",
             "choose_vault",
             "retry_start",
         ]),

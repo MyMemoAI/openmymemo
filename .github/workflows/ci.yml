@@ -114,7 +114,8 @@ jobs:
         working-directory: desktop/src-tauri
       - run: pnpm install --frozen-lockfile
         working-directory: desktop
-      - run: pnpm tauri build --bundles nsis
+      # No updater key here: the installer is built without its signed update file.
+      - run: pnpm tauri build --bundles nsis --config '{"bundle":{"createUpdaterArtifacts":false}}'
         working-directory: desktop
       - uses: actions/upload-artifact@v7
         with:
