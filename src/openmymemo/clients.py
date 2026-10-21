@@ -129,7 +129,10 @@ class Env:
     def child_env(self, exe: Path) -> dict[str, str]:
         """Environment for an app's own CLI: our search path (node scripts need `node`) and this home."""
         path = os.pathsep.join(dict.fromkeys([str(exe.parent), *(str(d) for d in self.bin_dirs)]))
-        return {**os.environ, "PATH": path, "HOME": str(self.home)}
+        home = {"HOME": str(self.home)}
+        if sys.platform == "win32":  # where programs there look for the home folder
+            home["USERPROFILE"] = str(self.home)
+        return {**os.environ, "PATH": path, **home}
 
 
 # ---- the catalog ---------------------------------------------------------------------------------------
@@ -893,8 +896,9 @@ def _json_or_jsonc(path: Path) -> Path:
 
 
 def _no_spaces(cmd: list[str]) -> dict:
-    """Trae can't run a command whose path has a space (the Mac app's launcher lives in "Application Support")."""
-    if " " not in cmd[0]:
+    """Trae can't run a command whose path has a space (the Mac app's launcher lives in "Application Support").
+    Windows has no /bin/sh to wrap it in, so there it stays as it is."""
+    if " " not in cmd[0] or sys.platform == "win32":
         return plain(cmd)
     return {"command": "/bin/sh", "args": ["-c", 'exec "$0" "$@"', *cmd]}
 

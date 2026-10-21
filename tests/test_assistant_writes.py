@@ -454,11 +454,11 @@ def test_hook_asks_first_and_does_nothing_without_consent(vault, fake):
     assert sessions.hook(vault.root, "claude-code", hook_json(path), spawn=False) == "declined"
     save_settings(session_apps={"claude-code": "allowed"})
     out = sessions.hook(vault.root, "claude-code", hook_json(path), spawn=False)
-    assert out.startswith("spawn:") and "--worker" in out and str(path) in out
+    assert out.startswith("spawn:") and "--worker" in out and str(path) in json.loads(out.removeprefix("spawn:"))
     assert not fake.requests  # the hook itself never calls the model
 
 
-@pytest.mark.parametrize("stdin", ["", "not json", "[1, 2]", "{" * 70_000])
+@pytest.mark.parametrize("stdin", ["", "not json", "[1, 2]", "{" * 70_000], ids=["empty", "text", "list", "huge"])
 def test_hook_is_silent_and_never_fails(vault, stdin):
     turn_on(vault)
     save_settings(features={"session": True}, session_apps={"claude-code": "allowed"})
@@ -485,7 +485,7 @@ def test_hook_only_reads_transcripts_where_the_app_keeps_them(vault, tmp_path):
     codex_file = place_transcript("codex_rollout.jsonl", "codex")
     out = sessions.hook(vault.root, "codex", json.dumps({"session_id": "0199-abcd", "hook_event_name": "Stop"}),
                         spawn=False)
-    assert str(codex_file) in out and "Stop" in out
+    assert str(codex_file) in json.loads(out.removeprefix("spawn:")) and "Stop" in out
 
 
 def test_worker_files_what_the_app_didnt_save_with_evidence(vault, fake):

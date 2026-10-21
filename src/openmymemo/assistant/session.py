@@ -187,9 +187,12 @@ def _hook(vault_root: Path, app: str, stdin_text: str, *, spawn: bool) -> str:
             "--session", session_id or path.stem, "--event", event]
     if not spawn:
         return "spawn:" + json.dumps(args)
+    # Detached, so the worker outlives the hook: its own session, or on Windows its own process group and no console.
+    detach = ({"creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
+              else {"start_new_session": True})
     subprocess.Popen([sys.executable, "-m", "openmymemo", *args], stdin=subprocess.DEVNULL,
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True,
-                     start_new_session=True, cwd=str(Path.home()))
+                     cwd=str(Path.home()), **detach)
     return "spawned"
 
 

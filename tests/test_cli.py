@@ -1,3 +1,4 @@
+import os
 import shutil
 import socket
 from pathlib import Path
@@ -202,6 +203,7 @@ def test_blank_or_unsubstituted_vault_means_the_default(tmp_path, monkeypatch):
     # Claude Desktop passes its optional "Memory folder" field as OPENMYMEMO_HOME, which may arrive
     # empty or as a placeholder it didn't substitute.
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     for value in (None, "", "  ", "${user_config.vault}", "${HOME}/OpenMyMemo"):
         assert vault_path(value) == tmp_path / "OpenMyMemo", value
     assert vault_path("~/elsewhere") == tmp_path / "elsewhere"
@@ -299,28 +301,29 @@ def test_configs_name_uvx_when_openmymemo_runs_from_uvx(tmp_path, monkeypatch):
     """`uvx openmymemo connect …` runs from uv's cache, which `uv cache clean` deletes: configs get uvx instead."""
     from openmymemo import snippets
 
+    exe = ".exe" if os.name == "nt" else ""  # what `shutil.which` finds on Windows
     cached = tmp_path / "cache" / "uv" / "archive-v0" / "YOgxP7GEyeZ8I1n4"
     (cached / "bin").mkdir(parents=True)
-    (cached / "bin" / "openmymemo").write_text("#!/bin/sh\n")
+    (cached / "bin" / f"openmymemo{exe}").write_text("#!/bin/sh\n")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     for name in ("uv", "uvx"):
-        (bin_dir / name).write_text("#!/bin/sh\n")
-        (bin_dir / name).chmod(0o755)
+        (bin_dir / f"{name}{exe}").write_text("#!/bin/sh\n")
+        (bin_dir / f"{name}{exe}").chmod(0o755)
     monkeypatch.setattr("sys.prefix", str(cached))
-    monkeypatch.setattr("sys.argv", [str(cached / "bin" / "openmymemo")])
+    monkeypatch.setattr("sys.argv", [str(cached / "bin" / f"openmymemo{exe}")])
     monkeypatch.delenv("OPENMYMEMO_COMMAND", raising=False)
     monkeypatch.setenv("PATH", str(bin_dir))
     vault = tmp_path / "v"
-    assert snippets.command_for(vault) == [str((bin_dir / "uvx").resolve()), "openmymemo", "--vault", str(vault)]
-    (bin_dir / "uvx").unlink()
-    assert snippets.command_for(vault)[:4] == [str((bin_dir / "uv").resolve()), "tool", "run", "openmymemo"]
-    (bin_dir / "uv").unlink()  # no uv on PATH: the cached command is all there is
-    assert snippets.command_for(vault)[0] == str((cached / "bin" / "openmymemo").resolve())
+    assert snippets.command_for(vault) == [str((bin_dir / f"uvx{exe}").resolve()), "openmymemo", "--vault", str(vault)]
+    (bin_dir / f"uvx{exe}").unlink()
+    assert snippets.command_for(vault)[:4] == [str((bin_dir / f"uv{exe}").resolve()), "tool", "run", "openmymemo"]
+    (bin_dir / f"uv{exe}").unlink()  # no uv on PATH: the cached command is all there is
+    assert snippets.command_for(vault)[0] == str((cached / "bin" / f"openmymemo{exe}").resolve())
     monkeypatch.setattr("sys.prefix", str(tmp_path / "tools" / "openmymemo"))  # `uv tool install`: kept as is
-    (bin_dir / "uvx").write_text("#!/bin/sh\n")
-    (bin_dir / "uvx").chmod(0o755)
-    assert snippets.command_for(vault)[0] == str((cached / "bin" / "openmymemo").resolve())
+    (bin_dir / f"uvx{exe}").write_text("#!/bin/sh\n")
+    (bin_dir / f"uvx{exe}").chmod(0o755)
+    assert snippets.command_for(vault)[0] == str((cached / "bin" / f"openmymemo{exe}").resolve())
 
 
 def test_import_and_export_report_file_problems_without_a_traceback(tmp_path, vault):

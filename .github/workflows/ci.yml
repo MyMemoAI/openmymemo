@@ -12,8 +12,8 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-# Three jobs, one per kind of runner: Linux tests the oldest and newest Python we support, macOS tests the
-# middle one together with the Mac app, and the panel job checks the committed build and packs the extension.
+# Linux tests the oldest and newest Python we support, macOS (Apple silicon and Intel) the middle one together with
+# the Mac app, Windows the middle one too, and the panel job checks the committed build and packs the extension.
 jobs:
   linux:
     name: Python tests (Linux, 3.11 and 3.13)
@@ -60,6 +60,31 @@ jobs:
       - run: python3 scripts/stage_desktop.py
       - run: cargo test --locked
         working-directory: desktop/src-tauri
+
+  windows:
+    # The Python core on Windows (uvx, the AI apps' plugins). Failing tests are printed as annotations.
+    name: Windows tests (Python 3.12)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+      - name: Tests (a failing test is also printed as an annotation)
+        # The tests read and write their fixtures in the platform's default encoding, which on Windows isn't
+        # UTF-8; the package itself always names its encoding.
+        env:
+          PYTHONUTF8: "1"
+        run: |
+          status=0
+          uv run --frozen pytest --junitxml=report.xml || status=$?
+          if [ "$status" -ne 0 ]; then
+            uv run --frozen python scripts/annotate_failures.py report.xml || true
+          fi
+          exit "$status"
 
   panel:
     name: Panel build and extension

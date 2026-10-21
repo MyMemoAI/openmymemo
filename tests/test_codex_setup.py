@@ -98,10 +98,12 @@ def test_invalid_hooks_file_is_left_alone(home):
     assert path.read_text() == "{ not json"
 
     out = runner.invoke(app, ["setup", "codex"])
-    assert out.exit_code == 1 and "isn't valid JSON" in out.output
+    reason = "needs a POSIX shell" if os.name == "nt" else "isn't valid JSON"
+    assert out.exit_code == 1 and reason in out.output
     assert path.read_text() == "{ not json"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="the Codex hook command needs a POSIX shell")
 def test_cli_uses_the_plugin_when_installed_and_this_install_otherwise(home, tmp_path):
     vault_dir = tmp_path / "vault"
     out = runner.invoke(app, ["--vault", str(vault_dir), "setup", "codex"])
