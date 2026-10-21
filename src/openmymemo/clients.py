@@ -893,8 +893,9 @@ def _json_or_jsonc(path: Path) -> Path:
 
 
 def _no_spaces(cmd: list[str]) -> dict:
-    """Trae can't run a command whose path has a space (the Mac app's launcher lives in "Application Support")."""
-    if " " not in cmd[0]:
+    """Trae can't run a command whose path has a space (the Mac app's launcher lives in "Application Support").
+    Windows has no /bin/sh to wrap it in, so there it stays as it is."""
+    if " " not in cmd[0] or sys.platform == "win32":
         return plain(cmd)
     return {"command": "/bin/sh", "args": ["-c", 'exec "$0" "$@"', *cmd]}
 
