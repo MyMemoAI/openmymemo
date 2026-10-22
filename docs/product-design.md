@@ -1,6 +1,6 @@
 # OpenMyMemo product design
 
-> Status: v0.2 implemented (2026-10-08), except the PyPI release and the first installs in the real apps. §13 lists what changed against v0.1 and what is still open; §14 describes the Mac app (2026-10-10); §15 the two ways in, one-click connections and the first-run guide (2026-10-12); §16 the optional OpenMyMemo Cloud connector (2026-10-12, design; launched 2026-10-19 with the live relay for MyMemo Pro, Ultra and Lifetime, listed on the Connectors page by default, the offline queue not offered yet, §16.11); [MEMORY_FORMAT.md](./MEMORY_FORMAT.md) is the normative description of the folder. Differences between v0.1 and the original draft are in §12.
+> Status: v0.2 implemented (2026-10-08), except the PyPI release and the first installs in the real apps. §13 lists what changed against v0.1 and what is still open; §14 describes the Mac app (2026-10-10); §15 the two ways in, one-click connections and the first-run guide (2026-10-12); §16 the optional OpenMyMemo Cloud connector (2026-10-12, design; launched 2026-10-19 with the live relay for MyMemo Pro, Ultra and Lifetime, listed on the Connectors page by default, the offline queue not offered yet, §16.11); §17 the optional OpenMyMemo Assistant (2026-10-18); §18 the memory guardian: Home, a safety score, a daily brief and notifications (2026-10-22, design); [MEMORY_FORMAT.md](./MEMORY_FORMAT.md) is the normative description of the folder. Differences between v0.1 and the original draft are in §12.
 > Scope: the **local, open-source** version. Cloud hosting is explicitly out of scope for now: OpenMyMemo Cloud (§16) only relays web apps' calls to the computer, and the memory stays there.
 
 ## 0. In one sentence
@@ -811,3 +811,117 @@ Each step is its own release-sized piece and its own PRs. Each step is useful al
 3. ~~Should session-end extraction be on by default for an app once the Assistant is on, or always asked per app?~~ Decided 2026-10-18: asked per app on first use (§17.7, as built).
 4. Should a proposal's evidence from transcripts expire (§11, question 2), given it is now gathered automatically?
 5. Reverse sync — writing selected topics back to `CLAUDE.md` / `AGENTS.md` for apps without MCP — needs no model. Should it be its own feature outside the Assistant?
+
+## 18. Memory guardian: Home, a safety score and a daily brief (2026-10-22, design)
+
+OpenMyMemo does its work out of sight. AI apps read and write memory over MCP, additions apply without waiting, and the panel opens on a list. The only time OpenMyMemo reaches out is a notification when something changed. People forget it is there, and when they open it, nothing answers "how is my memory doing?".
+
+This section makes OpenMyMemo a **memory guardian**: it tells you what AI apps learned, who used your memory, and whether it is well protected, and it offers the next step as one click. Everything here is computed on the computer from files that already exist, and nothing in it needs a model.
+
+The product owner approved the design on 2026-10-22, with the recommendations in §18.7.
+
+### 18.1 Home
+
+Home is a new route and the panel's home page (`#/` with no route), ahead of Memories in the sidebar. It summarises and links; the work still happens on Memories, Changes and Connectors. Its cards, top to bottom:
+
+| Card | Shows | Opens |
+| --- | --- | --- |
+| Memory safety | The score (§18.2) as a ring, its level, the change since last week, and the three issues that cost the most, each with its fix | All checks |
+| Today | The daily brief (§18.3); "A quiet day" when nothing happened | The memories and changes it names |
+| Waiting for you | Pending changes, applied changes not yet looked at, memories due for review; hidden when all three are zero | Changes, or Memories filtered |
+| Your memory | Memories per group, growth over 30 days, where they came from (you, AI apps, imports), how many are in private topics | Memories, filtered |
+| Connected apps | Per app: last used, reads and writes in the last 7 days, and its access (topics, private or not, write mode) | The app's settings |
+| Last 7 days | Reads and writes per day | Activity |
+
+- **Empty is useful.** Before the first app is connected, Home shows the first-run steps (connect an app, import, choose private topics) instead of zeros.
+- **Private stays private.** Home counts memories in private topics but never shows their text or titles.
+- **Something waiting still comes first.** When changes wait, the "Waiting for you" card moves to the top, so Home replaces the current "open on Changes when something waits" rule without hiding it.
+
+### 18.2 Memory safety score
+
+A number from 0 to 100, computed by rules on this computer. Every point lost traces back to a memory, an app or a setting. It measures how well memory is protected, not how well it is written.
+
+| Area | Points | Checks | Fix |
+| --- | --- | --- | --- |
+| Sensitive information | 25 | Private topics are set (default `health`, `finance`); no memory outside them matches a secret pattern: an API key or token, a password line, a payment card number (Luhn-checked), a government ID number | Move to a private topic, mask, or delete |
+| App access | 25 | No app reads private topics; no app writes with `write: auto`; no app has had access for 30 days without using it; no app problem from `doctor` | Narrow the access, switch to `propose`, or disconnect |
+| Review habits | 20 | No pending change, and no applied change not looked at, older than 7 days | Open Changes |
+| Memory upkeep | 15 | No memory overdue for review; no near-duplicates (`textutil`); no single memory too long to read at a glance | Review, merge, split |
+| Backup | 15 | A recoverable copy from the last 30 days: a git commit that contains the memory files, or an export (§18.2, backup) | Export now, or "I back up another way" |
+
+- **Backup counts only a copy that exists.** Being inside a git repository is not enough. Git passes when the newest commit touching `memories/` is at most 30 days old and no memory file is untracked or ignored. Changes made since that commit don't fail the check, because the commit can still be restored. The other ways to pass are an export from the panel or `openmymemo export` in the last 30 days (the export records when it ran in `score.json`), or the person's explicit "I back up another way", which is kept with dismissals and can be withdrawn. Anything else leaves the area unverified and shows the fix. The tests cover a fresh `git init` with no commit, a folder under a parent repository that ignores it, untracked memory files, and a last commit older than 30 days.
+- **Levels.** 90 and above: Excellent. 70–89: Good. 50–69: Needs attention. Below 50: At risk.
+- **Scoring.** Each issue costs points within its area, and an area never goes below 0, so one area can't drag down another.
+- **Dismissing.** Any issue can be dismissed. It then costs nothing and stays listed under the checks, where it can be restored. Dismissals are kept in `.openmymemo/score.json`.
+- **History.** Once a day the score and each area's points are appended to `.openmymemo/score.jsonl` (date and numbers only), for the trend on Home.
+- **The secret patterns** are a new rule module, `secrets.py`. It reports which memory and which kind of pattern, never the matched text, and writes nothing to the activity log. Phone numbers are left out for now because they match too much. The model-based sensitivity check on proposals (§17.7) is unchanged.
+- **The words.** Copy states the issue and the fix. No red alarms, countdowns or "your data is in danger". The panel says "Memory safety: 82 · Good".
+
+### 18.3 Daily brief
+
+One brief per day, covering the previous calendar day in local time, built from the activity log, the proposals and memory metadata. Each part shows only when it has something:
+
+1. **What AI apps learned:** memories added or changed, grouped by app, by title; private topics only as a count.
+2. **Waiting for you:** pending changes and memories due for review.
+3. **Who used your memory:** reads per app and the topics read most.
+4. **Memory safety:** shown when the score changed or a new issue appeared.
+5. **From your memory:** one non-private memory nobody has looked at for a while, with "Still true?" and Keep, Edit or Archive.
+
+- **Rules first.** The brief is a structured list built by rules: stable, testable, free.
+- **Optional prose.** With the Assistant on and its own switch turned on (off by default), the Assistant rewrites the list as a short paragraph. Private topics are never sent, as everywhere in §17.
+- **Where it shows.** On Home's Today card; as `openmymemo brief` (with `--json`); and as a desktop notification (§18.4).
+
+### 18.4 Notifications
+
+The desktop app already notifies about new changes. This adds three kinds, each with its own switch in Settings → General:
+
+| Kind | When | At most | Default |
+| --- | --- | --- | --- |
+| New changes (exists) | An AI app changed something or proposed a change | Batched as today | On |
+| Daily brief | At a set time (default 9:00), only if the previous day had something to report | Once a day | On |
+| Waiting reminder | A change has waited more than 3 days | Once a week | On |
+| Safety alert | A new secret-pattern match outside private topics, or an app newly given private topics | Once per issue | On |
+
+- **No memory text.** The new kinds carry counts and app names only, so nothing personal shows on a locked screen or in the notification centre. For example: "Yesterday in your memory: Claude saved 3 memories, ChatGPT read 12. 2 changes are waiting for you."
+- **Missed times.** If the computer was off at the set time, the brief is sent once when the app next runs, never piled up.
+- **Phone push** through OpenMyMemo Cloud and the MyMemo app is deferred (§18.6, step 3). It would send only an event kind and counts, never memory text, titles or topic names, and the service side would be built in the closed-source MyMemo service, as for §16.8.
+
+### 18.5 Principles and privacy
+
+- **Principle 1 and "Local only" hold unchanged.** Score, overview and brief are computed on the computer. Nothing here talks to the network unless the Assistant prose (§18.3) or phone push (§18.4) is turned on.
+- **No telemetry.** Nothing counts how often the panel opens, and no score is reported anywhere. Use is shown only to the person, on their computer.
+- **Private topics stay out** of notifications, Assistant prose and phone push, and Home shows them only as a count.
+- **Plain files.** New state lives in `.openmymemo/` as readable files: `score.json`, `score.jsonl` and `notify.json` (what was sent when). Deleting them resets the history and changes no memory.
+
+### 18.6 Building it
+
+New modules, all read-only over existing data:
+
+| Module | Does | Reuses |
+| --- | --- | --- |
+| `overview.py` | Counts, growth, sources, per-app use | `/api/state`'s counts, the activity log, memory metadata |
+| `secrets.py` | Secret patterns: memory id and kind | — |
+| `score.py` | The five areas, dismissals, history | Connector settings, `doctor` checks, `textutil` duplicates |
+| `brief.py` | The brief for a date; optional Assistant prose | Activity log, proposals, the Assistant client |
+
+- **API.** `GET /api/overview` (everything Home needs, with the score and its top three issues), `GET /api/score`, `POST /api/score/dismiss`, `GET /api/brief?date=`.
+- **CLI.** `openmymemo status` (score and overview) and `openmymemo brief`, both with `--json`.
+- **Schedule.** In whichever process serves the panel, next to `tidy.Scheduler` and under the rule in §17.10 (question 1): record the day's score on the first run of the day, and at the set time build the brief and tell the app. `notify.json` makes sure each notification goes out once.
+- **Panel.** `HomeView.vue` and its cards. Charts are small inline SVG, with no chart library. Copy goes in `i18n.ts`, English only.
+- **Desktop app.** The new kinds go through the same notification path as `notify_new`.
+
+Order of work. Each step ships on its own, as PRs of one topic each:
+
+1. **Home and the safety score:** this section; `secrets.py`; `score.py` and `overview.py` with their API and `openmymemo status`; then Home.
+2. **The daily brief and notifications:** `brief.py` and its API and CLI; the schedule and the three notification kinds; their switches in Settings.
+3. **Phone push (optional):** only after steps 1 and 2 have been used for a while, and after a privacy review. It needs the protocol written down, the open-source sender, a MyMemo service endpoint and the MyMemo app.
+
+### 18.7 Decisions
+
+Decided 2026-10-22, from the recommendations in the design:
+
+1. The score is called **Memory safety**, with the five areas and points in §18.2.
+2. Home is the panel's home page; something waiting puts "Waiting for you" first (§18.1).
+3. The daily-brief notification is on by default at 9:00, and is skipped on days with nothing to report.
+4. Phone push waits until steps 1 and 2 have been used (§18.6).
+5. The secret patterns cover keys, tokens, passwords, payment cards and government ID numbers; phone numbers are left out for now.
