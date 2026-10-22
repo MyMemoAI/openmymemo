@@ -14,6 +14,7 @@ const internals = (window as unknown as { __TAURI_INTERNALS__?: { invoke: Invoke
 export const native = !!internals;
 
 export type Appearance = "system" | "light" | "dark";
+export type NoticeKind = "brief" | "waiting" | "safety";
 
 export interface AppSettings {
   vault: string;
@@ -21,6 +22,12 @@ export interface AppSettings {
   appearance: Appearance;
   /** A notification when an AI app changes something or something starts waiting. */
   notifications: boolean;
+  /** The other notifications (product-design.md §18.4): yesterday's brief, changes waiting, safety alerts. */
+  notify_brief: boolean;
+  notify_waiting: boolean;
+  notify_safety: boolean;
+  /** When the brief comes, "HH:MM" local time. */
+  brief_time: string;
   /** Look for a new version shortly after starting and once a day; an update is installed only when asked. */
   check_updates: boolean;
   version: string;
@@ -38,6 +45,8 @@ export const shell = {
   /** The whole app follows it: windows, this panel (its CSS follows the window), menus and dialogs. */
   setAppearance: (appearance: Appearance) => internals?.invoke("set_appearance", { appearance }),
   setNotifications: (enabled: boolean) => internals?.invoke("set_notifications", { enabled }),
+  setNotice: (kind: NoticeKind, enabled: boolean) => internals?.invoke("set_notice", { kind, enabled }),
+  setBriefTime: (time: string) => internals?.invoke("set_brief_time", { time }),
   setCheckUpdates: (enabled: boolean) => internals?.invoke("set_check_updates", { enabled }),
   /** Check now; the app answers in a dialog of its own (up to date, or install the new version?). */
   checkForUpdates: () => internals?.invoke("check_for_updates"),

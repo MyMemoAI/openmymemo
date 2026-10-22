@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import SettingsSheet from "./SettingsSheet.vue";
 
 const shell = vi.hoisted(() => {
-  const state = { check_updates: true };
+  const state = { check_updates: true, notify_waiting: true, brief_time: "09:00" };
   return {
     state,
     settings: vi.fn(async () => ({
@@ -11,6 +11,10 @@ const shell = vi.hoisted(() => {
       autostart: false,
       appearance: "system",
       notifications: true,
+      notify_brief: true,
+      notify_waiting: state.notify_waiting,
+      notify_safety: true,
+      brief_time: state.brief_time,
       check_updates: state.check_updates,
       version: "0.3.0",
       launcher: "",
@@ -20,6 +24,12 @@ const shell = vi.hoisted(() => {
       state.check_updates = enabled;
     }),
     checkForUpdates: vi.fn(async () => undefined),
+    setNotice: vi.fn(async (kind: string, enabled: boolean) => {
+      if (kind === "waiting") state.notify_waiting = enabled;
+    }),
+    setBriefTime: vi.fn(async (time: string) => {
+      state.brief_time = time;
+    }),
   };
 });
 vi.mock("../desktop", () => ({ native: true, shell }));
@@ -40,5 +50,27 @@ describe("Settings in the app", () => {
     await w.findAll("button").find((b) => b.text() === "Check Now")!.trigger("click");
     await flushPromises();
     expect(shell.checkForUpdates).toHaveBeenCalledOnce();
+  });
+
+  it("switches each kind of notification and sets the brief's time", async () => {
+    const w = mount(SettingsSheet, {
+      global: { stubs: { ApprovalSwitch: true, AssistantSettings: true, CloudSettings: true, ModalDialog: { template: "<div><slot /></div>" } } },
+    });
+    await flushPromises();
+    expect(w.text()).toContain("New changes");
+    for (const name of ["Daily brief", "Waiting reminder", "Safety alerts"]) {
+      expect(w.get(`[role="switch"][aria-label="${name}"]`).attributes("aria-checked")).toBe("true");
+    }
+    const waiting = w.get('[role="switch"][aria-label="Waiting reminder"]');
+    await waiting.trigger("click");
+    await flushPromises();
+    expect(shell.setNotice).toHaveBeenCalledWith("waiting", false);
+    expect(waiting.attributes("aria-checked")).toBe("false");
+
+    const time = w.get('input[aria-label="Time of the daily brief"]');
+    expect((time.element as HTMLInputElement).value).toBe("09:00");
+    await time.setValue("07:30");
+    await flushPromises();
+    expect(shell.setBriefTime).toHaveBeenCalledWith("07:30");
   });
 });

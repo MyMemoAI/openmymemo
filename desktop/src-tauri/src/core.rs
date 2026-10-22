@@ -178,6 +178,15 @@ pub fn api<T: serde::de::DeserializeOwned>(port: u16, path: &str) -> Option<T> {
         .ok()
 }
 
+/// POST JSON to a panel API path; true when the server accepted it.
+pub fn post(port: u16, path: &str, body: serde_json::Value) -> bool {
+    agent()
+        .post(&format!("http://127.0.0.1:{port}{path}"))
+        .set("X-OpenMyMemo", "1")
+        .send_json(body)
+        .is_ok()
+}
+
 fn same_folder(a: &Path, b: &Path) -> bool {
     match (fs::canonicalize(a), fs::canonicalize(b)) {
         (Ok(a), Ok(b)) => a == b,
