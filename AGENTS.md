@@ -59,7 +59,7 @@ python3 scripts/stage_desktop.py && (cd desktop/src-tauri && cargo test)  # Mac 
 | `skills/` | Skills shared by the Claude Code and Codex plugins |
 | `integrations/hooks/` | Session-start and session-end hook scripts shared by Claude Code (plugin hooks `SessionStart` and `SessionEnd` in `integrations/claude-code/hooks/hooks.json`) and Codex (user-level `SessionStart` and `Stop` hooks installed by `setup codex`; `integrations/codex/setup.sh` runs it from the installed plugin). The session-end one prints nothing, always exits 0 and hands the work to a background process |
 | `integrations/claude-desktop/` | `.mcpb` manifest; build with `scripts/build_mcpb.py` |
-| `integrations/icons/`, `web/public/logo.png` | The MyMemo logo at each size, rendered from MyMemo's app icon by `scripts/make_icons.py` |
+| `integrations/icons/`, `web/public/logo.png` | The OpenMyMemo logo at each size (black on a white rounded square), rendered from `integrations/icons/logo.svg` by `scripts/make_icons.py` |
 
 ## Conventions
 

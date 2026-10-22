@@ -6,6 +6,7 @@ What changed in each release, for people who use OpenMyMemo. Every release is al
 
 - **The app updates itself.** It looks for a new version once a day and asks before installing it: "Install and Restart", or "Later" and the menu-bar item (on Windows, the notification area) keeps it for you. "Check for Updates…" in the menus and "Check Now" in Settings → General check at once, and a switch there turns the daily check off. Only updates signed by OpenMyMemo's release key are installed. This version is the last one to download by hand.
 - **The app on Windows (preview).** Each release has an installer for Windows 10 and 11, `OpenMyMemo-<version>-x64-setup.exe`. It installs for your user without an administrator, keeps OpenMyMemo in the notification area, and connects your AI apps like the Mac app. It isn't signed yet, so SmartScreen asks once before it runs.
+- **A new logo.** OpenMyMemo now has its own icon, a black "M" shield on white, so it's easy to tell apart from the MyMemo app.
 - `uvx openmymemo`, `uv tool install openmymemo` and the AI apps' plugins work on Windows, and every change is now tested there.
 
 ## 0.2.9 — 2026-10-19
