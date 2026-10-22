@@ -11,6 +11,8 @@
     "allow-set-autostart",
     "allow-set-appearance",
     "allow-set-notifications",
+    "allow-set-notice",
+    "allow-set-brief-time",
     "allow-set-check-updates",
     "allow-check-for-updates",
     "allow-choose-vault",
