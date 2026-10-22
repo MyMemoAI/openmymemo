@@ -1,6 +1,6 @@
 import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Memory, Overview, SafetyIssue, SafetyScore, State } from "../api";
+import type { Connector, Memory, Overview, SafetyIssue, SafetyScore, State } from "../api";
 import { store } from "../store";
 import HomeView from "./HomeView.vue";
 
@@ -52,7 +52,7 @@ describe("Home", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     store.state = { counts: { active: 12, archived: 0, pending: 2, unreviewed: 0, review_due: 1 } } as State;
-    store.memories = [{ id: "m1", topic: "work" } as Memory];
+    store.memories = [{ id: "m1", topic: "work", version: 1, private: false } as Memory];
     store.connectors = [];
     api.overview.mockImplementation(async () => overview());
     api.score.mockImplementation(async () => checks);
@@ -119,15 +119,39 @@ describe("Home", () => {
     expect(api.dismissIssue).toHaveBeenLastCalledWith("upkeep-long", true);
   });
 
-  it("reloads when what it counts changes, not on every poll", async () => {
+  it("reloads when what it shows changes, every 30 seconds, and after a failed load; not on every poll", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+    const poll = async (change: () => void = () => {}) => {
+      change();
+      store.version++;
+      await flushPromises();
+    };
+    store.connectors = [{ id: "claude", include_private: false, write: "propose", read_topics: "all" } as Connector];
     mount(HomeView);
     await flushPromises();
     expect(api.overview).toHaveBeenCalledTimes(1);
-    store.state = { ...store.state!, counts: { ...store.state!.counts } }; // a poll with the same numbers
-    await flushPromises();
+    await poll(); // the same numbers, the same access, the same memories
     expect(api.overview).toHaveBeenCalledTimes(1);
-    store.state = { ...store.state!, counts: { ...store.state!.counts, pending: 3 } };
+    await poll(() => (store.connectors = [{ ...store.connectors[0], include_private: true, write: "auto" }]));
+    expect(api.overview).toHaveBeenCalledTimes(2);
+    await poll(() => (store.memories = [{ ...store.memories[0], version: 2 }])); // edited: maybe a secret now
+    expect(api.overview).toHaveBeenCalledTimes(3);
+    await poll(() => (store.state = { ...store.state!, counts: { ...store.state!.counts, pending: 3 } }));
+    expect(api.overview).toHaveBeenCalledTimes(4);
+    now.mockReturnValue(1_000_000 + 30_000); // reads leave the counts alone: the time does it
+    await poll();
+    expect(api.overview).toHaveBeenCalledTimes(5);
+    now.mockRestore();
+  });
+
+  it("tries again on the next poll when the first load failed", async () => {
+    api.overview.mockRejectedValueOnce(new Error("offline"));
+    const w = mount(HomeView);
+    await flushPromises();
+    expect(w.text()).toContain("Loading");
+    store.version++;
     await flushPromises();
     expect(api.overview).toHaveBeenCalledTimes(2);
+    expect(w.find('[data-test="safety"]').exists()).toBe(true);
   });
 });

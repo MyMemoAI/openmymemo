@@ -14,20 +14,43 @@ const data = ref<Overview | null>(null);
 const checks = ref<SafetyScore | null>(null);
 const showChecks = ref(false);
 
+let loadedAt = 0;
+let loadedKey = "";
+let failed = false;
+
 async function load() {
+  loadedAt = Date.now();
+  loadedKey = changeKey.value;
   try {
     data.value = await api.overview();
     if (showChecks.value) checks.value = await api.score();
+    failed = false;
   } catch {
-    // the panel's offline notice says it; keep what we had
+    failed = true; // the panel's offline notice says it; keep what we had and try again on the next poll
   }
 }
-// The overview is heavier than /api/state, so reload it when something it counts changes, not on every poll.
-const counted = computed(() => {
+
+/**
+ * What the overview depends on that the panel already polls: the counts, which topics are private, each app's access
+ * and each memory's version (an edit can add or remove a secret). Reads and other activity don't show there, so
+ * Home also reloads once RELOAD_MS have passed, and after a failed load. Otherwise it waits: the overview runs git
+ * and the duplicate check, so it isn't fetched on every 4-second poll.
+ */
+const RELOAD_MS = 30_000;
+const changeKey = computed(() => {
   const c = store.state?.counts;
-  return c ? [c.active, c.archived, c.pending, c.unreviewed, c.review_due, store.connectors.length].join() : "";
+  const apps = store.connectors.map((a) => `${a.id}:${a.include_private}:${a.write}:${JSON.stringify(a.read_topics)}`);
+  const mems = store.memories.map((m) => `${m.id}:${m.version}:${m.private}:${m.topic}`);
+  const privateTopics = (store.state?.topics ?? []).filter((tp) => tp.private).map((tp) => tp.slug);
+  return JSON.stringify([c, privateTopics, apps, mems]);
 });
-watch(counted, load, { immediate: true });
+watch(
+  () => store.version,
+  () => {
+    if (failed || changeKey.value !== loadedKey || Date.now() - loadedAt >= RELOAD_MS) load();
+  },
+);
+load();
 
 async function toggleChecks() {
   showChecks.value = !showChecks.value;
