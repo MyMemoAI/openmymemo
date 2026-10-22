@@ -39,12 +39,16 @@ app.add_typer(semantic_app, name="semantic")
 DEFAULT_PORT = 8787
 
 
-def _pad(text: str, width: int) -> str:
-    """Left-align text in a terminal column, counting CJK characters as two cells."""
+def _cells(text: str) -> int:
+    """How many terminal cells text takes, counting CJK characters as two."""
     import unicodedata
 
-    cells = sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in text)
-    return text + " " * max(0, width - cells)
+    return sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in text)
+
+
+def _pad(text: str, width: int) -> str:
+    """Left-align text in a terminal column, counting CJK characters as two cells."""
+    return text + " " * max(0, width - _cells(text))
 
 
 def _vault(ctx: typer.Context, init: bool = False) -> Vault:
@@ -114,12 +118,13 @@ def status(ctx: typer.Context,
     typer.echo(f"\nVault: {vault.root}\nMemories: {total}   Unreviewed changes: {props.unreviewed_count()}"
                f"   Pending proposals: {props.pending_count()}   Approval: {'on' if approval_on else 'off'}\n")
     group = None
+    title_width = max([12, *(_cells(t["title"]) for t in topics)])
     for t in topics:
         if t["group_name"] != group:
             group = t["group_name"]
             typer.secho(group, bold=True)
         lock = " (private)" if t["private"] else ""
-        typer.echo(f"  {_pad(t['title'], 12)} {t['count']:>4}   {_pad(t['slug'], 20)}{lock}".rstrip())
+        typer.echo(f"  {_pad(t['title'], title_width)} {t['count']:>4}   {_pad(t['slug'], 20)}{lock}".rstrip())
     cons = Connectors(vault).list()
     typer.echo("\nConnectors:" if cons else "\nNo connectors yet: see `openmymemo apps`, then `openmymemo connect <app>`")
     for c in cons:
