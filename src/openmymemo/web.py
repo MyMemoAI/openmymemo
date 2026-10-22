@@ -13,6 +13,7 @@ Assistant's MyMemo sign-in (product-design.md §17.8) comes back to the same add
 
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
 import json
 import os
@@ -29,7 +30,7 @@ from fastapi.staticfiles import StaticFiles
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel
 
-from . import __version__, clients, memfiles, overview, score, transfer
+from . import __version__, brief, clients, memfiles, overview, score, transfer
 from .assistant import (
     MYMEMO_HIDDEN,
     Assistant,
@@ -318,6 +319,14 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
     @api.get("/api/overview")
     def home() -> dict:
         return overview.build(vault)  # everything the Home page shows (product-design.md §18.1)
+
+    @api.get("/api/brief")
+    def daily_brief(date: str | None = None) -> dict:
+        try:
+            day = dt.date.fromisoformat(date) if date else None
+        except ValueError as e:
+            raise HTTPException(400, "date must be YYYY-MM-DD") from e
+        return brief.build(vault, day)  # one day in memory (product-design.md §18.3)
 
     # ---- memory safety (product-design.md §18.2) -------------------------------------------------
 

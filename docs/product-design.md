@@ -141,7 +141,8 @@ A single CLI on PyPI: `uv tool install openmymemo`, or `uvx openmymemo` without 
 | `openmymemo serve` | Local server: panel at `http://127.0.0.1:8787` plus HTTP MCP at `http://127.0.0.1:8787/mcp` |
 | `openmymemo review` | What AI changed since you last looked (undo per item), then anything waiting for your decision |
 | `openmymemo approval [on\|off]` | Show or set whether AI changes wait for your approval (off by default) |
-| `openmymemo status` | Memory counts, unreviewed changes, pending proposals, connectors, last access |
+| `openmymemo status` | The Memory safety score and its top issues (§18.2), memory counts, unreviewed changes, pending proposals, connectors, last access; `--json` |
+| `openmymemo brief` | One day in memory (§18.3): what AI apps learned, what waits, who read it, the safety change; yesterday by default, `--date`, `--json` |
 | `openmymemo connector add\|list\|config\|rotate\|remove` | Manage connectors; prints MCP config for each client using absolute paths |
 | `openmymemo context [--connector id]` | Print exactly what a connector sees right now |
 | `openmymemo add <topic> <text>` / `search <query>` | Add a memory yourself / search |
