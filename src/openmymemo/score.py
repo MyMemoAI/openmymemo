@@ -198,15 +198,20 @@ def _git(cwd: Path, *args: str) -> str | None:
 
 
 def git_backup(vault: Vault, now: datetime) -> bool:
-    """A commit touching ``memories/`` in the last BACKUP_DAYS, and no memory file untracked or ignored."""
+    """A commit touching ``memories/`` in the last BACKUP_DAYS whose tree holds every memory file there is now.
+
+    Files edited since that commit still count (the commit restores them); a file only staged, untracked or
+    ignored doesn't, since no commit has a copy of it.
+    """
     where = vault.memories_dir
-    if _git(where, "rev-parse", "--is-inside-work-tree") is None:
-        return False
     last = (_git(where, "log", "-1", "--format=%ct", "--", ".") or "").strip()
     if not last.isdigit() or now - datetime.fromtimestamp(int(last), UTC) > timedelta(days=BACKUP_DAYS):
         return False
-    status = _git(where, "status", "--porcelain", "--ignored", "--untracked-files=all", "--", ".")
-    return status is not None and not any(line[:2] in ("??", "!!") for line in status.splitlines())
+    tree = _git(where, "ls-tree", "-r", "-z", "--name-only", "HEAD", "--", ".")
+    if tree is None:
+        return False
+    committed = set(tree.split("\0"))
+    return all(p.relative_to(where).as_posix() in committed for p in where.rglob("*.md"))
 
 
 def _backup(vault: Vault, now: datetime) -> list[Issue]:

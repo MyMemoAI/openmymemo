@@ -142,6 +142,10 @@ def test_a_recent_commit_of_every_memory_file_counts_as_a_backup(vault):
     assert "backup" not in ids(score.compute(vault))
     vault.add_topic("hobbies", "Hobbies")  # a new, untracked topic file
     assert "backup" in ids(score.compute(vault))
+    git(vault.root, "add", "-A")  # staged is not committed: no commit has a copy yet
+    assert "backup" in ids(score.compute(vault))
+    git(vault.root, "commit", "-qm", "hobbies")
+    assert "backup" not in ids(score.compute(vault))
 
 
 @needs_git
