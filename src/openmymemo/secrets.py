@@ -12,7 +12,8 @@ Kinds:
   "api key", "token" or "secret".
 * ``password``: "password", "passcode", "密码" or "口令" followed by ":", "=", "is" or "是" and a value with a
   digit or a symbol (so "the password is long" doesn't count).
-* ``card``: 13 to 19 digits, spaces or dashes allowed, that pass the Luhn check.
+* ``card``: 13 to 19 digits starting with 2 to 6 (the payment networks, Mastercard's 2-series included), spaces or
+  dashes allowed, that pass the Luhn check.
 * ``id_number``: a US Social Security number (``123-45-6789``, not 000, 666 or 9xx) or an 18-digit Chinese
   resident ID whose check character is right.
 """
@@ -65,7 +66,7 @@ def _luhn(digits: str) -> bool:
 def _card(text: str) -> bool:
     for m in _CARD.finditer(text):
         digits = re.sub(r"[ -]", "", m.group())
-        if 13 <= len(digits) <= 19 and digits[0] in "3456" and len(set(digits)) > 1 and _luhn(digits):
+        if 13 <= len(digits) <= 19 and digits[0] in "23456" and len(set(digits)) > 1 and _luhn(digits):
             return True
     return False
 

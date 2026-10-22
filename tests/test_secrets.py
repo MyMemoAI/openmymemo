@@ -24,6 +24,8 @@ PEM = "-----BEGIN " + "RSA PRIVATE KEY-----"
     ("家里路由器的密码是 abc12345", ["password"]),
     ("Visa 4111 1111 1111 1111, expires 2027", ["card"]),
     ("Amex 3782-822463-10005", ["card"]),
+    ("Mastercard 2223000048400011", ["card"]),
+    ("Mastercard 2223 0000 4840 0011", ["card"]),
     ("SSN 123-45-6789", ["id_number"]),
     ("身份证号 11010519491231002X", ["id_number"]),
     (f"password: s3cret!, key {OPENAI}", ["key", "password"]),
@@ -39,6 +41,7 @@ def test_finds_each_kind(text, kinds):
     "A token of appreciation for the team",
     "The secret is outstandingperformance",  # no digit: a phrase, not a value
     "Order number 4111 1111 1111 1112",       # fails the Luhn check
+    "Ticket 2223 0000 4840 0012",              # 2-series shape, fails the Luhn check
     "0000 0000 0000 0000",
     "Phone +1 415 555 0123",                   # phone numbers are left out (§18.2)
     "手机 13800138000",
