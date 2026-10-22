@@ -29,7 +29,8 @@ async function load() {
     if (showChecks.value) checks.value = await api.score();
     failed = false;
   } catch {
-    failed = true; // the panel's offline notice says it; keep what we had and try again on the next poll
+    failed = true; // the panel's offline notice says it; keep the counts we had and try again on the next poll
+    today.value = null; // but not the brief's text, which may have become private since
   }
 }
 

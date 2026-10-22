@@ -239,4 +239,19 @@ describe("Home", () => {
     expect(w.text()).not.toContain("Lives in Lyon");
     expect(w.find('[data-test="safety"]').exists()).toBe(true);
   });
+
+  it("drops the brief's text when the whole reload fails after a privacy change", async () => {
+    const w = mount(HomeView);
+    await flushPromises();
+    expect(w.find('[data-test="today"]').text()).toContain("Prefers tea over coffee");
+
+    api.overview.mockImplementation(async () => { throw new Error("offline"); });
+    api.brief.mockImplementation(async () => { throw new Error("offline"); });
+    store.memories = [{ id: "m1", topic: "work", version: 1, private: true } as Memory];
+    store.version++;
+    await flushPromises();
+    expect(w.text()).not.toContain("Prefers tea over coffee");
+    expect(w.text()).not.toContain("Lives in Lyon");
+    expect(w.find('[data-test="safety"]').exists()).toBe(true); // the counts stay
+  });
 });
