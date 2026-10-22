@@ -11,7 +11,7 @@ from typing import Annotated, NoReturn
 
 import typer
 
-from . import __version__, memfiles, score, transfer
+from . import __version__, brief, memfiles, score, transfer
 from .assistant import features as assistant_features
 from .connectors import Connectors
 from .context import compile_context
@@ -125,6 +125,44 @@ def status(ctx: typer.Context,
     for c in cons:
         last = next(iter(vault.activity(c.id, limit=1)), None)
         typer.echo(f"  {c.id:<18} {c.kind:<5} write={c.write:<7} last seen {last['at'] if last else 'never'}")
+
+
+@app.command("brief")
+def brief_cmd(ctx: typer.Context,
+              day: Annotated[str | None, typer.Option("--date", help="The day, YYYY-MM-DD (default: yesterday).")] = None,
+              as_json: Annotated[bool, typer.Option("--json", help="The brief as JSON.")] = False) -> None:
+    """What happened in your memory on one day: what AI apps learned, what waits, who read it."""
+    from datetime import date
+
+    try:
+        when = date.fromisoformat(day) if day else None
+    except ValueError:
+        typer.secho("--date must be YYYY-MM-DD.", fg="red", err=True)
+        raise typer.Exit(2) from None
+    b = brief.build(_vault(ctx), when)
+    if as_json:
+        typer.echo(json.dumps(b, indent=2, ensure_ascii=False))
+        return
+    d = date.fromisoformat(b["date"])
+    typer.secho(f"{d:%a}, {d:%b} {d.day} in your memory", bold=True)
+    typer.echo(brief.counts_line(b))
+    for a in b["learned"]:
+        typer.echo(f"\n{a['app']}:")
+        for c in a["changes"]:
+            verb = {"add": "added", "archive": "archived"}.get(c["op"], "changed")
+            typer.echo(f"  {verb}: {c['content']}")
+        if a["private"]:
+            typer.echo(f"  and {a['private']} in private topics")
+    if b["used"]:
+        typer.echo("\nWho used your memory:")
+        for u in b["used"]:
+            typer.echo(f"  {u['app']}: {u['reads']} {'read' if u['reads'] == 1 else 'reads'}"
+                       + (f" ({', '.join(u['topics'])})" if u["topics"] else ""))
+    if b["waiting"]["review_due"]:
+        n = b["waiting"]["review_due"]
+        typer.echo(f"\n{n} {'memory is' if n == 1 else 'memories are'} due for a check.")
+    if b["resurface"]:
+        typer.echo(f"\nFrom your memory: {b['resurface']['content']}  (still true?)")
 
 
 def _read_input(file: Path | None, source: str) -> str:

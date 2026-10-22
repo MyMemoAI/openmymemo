@@ -23,7 +23,7 @@ ACTIVITY_DAYS = 7
 REVIEW_SOON = timedelta(days=14)  # the same window as a memory's ``review_due``
 
 
-def _day(value: str | None) -> date | None:
+def local_day(value: str | None) -> date | None:
     try:
         when = datetime.fromisoformat(value) if value else None
     except ValueError:
@@ -54,7 +54,7 @@ def build(vault: Vault, *, now: datetime | None = None) -> dict:
         groups[-1]["count"] += t["count"]
 
     days = [today - timedelta(days=n) for n in range(GROWTH_DAYS - 1, -1, -1)]
-    created = Counter(_day(m.created_at) for m in mems)
+    created = Counter(local_day(m.created_at) for m in mems)
     total = sum(n for d, n in created.items() if d is None or d < days[0])
     growth = []
     for d in days:
@@ -72,7 +72,7 @@ def build(vault: Vault, *, now: datetime | None = None) -> dict:
     per_day = {d: {"reads": 0, "writes": 0} for d in week}
     per_app: dict[str, Counter] = {}
     for row in vault.activity(limit=100_000):
-        d = _day(row.get("at"))
+        d = local_day(row.get("at"))
         if d not in per_day:
             continue
         kind = "reads" if row.get("action") in READS else "writes" if row.get("action") in WRITES else None
