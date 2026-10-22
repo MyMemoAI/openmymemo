@@ -30,7 +30,7 @@ from fastapi.staticfiles import StaticFiles
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel
 
-from . import __version__, brief, clients, memfiles, overview, score, transfer
+from . import __version__, brief, clients, memfiles, notices, overview, score, transfer
 from .assistant import (
     MYMEMO_HIDDEN,
     Assistant,
@@ -78,6 +78,10 @@ class MemoryPatch(BaseModel):
     private: bool | None = None
     until: str | None = None
     expected_version: int | None = None  # refused with 409 when the memory has moved on
+
+
+class NoticeIn(BaseModel):
+    id: str
 
 
 class DismissIn(BaseModel):
@@ -327,6 +331,21 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
         except ValueError as e:
             raise HTTPException(400, "date must be YYYY-MM-DD") from e
         return brief.build(vault, day)  # one day in memory (product-design.md §18.3)
+
+    # ---- notifications the desktop app shows (product-design.md §18.4) -----------------------------
+
+    @api.get("/api/notices")
+    def due_notices(kinds: str = ",".join(notices.KINDS), brief_at: str | None = None) -> list[dict]:
+        wanted = tuple(k for k in kinds.split(",") if k in notices.KINDS)
+        return notices.due(vault, kinds=wanted, brief_at=notices.parse_time(brief_at))
+
+    @api.post("/api/notices/sent")
+    def notice_sent(body: NoticeIn) -> dict:
+        try:
+            notices.sent(vault, body.id)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return {"ok": True}
 
     # ---- memory safety (product-design.md §18.2) -------------------------------------------------
 
