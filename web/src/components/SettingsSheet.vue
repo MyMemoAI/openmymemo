@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { native, shell, type AppSettings, type Appearance } from "../desktop";
+import { native, shell, type AppSettings, type Appearance, type NoticeKind } from "../desktop";
 import { t } from "../i18n";
 import { copy, store, toast } from "../store";
 import AppIcon from "./AppIcon.vue";
@@ -19,6 +19,7 @@ const emit = defineEmits<{ close: [] }>();
 const app = ref<AppSettings | null>(null);
 const vault = computed(() => app.value?.vault ?? store.state?.vault ?? "");
 const APPEARANCES: Appearance[] = ["system", "light", "dark"];
+const NOTICES: NoticeKind[] = ["brief", "waiting", "safety"];
 const GITHUB = "https://github.com/MyMemoAI/openmymemo";
 
 onMounted(async () => {
@@ -41,6 +42,11 @@ function openGuide() {
   emit("close");
 }
 const toggleNotifications = () => run(() => shell.setNotifications(!app.value?.notifications));
+const toggleNotice = (kind: NoticeKind) => run(() => shell.setNotice(kind, !app.value?.[`notify_${kind}`]));
+const setBriefTime = (e: Event) => {
+  const time = (e.target as HTMLInputElement).value;
+  if (time) run(() => shell.setBriefTime(time));
+};
 const toggleUpdates = () => run(() => shell.setCheckUpdates(!app.value?.check_updates));
 const checkNow = () => run(() => shell.checkForUpdates());
 const setAppearance = (a: Appearance) => run(() => shell.setAppearance(a));
@@ -88,6 +94,32 @@ const revealLog = () => app.value && run(() => shell.reveal(app.value!.log));
               <span class="switch-knob" />
             </button>
           </div>
+          <template v-if="native && app">
+            <div v-for="kind in NOTICES" :key="kind" class="flex items-center gap-4 px-4.5 py-3">
+              <div class="min-w-0 flex-1 space-y-0.5">
+                <div class="font-semibold">{{ t(`desk.notice.${kind}`) }}</div>
+                <p class="text-[13px] text-muted">{{ t(`desk.notice.${kind}Help`) }}</p>
+              </div>
+              <input
+                v-if="kind === 'brief'"
+                type="time"
+                class="input w-auto py-1 text-[13px]"
+                :value="app.brief_time"
+                :disabled="!app.notify_brief"
+                :aria-label="t('desk.notice.briefTime')"
+                @change="setBriefTime"
+              />
+              <button
+                role="switch"
+                class="switch"
+                :aria-checked="app[`notify_${kind}`]"
+                :aria-label="t(`desk.notice.${kind}`)"
+                @click="toggleNotice(kind)"
+              >
+                <span class="switch-knob" />
+              </button>
+            </div>
+          </template>
           <div v-if="native && app" class="flex items-center gap-4 px-4.5 py-3">
             <div class="min-w-0 flex-1 space-y-0.5">
               <div class="font-semibold">{{ t("desk.updates") }}</div>

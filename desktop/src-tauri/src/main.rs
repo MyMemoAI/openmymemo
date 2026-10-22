@@ -80,6 +80,13 @@ struct Settings {
     appearance: Appearance,
     /// A notification when an AI app changes something or something starts waiting.
     notifications: bool,
+    /// The other notifications (product-design.md §18.4), each with its own switch: yesterday's brief,
+    /// changes waiting more than 3 days, and new safety issues.
+    notify_brief: bool,
+    notify_waiting: bool,
+    notify_safety: bool,
+    /// When the brief comes, "HH:MM" in local time.
+    brief_time: String,
     /// Look for a new version shortly after starting and once a day (updates.rs).
     check_updates: bool,
     /// Keys this version doesn't know (a newer one wrote them), written back as they were.
@@ -93,10 +100,26 @@ impl Default for Settings {
             vault: default_vault(),
             appearance: Appearance::System,
             notifications: true,
+            notify_brief: true,
+            notify_waiting: true,
+            notify_safety: true,
+            brief_time: DEFAULT_BRIEF_TIME.into(),
             check_updates: true,
             other: Default::default(),
         }
     }
+}
+
+const DEFAULT_BRIEF_TIME: &str = "09:00";
+
+/// "9:05" or "09:05" as "09:05"; None for anything that isn't a time of day.
+fn brief_time(text: &str) -> Option<String> {
+    let (h, m) = text.trim().split_once(':')?;
+    if !(1..=2).contains(&h.len()) || m.len() != 2 {
+        return None;
+    }
+    let (h, m): (u8, u8) = (h.parse().ok()?, m.parse().ok()?);
+    (h < 24 && m < 60).then(|| format!("{h:02}:{m:02}"))
 }
 
 /// Key by key: a value of the wrong type loses only that setting, never the memory folder with it.
@@ -112,8 +135,18 @@ fn parse_settings(text: &str) -> Settings {
     if let Some(notifications) = map.remove("notifications").and_then(|v| v.as_bool()) {
         settings.notifications = notifications;
     }
-    if let Some(check_updates) = map.remove("check_updates").and_then(|v| v.as_bool()) {
-        settings.check_updates = check_updates;
+    for (key, field) in [
+        ("notify_brief", &mut settings.notify_brief),
+        ("notify_waiting", &mut settings.notify_waiting),
+        ("notify_safety", &mut settings.notify_safety),
+        ("check_updates", &mut settings.check_updates),
+    ] {
+        if let Some(on) = map.remove(key).and_then(|v| v.as_bool()) {
+            *field = on;
+        }
+    }
+    if let Some(time) = map.remove("brief_time").as_ref().and_then(|v| v.as_str()).and_then(brief_time) {
+        settings.brief_time = time;
     }
     settings.other = map;
     settings
@@ -306,6 +339,10 @@ struct AppSettings {
     autostart: bool,
     appearance: Appearance,
     notifications: bool,
+    notify_brief: bool,
+    notify_waiting: bool,
+    notify_safety: bool,
+    brief_time: String,
     check_updates: bool,
     version: String,
     /// The `openmymemo` command for terminals and other MCP apps.
@@ -322,6 +359,10 @@ fn app_settings(app: AppHandle, shared: tauri::State<Arc<Shared>>) -> AppSetting
         autostart: app.autolaunch().is_enabled().unwrap_or(false),
         appearance: settings.appearance,
         notifications: settings.notifications,
+        notify_brief: settings.notify_brief,
+        notify_waiting: settings.notify_waiting,
+        notify_safety: settings.notify_safety,
+        brief_time: settings.brief_time,
         check_updates: settings.check_updates,
         version: app.package_info().version.to_string(),
         launcher: shared.launcher.clone(),
@@ -339,6 +380,23 @@ fn set_appearance(app: AppHandle, shared: tauri::State<Arc<Shared>>, appearance:
 #[tauri::command]
 fn set_notifications(shared: tauri::State<Arc<Shared>>, enabled: bool) -> Result<(), String> {
     shared.save(|s| s.notifications = enabled)
+}
+
+/// One of the §18.4 switches: "brief", "waiting" or "safety".
+#[tauri::command]
+fn set_notice(shared: tauri::State<Arc<Shared>>, kind: String, enabled: bool) -> Result<(), String> {
+    shared.save(|s| match kind.as_str() {
+        "brief" => s.notify_brief = enabled,
+        "waiting" => s.notify_waiting = enabled,
+        "safety" => s.notify_safety = enabled,
+        _ => {}
+    })
+}
+
+#[tauri::command]
+fn set_brief_time(shared: tauri::State<Arc<Shared>>, time: String) -> Result<(), String> {
+    let time = brief_time(&time).ok_or("Use a time like 09:00.")?;
+    shared.save(|s| s.brief_time = time)
 }
 
 #[tauri::command]
@@ -443,6 +501,39 @@ fn notify_new(app: &AppHandle, port: u16, seen: &mut HashSet<String>, first: boo
     let _ = app.notification().builder().title("OpenMyMemo").body(body).show();
 }
 
+/// The query for /api/notices from the switches; None when they're all off.
+fn notices_query(settings: &Settings) -> Option<String> {
+    let kinds: Vec<&str> = [
+        ("brief", settings.notify_brief),
+        ("waiting", settings.notify_waiting),
+        ("safety", settings.notify_safety),
+    ]
+    .into_iter()
+    .filter_map(|(kind, on)| on.then_some(kind))
+    .collect();
+    (!kinds.is_empty()).then(|| format!("/api/notices?kinds={}&brief_at={}", kinds.join(","), settings.brief_time))
+}
+
+#[derive(Deserialize)]
+struct Notice {
+    id: String,
+    title: String,
+    body: String,
+}
+
+/// Show what the server says is due (the brief, the waiting reminder, safety alerts) and tell it, so each
+/// goes out once. The server decides and remembers (src/openmymemo/notices.py); the texts carry no memory text.
+fn notify_due(app: &AppHandle, port: u16) {
+    let query = notices_query(&app.state::<Arc<Shared>>().settings.lock().unwrap());
+    let Some(query) = query else { return };
+    let due: Vec<Notice> = core::api(port, &query).unwrap_or_default();
+    for n in due {
+        if core::post(port, "/api/notices/sent", serde_json::json!({ "id": n.id })) {
+            let _ = app.notification().builder().title(n.title).body(n.body).show();
+        }
+    }
+}
+
 fn update_badge(app: &AppHandle, counts: &Counts) {
     let shared = app.state::<Arc<Shared>>();
     let n = counts.pending + counts.unreviewed;
@@ -536,6 +627,9 @@ fn offer_move(app: &AppHandle) -> bool {
     }
 }
 
+/// How often to ask the server which of the §18.4 notifications are due.
+const NOTICES_EVERY: Duration = Duration::from_secs(60);
+
 fn monitor(app: AppHandle, paths: Paths) {
     if offer_move(&app) {
         return;
@@ -544,6 +638,7 @@ fn monitor(app: AppHandle, paths: Paths) {
     let mut core = Core::new(shared.vault(), paths, core::PORTS);
     let mut last_counts: Option<Counts> = None;
     let mut seen: HashSet<String> = HashSet::new();
+    let mut next_notices = Instant::now();
     let mut failures: u32 = 0;
     loop {
         if shared.restart.swap(false, Ordering::SeqCst) {
@@ -582,6 +677,10 @@ fn monitor(app: AppHandle, paths: Paths) {
                     }
                     update_badge(&app, &state.counts);
                     last_counts = Some(state.counts);
+                }
+                if Instant::now() >= next_notices {
+                    notify_due(&app, port);
+                    next_notices = Instant::now() + NOTICES_EVERY;
                 }
             }
             Err(problem) => {
@@ -1016,6 +1115,8 @@ fn main() {
             set_autostart,
             set_appearance,
             set_notifications,
+            set_notice,
+            set_brief_time,
             set_check_updates,
             check_for_updates,
             choose_vault,
@@ -1208,9 +1309,32 @@ mod tests {
         let saved: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(
             saved,
-            serde_json::json!({ "vault": "/Users/me/Memory", "appearance": "dark", "notifications": false, "check_updates": true })
+            serde_json::json!({
+                "vault": "/Users/me/Memory", "appearance": "dark", "notifications": false, "notify_brief": true,
+                "notify_waiting": true, "notify_safety": true, "brief_time": "09:00", "check_updates": true
+            })
         );
         assert_eq!(shared.vault(), root.join("dev-vault"));
+    }
+
+    #[test]
+    fn the_notification_switches_and_the_brief_time() {
+        let set = parse_settings(r#"{ "vault": "/m", "notify_brief": false, "notify_safety": "no", "brief_time": "7:30" }"#);
+        assert_eq!((set.notify_brief, set.notify_waiting, set.notify_safety), (false, true, true));
+        assert_eq!(set.brief_time, "07:30");
+        assert_eq!(parse_settings(r#"{ "brief_time": "25:00" }"#).brief_time, "09:00");
+        for bad in ["", "9", "9:5:0", "-1:00", "12:60", "12:005", "noon"] {
+            assert_eq!(brief_time(bad), None, "{bad}");
+        }
+        assert_eq!(brief_time(" 23:59 ").as_deref(), Some("23:59"));
+
+        assert_eq!(notices_query(&set).as_deref(), Some("/api/notices?kinds=waiting,safety&brief_at=07:30"));
+        let off = Settings { notify_brief: false, notify_waiting: false, notify_safety: false, ..Settings::default() };
+        assert_eq!(notices_query(&off), None, "nothing asked when every switch is off");
+        assert_eq!(
+            notices_query(&Settings::default()).as_deref(),
+            Some("/api/notices?kinds=brief,waiting,safety&brief_at=09:00")
+        );
     }
 
     #[test]
