@@ -1,6 +1,7 @@
 /** Line icons in one style (24px grid, round caps), drawn in currentColor. */
 const S = 'fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"';
 export const ICONS = {
+  shield: `<path ${S} d="M12 3.5 5 6v5.5c0 4.2 2.9 7.7 7 9 4.1-1.3 7-4.8 7-9V6z"/><path ${S} d="m9 12 2 2 4-4"/>`,
   memories: `<path ${S} d="M4 5.5A1.5 1.5 0 0 1 5.5 4h4l2 2h7A1.5 1.5 0 0 1 20 7.5v10a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z"/>`,
   changes: `<circle ${S} cx="12" cy="12" r="8"/><path ${S} d="m8.5 12 2.5 2.5 4.5-5"/>`,
   eye: `<path ${S} d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6z"/><circle ${S} cx="12" cy="12" r="2.5"/>`,

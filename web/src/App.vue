@@ -14,12 +14,13 @@ import ActivityView from "./views/ActivityView.vue";
 import ChangesView from "./views/ChangesView.vue";
 import ConnectorsView from "./views/ConnectorsView.vue";
 import ContextView from "./views/ContextView.vue";
+import HomeView from "./views/HomeView.vue";
 import ImportView from "./views/ImportView.vue";
 import MemoriesDesktopView from "./views/MemoriesDesktopView.vue";
 import MemoriesView from "./views/MemoriesView.vue";
 import WelcomeView from "./views/WelcomeView.vue";
 
-const ROUTES = ["memories", "changes", "context", "connectors", "activity", "import", "welcome"] as const;
+const ROUTES = ["home", "memories", "changes", "context", "connectors", "activity", "import", "welcome"] as const;
 type Route = (typeof ROUTES)[number];
 /** Old names that links in the wild (MCP results, docs) still use. */
 const ALIASES: Record<string, Route> = { review: "changes" };
@@ -36,13 +37,12 @@ function parseHash(): { route: Route | null; param: string | null } {
 const current = ref(parseHash());
 
 /**
- * With no route: Changes when something waits or changed since the user last looked, otherwise the first-run
- * guide while the folder hasn't had it (`onboarded`; "Get started" offers it either way), otherwise Memories.
+ * With no route: the first-run guide while the folder hasn't had it (`onboarded`; "Get started" offers it either
+ * way) and nothing waits, otherwise Home, which puts what waits first (product-design.md §18.1).
  */
 function settleHome() {
   if (current.value.route !== null || !store.state) return;
-  const route: Route =
-    toReview.value > 0 ? "changes" : store.state.settings.onboarded === false ? "welcome" : "memories";
+  const route: Route = store.state.settings.onboarded === false && toReview.value === 0 ? "welcome" : "home";
   history.replaceState(null, "", `#/${route}`);
   current.value = { route, param: null };
 }
@@ -90,6 +90,7 @@ type NavItem = { id: Route; label: string; icon: IconName; badge?: number | null
 const nav = computed<NavItem[]>(() => [
   // "Get started" until the first-run guide is finished or skipped.
   ...(store.state?.settings.onboarded === false ? [{ id: "welcome", label: t("onb.nav"), icon: "star" } as const] : []),
+  { id: "home", label: t("nav.home"), icon: "shield" },
   { id: "memories", label: t("nav.memories"), icon: "memories", badge: store.state?.counts.active || null },
   { id: "changes", label: t("nav.changes"), icon: "changes", badge: toReview.value || null, alert: toReview.value > 0 },
   { id: "context", label: t("nav.context"), icon: "eye" },
@@ -99,7 +100,7 @@ const nav = computed<NavItem[]>(() => [
 ]);
 
 /** Phones: three tabs, and the rest behind "More". */
-const TABS: Route[] = ["memories", "changes", "context"];
+const TABS: Route[] = ["home", "memories", "changes"];
 const tabs = computed(() => nav.value.filter((n) => TABS.includes(n.id)));
 const moreItems = computed(() => nav.value.filter((n) => !TABS.includes(n.id)));
 const moreActive = computed(() => moreItems.value.some((n) => n.id === current.value.route));
@@ -125,7 +126,8 @@ const moreActive = computed(() => moreItems.value.some((n) => n.id === current.v
         <div id="desktop-toolbar" class="contents" />
         <main class="min-h-0 flex-1 overflow-y-auto bg-ground">
           <div class="mx-auto w-full max-w-[880px] px-8 pt-6 pb-12">
-            <ChangesView v-if="current.route === 'changes'" :initial-tab="current.param" />
+            <HomeView v-if="current.route === 'home'" />
+            <ChangesView v-else-if="current.route === 'changes'" :initial-tab="current.param" />
             <ContextView v-else-if="current.route === 'context'" :initial-connector="current.param" />
             <ConnectorsView v-else-if="current.route === 'connectors'" :initial-connector="current.param" />
             <ActivityView v-else-if="current.route === 'activity'" />
@@ -155,7 +157,7 @@ const moreActive = computed(() => moreItems.value.some((n) => n.id === current.v
   <div v-else class="min-h-screen md:flex">
     <!-- desktop: the sidebar; MemoriesView teleports its topics into #sidebar-extra -->
     <aside class="sticky top-0 hidden h-screen w-[248px] shrink-0 flex-col gap-5 overflow-y-auto px-3.5 pt-5 pb-6 md:flex">
-      <a href="#/memories" class="flex items-center gap-2.5 px-2.5 text-base font-semibold tracking-[-0.01em]">
+      <a href="#/home" class="flex items-center gap-2.5 px-2.5 text-base font-semibold tracking-[-0.01em]">
         <img src="/logo.png" alt="" class="size-7 rounded-lg" />
         OpenMyMemo
       </a>
@@ -185,7 +187,8 @@ const moreActive = computed(() => moreItems.value.some((n) => n.id === current.v
       <main class="mx-auto w-full max-w-[960px] flex-1 px-4 pt-6 pb-28 sm:px-6 md:px-10 md:pt-8 md:pb-10">
         <div v-if="!store.state" class="py-24 text-center text-muted">{{ t("common.loading") }}</div>
         <template v-else>
-          <MemoriesView v-if="current.route === 'memories'" :initial-topic="current.param" />
+          <HomeView v-if="current.route === 'home'" />
+          <MemoriesView v-else-if="current.route === 'memories'" :initial-topic="current.param" />
           <ChangesView v-else-if="current.route === 'changes'" :initial-tab="current.param" />
           <ContextView v-else-if="current.route === 'context'" :initial-connector="current.param" />
           <ConnectorsView v-else-if="current.route === 'connectors'" :initial-connector="current.param" />
