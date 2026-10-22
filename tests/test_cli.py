@@ -381,3 +381,10 @@ def test_an_unknown_connector_gets_a_message_not_a_traceback(vault):
     assert runner.invoke(app, [*base, "connector", "remove", "foo"]).exit_code == 0
     again = runner.invoke(app, [*base, "connector", "remove", "foo"])  # already revoked
     assert again.exit_code == 2 and "No connector foo." in again.output
+
+
+def test_status_lines_up_the_topic_columns_for_long_titles(vault):
+    out = runner.invoke(app, ["--vault", str(vault.root), "status"]).stdout.splitlines()
+    rows = {line.split()[-1]: line for line in out if line.endswith(("identity", "how-to-work-with-me", "interests"))}
+    # "How to work with me" and "Interests and taste" are wider than the shorter titles' column.
+    assert len({line.index(slug) for slug, line in rows.items()}) == 1, rows
