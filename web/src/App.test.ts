@@ -36,6 +36,7 @@ const { api } = vi.hoisted(() => ({
     patchSettings: vi.fn(async () => ({})),
     apps: vi.fn(async () => ({ system: "darwin", apps: [], custom: [] })), // ConnectApps in the guide
     overview: vi.fn(async () => overview), // Home
+    brief: vi.fn(async () => { throw new Error("no brief"); }), // Home without its Today card
   },
 }));
 vi.mock("./api", () => ({ api }));
