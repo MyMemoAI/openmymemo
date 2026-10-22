@@ -29,7 +29,7 @@ from fastapi.staticfiles import StaticFiles
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel
 
-from . import __version__, clients, memfiles, transfer
+from . import __version__, clients, memfiles, score, transfer
 from .assistant import (
     MYMEMO_HIDDEN,
     Assistant,
@@ -77,6 +77,11 @@ class MemoryPatch(BaseModel):
     private: bool | None = None
     until: str | None = None
     expected_version: int | None = None  # refused with 409 when the memory has moved on
+
+
+class DismissIn(BaseModel):
+    id: str
+    restore: bool = False
 
 
 class ArchiveIn(BaseModel):
@@ -309,6 +314,19 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
             },
             "mcp_url": f"{base_url}/mcp",
         }
+
+    # ---- memory safety (product-design.md §18.2) -------------------------------------------------
+
+    @api.get("/api/score")
+    def safety_score() -> dict:
+        result = score.compute(vault)
+        score.record(vault, result)
+        return result
+
+    @api.post("/api/score/dismiss")
+    def dismiss_issue(body: DismissIn) -> dict:
+        score.dismiss(vault, body.id, restore=body.restore)
+        return score.compute(vault)
 
     # ---- memories ------------------------------------------------------------------------------
 
@@ -876,6 +894,7 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
             text = transfer.export(vault, format, include_private=include_private)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
+        score.note_export(vault, full=include_private)
         ext = {"json": "json", "markdown": "md"}.get(format, "txt")
         return PlainTextResponse(text, headers={
             "Content-Disposition": f'attachment; filename="openmymemo-{format}.{ext}"'})

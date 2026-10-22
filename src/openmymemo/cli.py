@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -10,7 +11,7 @@ from typing import Annotated, NoReturn
 
 import typer
 
-from . import __version__, memfiles, transfer
+from . import __version__, memfiles, score, transfer
 from .assistant import features as assistant_features
 from .connectors import Connectors
 from .context import compile_context
@@ -90,14 +91,27 @@ def init(ctx: typer.Context) -> None:
 
 
 @app.command()
-def status(ctx: typer.Context) -> None:
-    """Show what's in the vault and who has access."""
+def status(ctx: typer.Context,
+           as_json: Annotated[bool, typer.Option("--json", help="The memory safety score and counts as JSON.")] = False,
+           ) -> None:
+    """Show your memory safety score, what's in the vault and who has access."""
     vault = _vault(ctx)
     topics = vault.topics()
     total = sum(t["count"] for t in topics)
     approval_on = vault.settings()["require_approval"]
     props = Proposals(vault)
-    typer.echo(f"Vault: {vault.root}\nMemories: {total}   Unreviewed changes: {props.unreviewed_count()}"
+    safety = score.compute(vault)
+    score.record(vault, safety)
+    if as_json:
+        typer.echo(json.dumps({"vault": str(vault.root), "memories": total, "unreviewed": props.unreviewed_count(),
+                               "pending": props.pending_count(), "safety": safety}, indent=2, ensure_ascii=False))
+        return
+    change = safety["week_change"]
+    trend = f"   ({change:+d} since last week)" if change else ""
+    typer.secho(f"Memory safety: {safety['score']} · {safety['level']}{trend}", bold=True)
+    for issue in [i for i in safety["issues"] if not i["dismissed"]][:3]:
+        typer.echo(f"  -{issue['points']:<3} {issue['message']}")
+    typer.echo(f"\nVault: {vault.root}\nMemories: {total}   Unreviewed changes: {props.unreviewed_count()}"
                f"   Pending proposals: {props.pending_count()}   Approval: {'on' if approval_on else 'off'}\n")
     group = None
     for t in topics:
@@ -459,7 +473,8 @@ def export(ctx: typer.Context,
     if fmt not in transfer.EXPORT_FORMATS:
         typer.secho(f"format must be one of {', '.join(transfer.EXPORT_FORMATS)}", fg="red", err=True)
         raise typer.Exit(2)
-    text = transfer.export(_vault(ctx), fmt, include_private=include_private)
+    vault = _vault(ctx)
+    text = transfer.export(vault, fmt, include_private=include_private)
     if output:
         try:
             output.write_text(text, encoding="utf-8")
@@ -469,6 +484,7 @@ def export(ctx: typer.Context,
         typer.echo(f"Wrote {output}")
     else:
         typer.echo(text, nl=False)
+    score.note_export(vault, full=include_private)
 
 
 def _hook_digest_line(unreviewed: list) -> str | None:
