@@ -23,8 +23,9 @@ async function load() {
   loadedAt = Date.now();
   loadedKey = changeKey.value;
   try {
-    // The Today card is extra: if the brief can't be had, Home still shows everything else.
-    [data.value, today.value] = await Promise.all([api.overview(), api.brief().catch(() => today.value)]);
+    // The Today card is extra: if the brief can't be had, Home still shows everything else. The old brief isn't
+    // kept, since it holds memory text that may have become private since.
+    [data.value, today.value] = await Promise.all([api.overview(), api.brief().catch(() => null)]);
     if (showChecks.value) checks.value = await api.score();
     failed = false;
   } catch {
@@ -69,7 +70,7 @@ async function dismiss(issue: SafetyIssue, restore = false) {
 
 // ---- Today: yesterday's brief (product-design.md §18.3) ---------------------------------------------------
 const SHOWN = 3;
-const KEPT = "openmymemo.home.kept"; // the resurfaced memory the person kept, so it doesn't ask again that day
+const KEPT = "openmymemo.home.kept"; // "<brief date>:<memory id>" kept, so it doesn't ask again that day
 const kept = ref<string | null>(readKept());
 function readKept(): string | null {
   try {
@@ -79,9 +80,9 @@ function readKept(): string | null {
   }
 }
 function keep(id: string) {
-  kept.value = id;
+  kept.value = `${today.value?.date}:${id}`;
   try {
-    localStorage.setItem(KEPT, id);
+    localStorage.setItem(KEPT, kept.value);
   } catch {
     // private window or blocked storage: it just asks again next time
   }
@@ -91,7 +92,7 @@ async function archiveResurfaced(id: string) {
 }
 const resurfaced = computed(() => {
   const r = today.value?.resurface;
-  return r && r.memory_id !== kept.value ? r : null;
+  return r && `${today.value?.date}:${r.memory_id}` !== kept.value ? r : null;
 });
 
 function fixHref(issue: SafetyIssue): string {

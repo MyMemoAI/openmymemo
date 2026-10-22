@@ -205,6 +205,38 @@ describe("Home", () => {
     expect(quiet.find('[data-test="today"]').text()).toContain("A quiet day: no AI app saved or read anything.");
     await quiet.find('[data-test="resurface"] button').trigger("click"); // Keep
     expect(quiet.find('[data-test="resurface"]').exists()).toBe(false);
-    expect(localStorage.getItem("openmymemo.home.kept")).toBe("m1");
+    expect(localStorage.getItem("openmymemo.home.kept")).toBe("2026-10-21:m1");
+  });
+
+  it("keeps a resurfaced memory only for that day's brief", async () => {
+    const w = mount(HomeView);
+    await flushPromises();
+    await w.find('[data-test="resurface"] button').trigger("click"); // Keep
+    expect(w.find('[data-test="resurface"]').exists()).toBe(false);
+    w.unmount();
+
+    const again = mount(HomeView);
+    await flushPromises();
+    expect(again.find('[data-test="resurface"]').exists()).toBe(false);
+    again.unmount();
+
+    api.brief.mockImplementation(async () => brief({ date: "2026-10-22" }));
+    const nextDay = mount(HomeView);
+    await flushPromises();
+    expect(nextDay.find('[data-test="resurface"]').text()).toContain("Lives in Lyon");
+  });
+
+  it("drops the brief's text when it can't be reloaded after a privacy change", async () => {
+    const w = mount(HomeView);
+    await flushPromises();
+    expect(w.find('[data-test="today"]').text()).toContain("Prefers tea over coffee");
+
+    api.brief.mockImplementation(async () => { throw new Error("offline"); });
+    store.memories = [{ id: "m1", topic: "work", version: 1, private: true } as Memory];
+    store.version++;
+    await flushPromises();
+    expect(w.text()).not.toContain("Prefers tea over coffee");
+    expect(w.text()).not.toContain("Lives in Lyon");
+    expect(w.find('[data-test="safety"]').exists()).toBe(true);
   });
 });
