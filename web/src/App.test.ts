@@ -21,6 +21,12 @@ const unreviewed: Proposal = {
   original_op: null, similarity: null, conflict: false, can_undo: true,
 };
 
+const overview = {
+  first_run: true, safety: { score: 85, level: "Good", week_change: null, top: [] },
+  waiting: { pending: 0, unreviewed: 1, review_due: 0 },
+  memories: { total: 0, private: 0, groups: [], growth: [], sources: {} }, apps: [], activity: [],
+};
+
 const { api } = vi.hoisted(() => ({
   api: {
     state: vi.fn(),
@@ -29,6 +35,7 @@ const { api } = vi.hoisted(() => ({
     connectors: vi.fn(async () => []),
     patchSettings: vi.fn(async () => ({})),
     apps: vi.fn(async () => ({ system: "darwin", apps: [], custom: [] })), // ConnectApps in the guide
+    overview: vi.fn(async () => overview), // Home
   },
 }));
 vi.mock("./api", () => ({ api }));
@@ -60,17 +67,18 @@ describe("the home page", () => {
     expect(w.find('nav a[href="#/welcome"]').text()).toBe("Get started");
   });
 
-  it("is Changes when an AI app changed something, even before the guide, which Get started still offers", async () => {
+  it("is Home when an AI app changed something, even before the guide, which Get started still offers", async () => {
     api.proposals.mockImplementation(async (q) => (q?.unreviewed ? [unreviewed] : []));
     const w = await open("", false);
-    expect(location.hash).toBe("#/changes");
+    expect(location.hash).toBe("#/home");
+    expect(w.find('[data-test="waiting"]').text()).toContain("1 change by an AI app you haven't looked at");
     expect(w.find('nav a[href="#/welcome"]').text()).toBe("Get started");
   });
 
-  it("is Memories once the guide is done, and Get started is gone", async () => {
+  it("is Home once the guide is done, first in the navigation, and Get started is gone", async () => {
     const w = await open("", true);
-    expect(location.hash).toBe("#/memories");
-    expect(w.find('a[href="#/welcome"]').text()).toBe("Show the welcome guide"); // the empty state's link
+    expect(location.hash).toBe("#/home");
+    expect(w.find("nav a").attributes("href")).toBe("#/home");
     expect(w.find('nav a[href="#/welcome"]').exists()).toBe(false);
   });
 

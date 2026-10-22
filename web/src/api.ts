@@ -598,6 +598,45 @@ export interface AssistantTest {
 
 const HEADERS = { "X-OpenMyMemo": "1", "Content-Type": "application/json" };
 
+/** One thing that costs Memory safety points (product-design.md §18.2): ids and counts, never memory text. */
+export interface SafetyIssue {
+  id: string;
+  area: "sensitive" | "apps" | "review" | "upkeep" | "backup";
+  points: number;
+  message: string;
+  /** What the fix opens: a memory or an app (`target`), Changes, Memories, the export, or private topics. */
+  fix: "memory" | "app" | "changes" | "memories" | "export" | "private_topics";
+  target: string | null;
+  dismissed: boolean;
+}
+
+export interface SafetyScore {
+  score: number;
+  level: string;
+  areas: { id: string; name: string; max: number; points: number }[];
+  issues: SafetyIssue[];
+  week_change: number | null;
+}
+
+/** Everything the Home page shows (product-design.md §18.1). */
+export interface Overview {
+  first_run: boolean;
+  safety: { score: number; level: string; week_change: number | null; top: SafetyIssue[] };
+  waiting: { pending: number; unreviewed: number; review_due: number };
+  memories: {
+    total: number;
+    private: number;
+    groups: { id: string; name: string; count: number }[];
+    growth: { date: string; total: number }[];
+    sources: { you?: number; apps?: number; imports?: number };
+  };
+  apps: {
+    id: string; name: string; kind: Connector["kind"]; last_seen: string | null; reads: number; writes: number;
+    read_topics: string[] | "all"; include_private: boolean; write: Connector["write"];
+  }[];
+  activity: { date: string; reads: number; writes: number }[];
+}
+
 /** A refused request; `status` 409 means the memory changed since the version the request named. */
 export class ApiError extends Error {
   constructor(message: string, readonly status: number) {
@@ -618,6 +657,9 @@ const enc = encodeURIComponent;
 
 export const api = {
   state: () => req<State>("GET", "/api/state"),
+  overview: () => req<Overview>("GET", "/api/overview"),
+  score: () => req<SafetyScore>("GET", "/api/score"),
+  dismissIssue: (id: string, restore = false) => req<SafetyScore>("POST", "/api/score/dismiss", { id, restore }),
   memories: (status: "active" | "archived" = "active") => req<Memory[]>("GET", `/api/memories?status=${status}`),
   addMemory: (body: { topic?: string; content: string; kind?: Kind; section?: string | null; private?: boolean }) =>
     req<Memory>("POST", "/api/memories", body),
