@@ -1,6 +1,6 @@
 import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Connector, Memory, Overview, SafetyIssue, SafetyScore, State } from "../api";
+import type { Brief, Connector, Memory, Overview, SafetyIssue, SafetyScore, State } from "../api";
 import { store } from "../store";
 import HomeView from "./HomeView.vue";
 
@@ -40,8 +40,25 @@ const checks: SafetyScore = {
   issues: [issue("backup"), issue("upkeep-long", { area: "sensitive", points: 5, message: "Old one", dismissed: true })],
 };
 
+function brief(extra: Partial<Brief> = {}): Brief {
+  return {
+    date: "2026-10-21", quiet: false,
+    learned: [{ app: "Claude", private: 1, changes: [
+      { op: "add", memory_id: "m2", content: "Prefers tea over coffee", topic: "preferences" },
+      { op: "update", memory_id: "m3", content: "Works at Globex", topic: "work" },
+      { op: "add", memory_id: "m4", content: "Runs on Sundays", topic: "health-habits" },
+      { op: "add", memory_id: "m5", content: "Uses pnpm", topic: "work" },
+    ] }],
+    waiting: { pending: 2, review_due: 1 },
+    used: [{ app: "ChatGPT", reads: 12, topics: ["Work", "Projects"] }],
+    safety: { score: 72, change: -3 },
+    resurface: { memory_id: "m1", content: "Lives in Lyon", topic: "identity", updated_at: "2026-08-01T00:00:00Z" },
+    ...extra,
+  };
+}
+
 const { api } = vi.hoisted(() => ({
-  api: { overview: vi.fn(), score: vi.fn(), dismissIssue: vi.fn(), state: vi.fn(), memories: vi.fn(),
+  api: { overview: vi.fn(), brief: vi.fn(), archive: vi.fn(), score: vi.fn(), dismissIssue: vi.fn(), state: vi.fn(), memories: vi.fn(),
          proposals: vi.fn(async () => []), connectors: vi.fn(async () => []) },
 }));
 vi.mock("../api", () => ({ api }));
@@ -55,6 +72,8 @@ describe("Home", () => {
     store.memories = [{ id: "m1", topic: "work", version: 1, private: false } as Memory];
     store.connectors = [];
     api.overview.mockImplementation(async () => overview());
+    api.brief.mockImplementation(async () => brief());
+    localStorage.clear();
     api.score.mockImplementation(async () => checks);
     api.state.mockImplementation(async () => store.state);
     api.memories.mockImplementation(async () => store.memories);
@@ -153,5 +172,39 @@ describe("Home", () => {
     await flushPromises();
     expect(api.overview).toHaveBeenCalledTimes(2);
     expect(w.find('[data-test="safety"]').exists()).toBe(true);
+  });
+
+  it("shows yesterday on the Today card: what apps saved, who read, the score, and a memory to check", async () => {
+    const w = mount(HomeView);
+    await flushPromises();
+    const card = w.find('[data-test="today"]');
+    const text = card.text().replace(/\s+/g, " ");
+    expect(text).toContain("Claude saved 5 memories");
+    expect(text).toContain("Added: Prefers tea over coffee");
+    expect(text).toContain("and 1 more");
+    expect(text).not.toContain("Uses pnpm"); // the fourth: behind "and 1 more"
+    expect(text).toContain("1 in a private topic");
+    expect(text).toContain("ChatGPT read your memory 12 times · Work, Projects");
+    expect(text).toContain("Memory safety went from 75 to 72.");
+    expect(card.find('[data-test="resurface"]').text()).toContain("Lives in Lyon");
+  });
+
+  it("keeps or archives the memory to check, and says when a day was quiet", async () => {
+    api.archive.mockImplementation(async () => ({}));
+    const w = mount(HomeView);
+    await flushPromises();
+    await w.findAll('[data-test="resurface"] button')[1].trigger("click"); // Archive
+    await flushPromises();
+    expect(api.archive).toHaveBeenCalledWith("m1");
+    expect(w.find('[data-test="resurface"]').exists()).toBe(false);
+
+    localStorage.clear();
+    api.brief.mockImplementation(async () => brief({ quiet: true, learned: [], used: [], safety: null }));
+    const quiet = mount(HomeView);
+    await flushPromises();
+    expect(quiet.find('[data-test="today"]').text()).toContain("A quiet day: no AI app saved or read anything.");
+    await quiet.find('[data-test="resurface"] button').trigger("click"); // Keep
+    expect(quiet.find('[data-test="resurface"]').exists()).toBe(false);
+    expect(localStorage.getItem("openmymemo.home.kept")).toBe("m1");
   });
 });
