@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { api, type Overview, type SafetyIssue, type SafetyScore } from "../api";
+import { api, type Brief, type Overview, type SafetyIssue, type SafetyScore } from "../api";
 import AppIcon from "../components/AppIcon.vue";
 import PageHeader from "../components/PageHeader.vue";
 import { relTime, t, tn } from "../i18n";
@@ -13,6 +13,7 @@ import { act, store } from "../store";
 const data = ref<Overview | null>(null);
 const checks = ref<SafetyScore | null>(null);
 const showChecks = ref(false);
+const today = ref<Brief | null>(null);
 
 let loadedAt = 0;
 let loadedKey = "";
@@ -22,11 +23,14 @@ async function load() {
   loadedAt = Date.now();
   loadedKey = changeKey.value;
   try {
-    data.value = await api.overview();
+    // The Today card is extra: if the brief can't be had, Home still shows everything else. The old brief isn't
+    // kept, since it holds memory text that may have become private since.
+    [data.value, today.value] = await Promise.all([api.overview(), api.brief().catch(() => null)]);
     if (showChecks.value) checks.value = await api.score();
     failed = false;
   } catch {
-    failed = true; // the panel's offline notice says it; keep what we had and try again on the next poll
+    failed = true; // the panel's offline notice says it; keep the counts we had and try again on the next poll
+    today.value = null; // but not the brief's text, which may have become private since
   }
 }
 
@@ -64,6 +68,33 @@ async function dismiss(issue: SafetyIssue, restore = false) {
     await load();
   }
 }
+
+// ---- Today: yesterday's brief (product-design.md §18.3) ---------------------------------------------------
+const SHOWN = 3;
+const KEPT = "openmymemo.home.kept"; // "<brief date>:<memory id>" kept, so it doesn't ask again that day
+const kept = ref<string | null>(readKept());
+function readKept(): string | null {
+  try {
+    return localStorage.getItem(KEPT);
+  } catch {
+    return null;
+  }
+}
+function keep(id: string) {
+  kept.value = `${today.value?.date}:${id}`;
+  try {
+    localStorage.setItem(KEPT, kept.value);
+  } catch {
+    // private window or blocked storage: it just asks again next time
+  }
+}
+async function archiveResurfaced(id: string) {
+  if (await act(() => api.archive(id), t("home.archived"))) keep(id);
+}
+const resurfaced = computed(() => {
+  const r = today.value?.resurface;
+  return r && `${today.value?.date}:${r.memory_id}` !== kept.value ? r : null;
+});
 
 function fixHref(issue: SafetyIssue): string {
   switch (issue.fix) {
@@ -149,6 +180,45 @@ function access(a: Overview["apps"][number]): string[] {
 
     <div v-if="!data" class="py-16 text-center text-muted">{{ t("common.loading") }}</div>
     <div v-else class="grid gap-5 md:grid-cols-2">
+      <!-- Today: yesterday's brief; private changes only counted -->
+      <section v-if="today && !data.first_run" class="card order-2 space-y-3 p-5 md:col-span-2" data-test="today">
+        <div class="space-y-0.5">
+          <h2 class="text-[15px] font-semibold">{{ t("home.today") }}</h2>
+          <p class="text-[13px] text-muted">{{ t("home.todaySub") }}</p>
+        </div>
+        <p v-if="today.quiet" class="text-sm text-muted">{{ t("home.quiet") }}</p>
+        <div v-for="a in today.learned" :key="a.app" class="space-y-1 text-sm">
+          <p class="font-medium">{{ tn("home.saved", a.changes.length + a.private, { app: a.app }) }}</p>
+          <ul class="space-y-0.5 text-ink-2">
+            <li v-for="(c, i) in a.changes.slice(0, SHOWN)" :key="i" class="truncate">
+              <span class="text-muted">{{ t(`home.op.${c.op}`) }}:</span> {{ c.content }}
+            </li>
+            <li v-if="a.changes.length > SHOWN" class="text-muted">
+              <a href="#/changes" class="hover:underline">{{ t("home.andMore", { n: a.changes.length - SHOWN }) }}</a>
+            </li>
+            <li v-if="a.private" class="flex items-center gap-1.5 text-muted">
+              <AppIcon name="lock" :size="13" />{{ tn("home.privateChanges", a.private) }}
+            </li>
+          </ul>
+        </div>
+        <p v-for="u in today.used" :key="u.app" class="text-sm">
+          {{ tn("home.read", u.reads, { app: u.app }) }}<span v-if="u.topics.length" class="text-muted"> · {{ u.topics.join(", ") }}</span>
+        </p>
+        <p v-if="today.safety" class="text-sm">
+          {{ t("home.safetyMoved", { from: today.safety.score - today.safety.change, to: today.safety.score }) }}
+        </p>
+        <div v-if="resurfaced" class="space-y-2 rounded-[10px] bg-sunken p-3.5" data-test="resurface">
+          <p class="text-[12px] font-medium tracking-wide text-muted uppercase">{{ t("home.resurface") }}</p>
+          <p class="text-sm">{{ resurfaced.content }}</p>
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="text-[13px] text-muted">{{ t("home.stillTrue") }}</span>
+            <button class="btn btn-sm" @click="keep(resurfaced.memory_id)">{{ t("home.keep") }}</button>
+            <a :href="`#/memories/${encodeURIComponent(resurfaced.topic)}`" class="btn btn-sm">{{ t("home.edit") }}</a>
+            <button class="btn btn-sm" @click="archiveResurfaced(resurfaced.memory_id)">{{ t("home.archive") }}</button>
+          </div>
+        </div>
+      </section>
+
       <!-- something waits: first, across the page -->
       <section v-if="anyWaiting" class="card space-y-2.5 p-5 md:col-span-2" :class="waitingFirst ? 'order-first' : 'order-2'"
                data-test="waiting">

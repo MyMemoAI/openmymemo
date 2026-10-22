@@ -618,6 +618,18 @@ export interface SafetyScore {
   week_change: number | null;
 }
 
+/** One day in memory (product-design.md §18.3); private changes are only counted. */
+export interface Brief {
+  date: string;
+  quiet: boolean;
+  learned: { app: string; private: number;
+             changes: { op: "add" | "update" | "archive"; memory_id: string | null; content: string | null; topic: string | null }[] }[];
+  waiting: { pending: number; review_due: number };
+  used: { app: string; reads: number; topics: string[] }[];
+  safety: { score: number; change: number } | null;
+  resurface: { memory_id: string; content: string; topic: string; updated_at: string } | null;
+}
+
 /** Everything the Home page shows (product-design.md §18.1). */
 export interface Overview {
   first_run: boolean;
@@ -660,6 +672,7 @@ export const api = {
   overview: () => req<Overview>("GET", "/api/overview"),
   score: () => req<SafetyScore>("GET", "/api/score"),
   dismissIssue: (id: string, restore = false) => req<SafetyScore>("POST", "/api/score/dismiss", { id, restore }),
+  brief: (date?: string) => req<Brief>("GET", `/api/brief${date ? `?date=${date}` : ""}`),
   memories: (status: "active" | "archived" = "active") => req<Memory[]>("GET", `/api/memories?status=${status}`),
   addMemory: (body: { topic?: string; content: string; kind?: Kind; section?: string | null; private?: boolean }) =>
     req<Memory>("POST", "/api/memories", body),
