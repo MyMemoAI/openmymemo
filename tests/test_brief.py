@@ -30,6 +30,8 @@ def test_what_apps_learned_and_read_that_day(vault):
     props.propose(claude, "add", content="Prefers tea over coffee", reason="said so")
     r = props.propose(claude, "add", content="Allergic to penicillin", topic="work", reason="said so")
     vault.update(r["memory_id"], private=True)  # marked private since
+    r = props.propose(claude, "add", content="Earns 120k a year", topic="work", reason="said so")
+    vault.update(r["memory_id"], topic="finance")  # moved into a private topic since
     work = vault.add("work", "Works at Acme")
     for _ in range(3):
         vault.log_activity("chatgpt", "context", memory_ids=[work.id])
@@ -37,12 +39,12 @@ def test_what_apps_learned_and_read_that_day(vault):
     b = brief.build(vault, TODAY)
     assert b["quiet"] is False
     [learned] = b["learned"]
-    assert learned["app"] == "Claude" and learned["private"] == 1
+    assert learned["app"] == "Claude" and learned["private"] == 2
     assert [c["content"] for c in learned["changes"]] == ["Prefers tea over coffee"]
     assert b["used"] == [{"app": "ChatGPT", "reads": 3, "topics": ["Work"]}]
-    assert "penicillin" not in json.dumps(b)
+    assert "penicillin" not in json.dumps(b) and "120k" not in json.dumps(b)
     line = brief.counts_line(b)
-    assert line == "Claude saved 2 memories, ChatGPT read 3."
+    assert line == "Claude saved 3 memories, ChatGPT read 3."
     assert "tea" not in line
     assert brief.build(vault, TODAY - timedelta(days=1))["quiet"] is True  # another day
 

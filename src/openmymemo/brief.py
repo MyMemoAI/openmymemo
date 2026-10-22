@@ -37,12 +37,14 @@ def build(vault: Vault, day: date | None = None, *, now: datetime | None = None)
     names = {c.id: c.name for c in Connectors(vault).list()}
 
     def is_private(memory_id: str | None, topic: str | None) -> bool:
+        """Private then (the change's topic) or now (moved to a private topic since, or marked private)."""
         if topic in private_topics:
             return True
         try:
-            return bool(memory_id) and vault.get(memory_id).private
+            m = vault.get(memory_id) if memory_id else None
         except NotFound:
             return False
+        return bool(m) and vault.is_private(m)
 
     # 1. What AI apps learned: changes that applied that day, by app.
     learned: dict[str, dict] = {}
