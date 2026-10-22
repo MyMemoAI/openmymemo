@@ -29,7 +29,7 @@ from fastapi.staticfiles import StaticFiles
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel
 
-from . import __version__, clients, memfiles, score, transfer
+from . import __version__, clients, memfiles, overview, score, transfer
 from .assistant import (
     MYMEMO_HIDDEN,
     Assistant,
@@ -314,6 +314,10 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
             },
             "mcp_url": f"{base_url}/mcp",
         }
+
+    @api.get("/api/overview")
+    def home() -> dict:
+        return overview.build(vault)  # everything the Home page shows (product-design.md §18.1)
 
     # ---- memory safety (product-design.md §18.2) -------------------------------------------------
 
