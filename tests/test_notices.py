@@ -1,3 +1,4 @@
+import threading
 from datetime import UTC, datetime, time, timedelta
 
 import pytest
@@ -61,8 +62,8 @@ def test_safety_alerts_only_for_new_issues_once_each(vault):
     assert notices.due(vault, kinds=("safety",)) == []  # the first look only notes what is there
     m = vault.add("work", f"Deploy key {GITHUB}")
     [n] = notices.due(vault, kinds=("safety",))
-    assert n["body"] == "A memory in Work looks like it contains an API key or token."
-    assert GITHUB not in n["body"] and m.id in n["id"]
+    assert n["body"] == "A memory looks like it contains an API key or token."
+    assert GITHUB not in n["body"] and "Work" not in n["body"] and m.id in n["id"]
     notices.sent(vault, n["id"])
     assert notices.due(vault, kinds=("safety",)) == []
     cons.ensure("cursor", "Cursor")
@@ -91,3 +92,23 @@ def test_notices_over_the_api(vault):
     assert api.post("/api/notices/sent", headers=H, json={"id": n["id"]}).json() == {"ok": True}
     assert api.get("/api/notices?kinds=safety", headers=H).json() == []
     assert api.post("/api/notices/sent", headers=H, json={"id": "nope"}).status_code == 400
+
+
+def test_acknowledgements_at_the_same_time_both_stay(vault, monkeypatch):
+    notices.sent(vault, "safety:a")
+    real = notices._state
+    other: list[threading.Thread] = []
+
+    def read_then_let_another_in(v):
+        state = real(v)
+        if not other:  # a second request acknowledges between this one's read and its write
+            other.append(threading.Thread(target=notices.sent, args=(vault, "safety:b")))
+            other[0].start()
+            other[0].join(0.3)  # it waits for the lock rather than finishing first
+        return state
+
+    monkeypatch.setattr(notices, "_state", read_then_let_another_in)
+    notices.sent(vault, "safety:c")
+    other[0].join()
+    monkeypatch.undo()
+    assert set(notices._state(vault)["safety"]) == {"a", "b", "c"}

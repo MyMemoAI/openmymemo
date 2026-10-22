@@ -82,29 +82,45 @@ def due(vault: Vault, *, kinds: tuple[str, ...] = KINDS, brief_at: time = time(9
         current = [i for i in score.compute(vault, now=now)["issues"]
                    if i["id"].startswith(ALERTED) and not i["dismissed"]]
         if "safety" not in state:  # the first time: note what is already there; Home shows it
-            _note(vault, safety=[i["id"] for i in current])
+            _seed(vault, [i["id"] for i in current])
         else:
             new = [i for i in current if i["id"] not in set(state["safety"])]
             if new:
-                body = new[0]["message"] if len(new) == 1 else f"{len(new)} new things to check on Home."
+                body = _safety_line(new[0]) if len(new) == 1 else f"{len(new)} new things to check on Home."
                 out.append({"id": "safety:" + ",".join(sorted(i["id"] for i in new)), "kind": "safety",
                             "title": "Memory safety", "body": body})
     return out
 
 
+def _safety_line(issue: dict) -> str:
+    """A safety alert's text: the kind of secret or the app's name, never a topic title (it may be personal)."""
+    if issue["id"].startswith("secret:"):
+        kind = issue["id"].rsplit(":", 1)[-1]
+        return f"A memory looks like it contains {score.KIND_NAMES.get(kind, 'something sensitive')}."
+    return issue["message"]  # "<app> can read your private topics."
+
+
 def sent(vault: Vault, notice_id: str) -> None:
     """Remember that a notification went out, so it isn't sent again."""
     kind, _, rest = notice_id.partition(":")
-    if kind == "brief" or kind == "waiting":
-        _note(vault, **{kind: rest})
-    elif kind == "safety":
-        _note(vault, safety=sorted(set(_state(vault).get("safety") or []) | set(rest.split(","))))
-    else:
+    if kind not in KINDS:
         raise ValueError(f"Unknown notification: {notice_id}")
+    with vault.lock():  # read and write together, so two acknowledgements at once both stay
+        state = _state(vault)
+        if kind == "safety":
+            state["safety"] = sorted(set(state.get("safety") or []) | set(rest.split(",")))
+        else:
+            state[kind] = rest
+        _save(vault, state)
 
 
-def _note(vault: Vault, **changes) -> None:
+def _seed(vault: Vault, ids: list[str]) -> None:
     with vault.lock():
         state = _state(vault)
-        state.update(changes)
-        _atomic_write(_path(vault), json.dumps(state, indent=2, ensure_ascii=False) + "\n")
+        if "safety" not in state:  # another request may have seeded or acknowledged meanwhile
+            state["safety"] = ids
+            _save(vault, state)
+
+
+def _save(vault: Vault, state: dict) -> None:
+    _atomic_write(_path(vault), json.dumps(state, indent=2, ensure_ascii=False) + "\n")
