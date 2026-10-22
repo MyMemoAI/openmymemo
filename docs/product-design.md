@@ -847,8 +847,9 @@ A number from 0 to 100, computed by rules on this computer. Every point lost tra
 | App access | 25 | No app reads private topics; no app writes with `write: auto`; no app has had access for 30 days without using it; no app problem from `doctor` | Narrow the access, switch to `propose`, or disconnect |
 | Review habits | 20 | No pending change, and no applied change not looked at, older than 7 days | Open Changes |
 | Memory upkeep | 15 | No memory overdue for review; no near-duplicates (`textutil`); no single memory too long to read at a glance | Review, merge, split |
-| Backup | 15 | The folder is in a git repository, or was exported in the last 30 days | Export now, or "I back up another way" |
+| Backup | 15 | A recoverable copy from the last 30 days: a git commit that contains the memory files, or an export (§18.2, backup) | Export now, or "I back up another way" |
 
+- **Backup counts only a copy that exists.** Being inside a git repository is not enough. Git passes when the newest commit touching `memories/` is at most 30 days old and no memory file is untracked or ignored. Changes made since that commit don't fail the check, because the commit can still be restored. The other ways to pass are an export from the panel or `openmymemo export` in the last 30 days (the export records when it ran in `score.json`), or the person's explicit "I back up another way", which is kept with dismissals and can be withdrawn. Anything else leaves the area unverified and shows the fix. The tests cover a fresh `git init` with no commit, a folder under a parent repository that ignores it, untracked memory files, and a last commit older than 30 days.
 - **Levels.** 90 and above: Excellent. 70–89: Good. 50–69: Needs attention. Below 50: At risk.
 - **Scoring.** Each issue costs points within its area, and an area never goes below 0, so one area can't drag down another.
 - **Dismissing.** Any issue can be dismissed. It then costs nothing and stays listed under the checks, where it can be restored. Dismissals are kept in `.openmymemo/score.json`.
