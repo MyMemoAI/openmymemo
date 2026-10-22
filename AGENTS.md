@@ -35,6 +35,7 @@ python3 scripts/stage_desktop.py && (cd desktop/src-tauri && cargo test)  # Mac 
 | `docs/MEMORY_FORMAT.md` | The folder format; change it before changing what the code reads or writes |
 | `docs/distribution.md`, `llms-install.md` | Where OpenMyMemo is published and listed, the shared listing details, and the setup guide AI agents such as Cline follow |
 | `src/openmymemo/textutil.py` | Similarity, search scoring, rule-based classification |
+| `src/openmymemo/secrets.py` | Secret patterns for the Memory safety score (product-design.md §18.2): keys and tokens, passwords, payment cards (Luhn), US SSNs and Chinese resident IDs (check character) in memories outside private topics; reports memory id and kind, never the matched text |
 | `src/openmymemo/connectors.py` | Connector permissions, tokens, revocation tombstones |
 | `src/openmymemo/clients.py` | The catalog of AI apps (product-design.md §15.1): detection, status, one-click connect and disconnect by editing an app's MCP config (JSON or Codex TOML) or running its `mcp add`, and the manual snippets |
 | `src/openmymemo/appfiles.py` | Writing other apps' files (their MCP configs, Codex's `hooks.json`): atomic, permissions kept from the first byte, through symlinks, with a one-time `<file>.openmymemo-backup` |
