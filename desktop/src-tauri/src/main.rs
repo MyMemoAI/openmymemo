@@ -468,7 +468,8 @@ fn list_names(names: &[String]) -> String {
     }
 }
 
-/// One notification for what arrived since the last look: applied changes, then what waits.
+/// One notification for what arrived since the last look: applied changes, then what waits. App names and
+/// counts only, never memory text, so nothing personal shows on a locked screen (product-design.md §18.4).
 fn notify_new(app: &AppHandle, port: u16, seen: &mut HashSet<String>, first: bool) {
     let applied: Vec<Proposal> = core::api(port, "/api/proposals?unreviewed=true&limit=100").unwrap_or_default();
     let waiting: Vec<Proposal> = core::api(port, "/api/proposals?status=pending&limit=100").unwrap_or_default();
@@ -487,12 +488,11 @@ fn notify_new(app: &AppHandle, port: u16, seen: &mut HashSet<String>, first: boo
     }
     let who = list_names(&names);
     let body = match (new_applied.len(), new_waiting.len()) {
-        (1, 0) => {
-            let p = new_applied[0];
-            let verb = match p.op.as_str() { "add" => "remembered", "archive" => "archived", _ => "changed" };
-            let text = p.final_content.as_deref().or(p.content.as_deref()).unwrap_or("");
-            format!("{who} {verb}: “{text}”")
-        }
+        (1, 0) => match new_applied[0].op.as_str() {
+            "add" => format!("{who} saved a new memory."),
+            "archive" => format!("{who} archived a memory."),
+            _ => format!("{who} changed a memory."),
+        },
         (0, 1) => format!("{who} wants to change a memory. It waits for you."),
         (a, 0) => format!("{who} made {a} changes to your memory."),
         (0, w) => format!("{who} proposed {w} changes. They wait for you."),

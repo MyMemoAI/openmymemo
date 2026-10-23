@@ -883,7 +883,7 @@ The desktop app already notifies about new changes. This adds three kinds, each 
 | Waiting reminder | A change has waited more than 3 days | Once a week | On |
 | Safety alert | A new secret-pattern match outside private topics, or an app newly given private topics | Once per issue | On |
 
-- **No memory text.** The new kinds carry counts and app names only, so nothing personal shows on a locked screen or in the notification centre. For example: "Yesterday in your memory: Claude saved 3 memories, ChatGPT read 12. 2 changes are waiting for you."
+- **No memory text.** Every kind, new changes included, carries counts and app names only, so nothing personal shows on a locked screen or in the notification centre. For example: "Yesterday in your memory: Claude saved 3 memories, ChatGPT read 12. 2 changes are waiting for you."
 - **Missed times.** If the computer was off at the set time, the brief is sent once when the app next runs, never piled up.
 - **Phone push** through OpenMyMemo Cloud and the MyMemo app is deferred (§18.6, step 3). It would send only an event kind and counts, never memory text, titles or topic names, and the service side would be built in the closed-source MyMemo service, as for §16.8.
 
