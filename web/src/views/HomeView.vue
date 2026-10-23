@@ -158,7 +158,7 @@ const weekBars = computed(() =>
     const label = new Date(y, m - 1, day).toLocaleDateString("en", { weekday: "short" });
     const scale = (n: number) => (n / weekMax.value) * (BAR_H - 4);
     return { ...d, label, reads_h: scale(d.reads), writes_h: scale(d.writes),
-             tip: t("home.dayTip", { day: label, reads: d.reads, writes: d.writes }) };
+             tip: t("home.dayTip", { day: label, reads: tn("home.nReads", d.reads), writes: tn("home.nWrites", d.writes) }) };
   }),
 );
 const weekTotals = computed(() => ({
@@ -372,7 +372,8 @@ function access(a: Overview["apps"][number]): string[] {
             </span>
           </div>
           <div class="grid grid-cols-7 items-end gap-2" :style="{ height: `${BAR_H + 20}px` }">
-            <div v-for="d in weekBars" :key="d.date" class="flex h-full flex-col items-center justify-end gap-1" :title="d.tip">
+            <div v-for="d in weekBars" :key="d.date" class="flex h-full flex-col items-center justify-end gap-1" :title="d.tip"
+                 role="img" :aria-label="d.tip">
               <div class="flex w-full max-w-6 flex-col justify-end gap-0.5">
                 <span v-if="d.writes" class="block w-full rounded-t-[4px] bg-wait" :style="{ height: `${d.writes_h}px` }" />
                 <span v-if="d.reads" class="block w-full bg-accent" :class="d.writes ? '' : 'rounded-t-[4px]'"

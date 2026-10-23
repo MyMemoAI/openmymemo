@@ -79,7 +79,7 @@ const strings: Record<string, string> = {
   "home.week": "Last 7 days",
   "home.reads": "Reads",
   "home.writes": "Changes",
-  "home.dayTip": "{day}: {reads} reads, {writes} changes",
+  "home.dayTip": "{day}: {reads}, {writes}",
   "home.start": "Get your memory going",
   "home.start.connect": "Connect an AI app",
   "home.start.connectHelp": "Claude, ChatGPT, Cursor and others can then read and add to your memory.",

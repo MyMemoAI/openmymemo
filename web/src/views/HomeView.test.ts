@@ -105,7 +105,10 @@ describe("Home", () => {
     const week = w.find('[data-test="week"]');
     expect(week.text()).toContain("Reads 21");
     expect(week.text()).toContain("Changes 3");
-    expect(week.findAll("[title]")).toHaveLength(7);
+    const days = week.findAll('[role="img"]');
+    expect(days).toHaveLength(7);
+    expect(days[1].attributes("aria-label")).toBe("Sat: 1 read, 1 change");
+    expect(days[6].attributes("aria-label")).toBe("Thu: 6 reads, 0 changes");
   });
 
   it("is the first steps in a new folder, and says nothing waits by leaving the card out", async () => {
