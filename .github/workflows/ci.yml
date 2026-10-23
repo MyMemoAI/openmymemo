@@ -99,6 +99,8 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
+          # Nothing here installs through uv's cache, and saving an absent cache sometimes fails the job.
+          enable-cache: false
       - uses: pnpm/action-setup@v6
         with:
           version: 10
