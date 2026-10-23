@@ -120,8 +120,6 @@ pub struct Proposal {
     pub id: String,
     pub connector_name: String,
     pub op: String,
-    pub content: Option<String>,
-    pub final_content: Option<String>,
 }
 
 pub enum Probe {
