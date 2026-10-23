@@ -149,7 +149,8 @@ def brief_cmd(ctx: typer.Context,
         typer.echo(json.dumps(b, indent=2, ensure_ascii=False))
         return
     d = date.fromisoformat(b["date"])
-    typer.secho(f"{d:%a}, {d:%b} {d.day} in your memory", bold=True)
+    year = "" if d.year == date.today().year else f", {d.year}"
+    typer.secho(f"{d:%a}, {d:%b} {d.day}{year} in your memory", bold=True)
     typer.echo(brief.counts_line(b))
     for a in b["learned"]:
         typer.echo(f"\n{a['app']}:")
