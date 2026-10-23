@@ -91,4 +91,7 @@ def test_the_brief_over_the_api_and_the_cli(vault):
     js = runner.invoke(app, ["--vault", str(vault.root), "brief", "--json"])
     assert json.loads(js.stdout)["date"] == (TODAY - timedelta(days=1)).isoformat()
     assert runner.invoke(app, ["--vault", str(vault.root), "brief", "--date", "x"]).exit_code == 2
+    assert f"{TODAY.day} in your memory" in out.stdout and str(TODAY.year) not in out.stdout.splitlines()[0]
+    old = runner.invoke(app, ["--vault", str(vault.root), "brief", "--date", f"{TODAY.year - 1}-03-01"])
+    assert old.stdout.splitlines()[0] == f"{date(TODAY.year - 1, 3, 1):%a}, Mar 1, {TODAY.year - 1} in your memory"
     assert isinstance(date.fromisoformat(json.loads(js.stdout)["date"]), date)
