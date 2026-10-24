@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { api, type TidyResult, type TidyStatus } from "../api";
-import { relTime, t } from "../i18n";
+import { assistantPlace, relTime, t } from "../i18n";
 import { act, store, toast } from "../store";
 import ModalDialog from "./ModalDialog.vue";
 
@@ -47,7 +47,7 @@ async function run(dryRun: boolean) {
     <div v-else class="space-y-4">
       <p class="text-[13px] text-ink-2">{{ t("tidy.explain") }} {{ t("tidy.private") }}</p>
       <p v-if="!status.available" class="text-[13px] text-danger-ink" data-test="tidy-unavailable">
-        {{ status.reason ? `${status.reason} ` : "" }}{{ t("tidy.unavailable") }}
+        {{ status.reason ? `${status.reason} ` : "" }}{{ t("tidy.unavailable", { where: assistantPlace() }) }}
       </p>
 
       <div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px]">

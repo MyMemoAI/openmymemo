@@ -1,3 +1,5 @@
+import { desktop } from "./desktop";
+
 /** All panel copy, in one place. The panel is English only. */
 const strings: Record<string, string> = {
   "nav.home": "Home",
@@ -224,6 +226,8 @@ const strings: Record<string, string> = {
   "set.cloudServiceEnv": "Set by OPENMYMEMO_CLOUD_URL on this computer.",
   "set.cloudUseDefault": "Use MyMemo's own",
   "ast.title": "OpenMyMemo Assistant",
+  "ast.where": "Settings → Assistant",
+  "ast.where.web": "Connectors → OpenMyMemo Assistant",
   "ast.intro": "Optional model help: it splits imports into memories, suggests topics and helps search find what you mean. Everything works without it.",
   "ast.choice.off": "Off",
   "ast.choice.local": "On this computer",
@@ -333,8 +337,8 @@ const strings: Record<string, string> = {
   "ast.mm.manage": "Manage",
   "ast.mm.signOut": "Sign out",
   "ast.mm.noEmbeddings": "MyMemo's hosted model has no embeddings: search uses keywords, with the model's help where it is on. For search by meaning, turn on \"Search by meaning on this computer\" below; that model runs on this computer.",
-  "con.assistantPrivate": "Private topics reach the Assistant only with a model on this computer, picked in Settings → Assistant.",
-  "con.assistantSetup": "The Assistant runs inside OpenMyMemo; choose its model in Settings → Assistant.",
+  "con.assistantPrivate": "Private topics reach the Assistant only with a model on this computer, picked in {where}.",
+  "con.assistantSetup": "The Assistant runs inside OpenMyMemo; choose its model in {where}.",
   "apps.assistant": "Built in",
   "apps.assistantNote": "Optional model help",
   "act.call": "asked {model} at {host} ({feature}) · {result}",
@@ -447,7 +451,7 @@ const strings: Record<string, string> = {
   "tidy.check": "Estimate first",
   "tidy.run": "Tidy up now",
   "tidy.running": "Tidying up… this can take a minute.",
-  "tidy.unavailable": "Tidy up needs OpenMyMemo Assistant with tidy-up turned on, in Settings → Assistant.",
+  "tidy.unavailable": "Tidy up needs OpenMyMemo Assistant with tidy-up turned on, in {where}.",
   "tidy.schedule": "Run by itself",
   "tidy.schedule.off": "Off",
   "tidy.schedule.daily": "Every day",
@@ -674,7 +678,7 @@ const strings: Record<string, string> = {
   "imp.chats.tooBig": "That file is too large to send from the browser; give its path instead.",
   "imp.chats.nothing": "No messages from you in there.",
   "imp.chats.found": "{conversations} conversations, {messages} messages to read",
-  "imp.chats.needsAssistant": "Reading chats needs the OpenMyMemo Assistant: {reason} Turn it on in Settings → Assistant.",
+  "imp.chats.needsAssistant": "Reading chats needs the OpenMyMemo Assistant: {reason} Turn it on in {where}.",
   "imp.chats.cost": "Reading all of it takes {calls} calls, about {tokens} tokens.",
   "imp.chats.remote": "The messages go to {host}; private memories and anything that looks like a key are left out.",
   "imp.chats.local": "The messages stay on this computer.",
@@ -822,6 +826,11 @@ const strings: Record<string, string> = {
 export function t(key: string, params: Record<string, string | number> = {}): string {
   const text = strings[key] ?? key;
   return text.replace(/\{(\w+)\}/g, (_, k: string) => String(params[k] ?? ""));
+}
+
+/** Where the Assistant is set up: Settings in the Mac layout, the Connectors page in a browser. */
+export function assistantPlace(): string {
+  return t(desktop ? "ast.where" : "ast.where.web");
 }
 
 /** Pluralised copy: `${key}.one` for one, `${key}.other` otherwise; `{n}` is filled in. */
