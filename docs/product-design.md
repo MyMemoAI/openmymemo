@@ -926,3 +926,73 @@ Decided 2026-10-22, from the recommendations in the design:
 3. The daily-brief notification is on by default at 9:00, and is skipped on days with nothing to report.
 4. Phone push waits until steps 1 and 2 have been used (§18.6).
 5. The secret patterns cover keys, tokens, passwords, payment cards and government ID numbers; phone numbers are left out for now.
+
+## 19. Tell OpenMyMemo: say it, and the Assistant files it (2026-10-24, design)
+
+Today a memory gets in when an AI app proposes it, when it's imported, or when the person writes it out themselves on the Memories page, one statement at a time and in the right topic. This adds a box on Home where the person simply says what's new, in their own words. The Assistant (§17, the person's own model or MyMemo's hosted one) turns it into changes to memory, and nothing changes until the person saves them.
+
+Decided by the product owner: the box is on Home; the Assistant may add, update and archive; every change is previewed first.
+
+### 19.1 What the person sees
+
+- **On Home**, above the cards: one box, "Tell OpenMyMemo…", up to 4,000 characters. Examples rotate in the placeholder: "I moved to Berlin last month", "I don't drink coffee any more", "Call me Sam".
+- **Under the box**, when the Assistant uses a model outside this computer, the destination is always named: "Sent to MyMemo's hosted model" or "Sent to api.openai.com". Nothing is sent before **Preview**.
+- **The preview** lists the changes, as on the Changes page:
+  - **Add**, with its topic and kind.
+  - **Update**, showing the current text with the new text under it.
+  - **Archive**, showing the current text and why.
+  - Each change has a tick box and can be edited. A change to a memory the person edited since the preview opened is refused on save (version check, as for edits), and the preview is refreshed.
+- **Save** applies the ticked changes as the person's own edits: source `you`, logged as edits, and undoable from each memory's history as any edit is. Then a short line says what was done ("Added 2, updated 1"), with a link to each memory.
+- **Without the Assistant** (off, signed out, the plan missing or used up, the hosted service briefly unavailable), the box still works, by rules. The text becomes new memories, one per paragraph (cut at 1,000 characters), filed by today's sort rules, and the preview says "Turn on the Assistant to also update what you already have." Never an error that loses what was typed.
+
+### 19.2 What the model is given
+
+The text the person typed, the list of topics, and the memories it may need in order to update or archive. Those are up to 20, found by recall (§17.4, hybrid search over the typed text). Each one is a labelled block with its id and current text.
+
+- **Privacy holds as everywhere in §17.** For a model outside this computer, memories in private topics or marked private are never sent, so they can't be updated this way. The preview says so when a private memory was a likely match ("1 private memory wasn't checked").
+- **The typed text is screened like chat imports (§17.5).** Key and token shapes are masked before it leaves the computer.
+- **The answer is checked before anything is shown.**
+  - Updates and archives may only name memory ids that were sent.
+  - Every topic must exist, or is dropped to "suggest a topic".
+  - Content follows the memory rules: one standalone statement, at most 1,000 characters.
+  - Anything else is dropped.
+
+The instructions say:
+- A memory is a durable fact, preference or way of working, as in import splitting.
+- Update a memory when the new text replaces what it says (a move, a new job, a changed preference); archive one only when the person says it's no longer true and nothing replaces it; otherwise add.
+- Keep the person's language, names and dates; never infer.
+- Leave out passing remarks that aren't worth remembering, and say so in `skipped`.
+
+Schema (task `tell`):
+
+```json
+{"changes": [{"op": "add|update|archive", "memory_id": "string|null", "content": "string|null",
+              "topic": "string|null", "kind": "fact|preference|ongoing|instruction|null", "reason": "string"}],
+ "skipped": "string|null"}
+```
+
+### 19.3 Where it lives
+
+- **OpenMyMemo:**
+  - `assistant/tell.py` builds the preview: recall, blocks, the call, the checks, and the rules fallback. It works with every kind of model.
+  - The API has `POST /api/tell/preview` (`{text}` → `{changes, skipped, by, private_skipped}`) and `POST /api/tell/apply` (`{changes}` with each memory's `expected_version`).
+  - The panel has the Home box and the preview.
+  - Copy is English only.
+  - The feature is a new Assistant feature switch, `tell`, on by default.
+- **MyMemo's hosted model.** The `tell` task joins the service's fixed tasks, with the same instructions and schema. The shared fixture `tests/fixtures/cloud/assistant/tasks.json` gains the task, byte-identical in both repositories. It is built in the closed-source MyMemo service, as for §17.8. The service ships first. An older service answers 400 for an unknown task, and OpenMyMemo then falls back to the rules with "MyMemo's hosted model doesn't do this yet."
+- **Cost.** One call per Preview, about 1,000–6,000 input tokens. On the hosted model it counts against the plan's allowance like any task.
+
+### 19.4 Order of work
+
+1. This section.
+2. OpenMyMemo: `tell.py`, the API and tests with a fake model, using the person's own key or a local model.
+3. The MyMemo service: the `tell` task and the shared fixture.
+4. OpenMyMemo: the Home box and the preview.
+5. Release, after the service is deployed.
+
+Not in this step:
+- a quick-capture window from the menu bar;
+- `openmymemo tell` in the CLI;
+- voice input.
+
+They reuse `tell.py` when wanted.
