@@ -388,3 +388,17 @@ def test_status_lines_up_the_topic_columns_for_long_titles(vault):
     rows = {line.split()[-1]: line for line in out if line.endswith(("identity", "how-to-work-with-me", "interests"))}
     # "How to work with me" and "Interests and taste" are wider than the shorter titles' column.
     assert len({line.index(slug) for slug, line in rows.items()}) == 1, rows
+
+
+def test_command_help_has_no_line_breaks_inside_a_paragraph():
+    # Typer keeps a docstring's single line breaks, so a wrapped paragraph shows broken mid-sentence in --help
+    import typer
+
+    def commands(cmd, path=()):
+        yield path, cmd
+        for name, sub in getattr(cmd, "commands", {}).items():
+            yield from commands(sub, (*path, name))
+
+    broken = [" ".join(path) for path, cmd in commands(typer.main.get_command(app))
+              if any("\n" in p.strip() for p in (cmd.help or "").split("\n\n"))]
+    assert broken == []
