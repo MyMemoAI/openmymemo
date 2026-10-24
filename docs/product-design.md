@@ -943,7 +943,7 @@ Decided by the product owner: the box is on Home; the Assistant may add, update 
   - **Archive**, showing the current text and why.
   - Each change has a tick box and can be edited. A change to a memory the person edited since the preview opened is refused on save (version check, as for edits), and the preview is refreshed.
 - **Save** applies the ticked changes as the person's own edits: source `you`, logged as edits, and undoable from each memory's history as any edit is. Then a short line says what was done ("Added 2, updated 1"), with a link to each memory.
-- **Without the Assistant** (off, signed out, the plan missing or used up, the hosted service briefly unavailable), the box still works, by rules. The whole text becomes one new memory, filed by today's sort rules, and the preview says "Turn on the Assistant to also update what you already have." Never an error that loses what was typed.
+- **Without the Assistant** (off, signed out, the plan missing or used up, the hosted service briefly unavailable), the box still works, by rules. The text becomes new memories, one per paragraph (cut at 1,000 characters), filed by today's sort rules, and the preview says "Turn on the Assistant to also update what you already have." Never an error that loses what was typed.
 
 ### 19.2 What the model is given
 
