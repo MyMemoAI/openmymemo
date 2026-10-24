@@ -43,6 +43,7 @@ from .assistant import (
 )
 from .assistant import features as assistant_features
 from .assistant import mymemo as assistant_mymemo
+from .assistant import tell as assistant_tell
 from .cloud import CALLBACK_HEADERS, Cloud, CloudError, SettingLocked, callback_page
 from .cloud import load_link as cloud_link
 from .connectors import Connector, Connectors
@@ -82,6 +83,23 @@ class MemoryPatch(BaseModel):
 
 class NoticeIn(BaseModel):
     id: str
+
+
+class TellIn(BaseModel):
+    text: str
+
+
+class TellChange(BaseModel):
+    op: str
+    memory_id: str | None = None
+    content: str | None = None
+    topic: str | None = None
+    kind: str | None = None
+    version: int | None = None  # the version the preview showed; a memory that moved on is refused
+
+
+class TellApplyIn(BaseModel):
+    changes: list[TellChange]
 
 
 class DismissIn(BaseModel):
@@ -331,6 +349,19 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
         except ValueError as e:
             raise HTTPException(400, "date must be YYYY-MM-DD") from e
         return brief.build(vault, day)  # one day in memory (product-design.md §18.3)
+
+    # ---- Tell OpenMyMemo (product-design.md §19) ---------------------------------------------------
+
+    @api.post("/api/tell/preview")
+    def tell_preview(body: TellIn) -> dict:
+        try:
+            return assistant_tell.preview(vault, body.text)
+        except assistant_tell.TellError as e:
+            raise HTTPException(400, str(e)) from None
+
+    @api.post("/api/tell/apply")
+    def tell_apply(body: TellApplyIn) -> dict:
+        return assistant_tell.apply(vault, [c.model_dump() for c in body.changes])
 
     # ---- notifications the desktop app shows (product-design.md §18.4) -----------------------------
 

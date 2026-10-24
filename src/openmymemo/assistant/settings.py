@@ -31,12 +31,13 @@ from urllib.parse import urlsplit
 
 log = logging.getLogger("openmymemo.assistant")
 
-FEATURES = ("import", "sort", "recall", "check", "session", "tidy")
+FEATURES = ("import", "sort", "recall", "check", "session", "tidy", "tell")
 KINDS = ("local", "key", "mymemo")
 PROTOCOLS = ("openai", "anthropic")
 # Imports and sorting are what step 1 builds; recall and checking writes are cheap and on once the Assistant is on.
 # Session-end extraction and tidy-up read much more, so they wait until the person turns them on (§17.6, §17.7).
-DEFAULT_FEATURES = {"import": True, "sort": True, "recall": True, "check": True, "session": False, "tidy": False}
+DEFAULT_FEATURES = {"import": True, "sort": True, "recall": True, "check": True, "session": False, "tidy": False,
+                    "tell": True}
 DEFAULT_CAPS = {"calls": 1000, "tokens": 2_000_000}
 DEFAULT_TIMEOUT = 60.0
 DEFAULT_CHECK_BUDGET = 2.0  # seconds a proposal may wait for the Assistant's check before today's rules file it
