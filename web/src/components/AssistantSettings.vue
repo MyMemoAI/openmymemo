@@ -25,7 +25,7 @@ const CHOICES: Choice[] = ["off", "local", "key", "mymemo"];
 // A kind the server doesn't offer isn't shown: MyMemo's hosted model is offered unless turned off on this computer
 // (OPENMYMEMO_ASSISTANT_MYMEMO=0, §17.8).
 const choices = computed(() => CHOICES.filter((c) => c === "off" || status.value?.kinds[c]));
-const FEATURES: AssistantFeature[] = ["import", "sort", "recall", "check", "session", "tidy"];
+const FEATURES: AssistantFeature[] = ["import", "sort", "recall", "check", "session", "tidy", "tell"];
 
 const status = ref<AssistantStatus | null>(null);
 const busy = ref(false);

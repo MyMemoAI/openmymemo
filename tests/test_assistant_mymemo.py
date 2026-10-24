@@ -861,14 +861,14 @@ def test_every_feature_sends_mymemo_a_task_it_takes(vault, fake, monkeypatch):
     inputs, nothing else): MyMemo answers every one instead of refusing it as a bad request."""
     from test_assistant_writes import FIXTURES, app_connector, place_transcript
 
-    from openmymemo.assistant import chats, tidy
+    from openmymemo.assistant import chats, tell, tidy
     from openmymemo.assistant import session as sessions
     from openmymemo.assistant.checks import check_proposal
     from openmymemo.recall import search
 
     signed_in(vault, fake)
     save_settings(features={"import": True, "sort": True, "recall": True, "check": True, "session": True,
-                            "tidy": True}, session_apps={"claude-code": "allowed"})
+                            "tidy": True, "tell": True}, session_apps={"claude-code": "allowed"})
     for text in ("Prefers tea over coffee", "Prefers green tea", "Lives in Berlin", "喜欢喝茶"):
         vault.add("interests", text)
     features.import_preview(vault, "markdown", PASTE)
@@ -880,19 +880,20 @@ def test_every_feature_sends_mymemo_a_task_it_takes(vault, fake, monkeypatch):
     chats.ChatImport(vault, "claude-export", convs).run()
     sessions.work(vault, "claude-code", place_transcript(), "s-1")
     Assistant.from_settings(vault).test()
+    tell.preview(vault, "I live in Berlin now and drink green tea")
     sent = {c["body"]["task"] for c in fake.tasks}
     assert {"import.split", "sort", "check", "recall.expand", "tidy", "import.chats", "session.extract",
-            "test"} <= sent, sent
+            "test", "tell"} <= sent, sent
     assert len(fake.task_auth) == len(fake.tasks)  # none was refused as a bad request
 
 
 def test_the_tasks_fixture_pins_the_schemas_this_app_checks_answers_with():
     """MyMemo asks the model for the schema in tasks.json; the app cleans the answer with its own. They must agree."""
-    from openmymemo.assistant import chats, checks, tidy
+    from openmymemo.assistant import chats, checks, tell, tidy
     from openmymemo.recall import hybrid
 
     tasks = fixture("assistant/tasks.json")["tasks"]
-    local = {"import.split": features.SPLIT_SCHEMA, "sort": features.SORT_SCHEMA, "check": checks.CHECK_SCHEMA,
+    local = {"tell": tell.TELL_SCHEMA, "import.split": features.SPLIT_SCHEMA, "sort": features.SORT_SCHEMA, "check": checks.CHECK_SCHEMA,
              "import.chats": chats.EXTRACT_SCHEMA, "session.extract": chats.EXTRACT_SCHEMA, "tidy": tidy.SCHEMA,
              "recall.expand": hybrid.EXPAND_SCHEMA, "recall.rerank": hybrid.RERANK_SCHEMA}
     for name, schema in local.items():

@@ -432,10 +432,40 @@ export interface FilePreview {
   items: ImportItem[];
 }
 
-export type AssistantFeature = "import" | "sort" | "recall" | "check" | "session" | "tidy";
+export type AssistantFeature = "import" | "sort" | "recall" | "check" | "session" | "tidy" | "tell";
 export type AssistantKind = "local" | "key" | "mymemo";
 
 /** Settings → Assistant (src/openmymemo/assistant/core.py `status`). The key itself is never sent back. */
+/** One change Tell OpenMyMemo proposes (src/openmymemo/assistant/tell.py `preview`). ``current`` and ``version``
+ * are the memory as the preview saw it, for an update or archive. */
+export interface TellChange {
+  op: "add" | "update" | "archive";
+  memory_id: string | null;
+  content: string | null;
+  topic: string | null;
+  kind: Kind | null;
+  reason: string;
+  current: string | null;
+  version: number | null;
+}
+
+export interface TellPreview {
+  by: "assistant" | "rules";
+  changes: TellChange[];
+  skipped: string | null;
+  /** Likely matches left out because they're private. */
+  private_skipped: number;
+  note: string | null;
+}
+
+export interface TellApplied {
+  added: number;
+  updated: number;
+  archived: number;
+  ids: string[];
+  errors: { change: Partial<TellChange>; error: string }[];
+}
+
 export interface AssistantStatus {
   enabled: boolean;
   kind: AssistantKind;
@@ -771,6 +801,9 @@ export const api = {
   chatCancel: (job: string) => req<{ ok: boolean }>("DELETE", `/api/import/chats/${enc(job)}`),
   importCommit: (source: string, items: ImportItem[]) =>
     req<{ memory_ids: string[] }>("POST", "/api/import/commit", { source, items }),
+  tellPreview: (text: string) => req<TellPreview>("POST", "/api/tell/preview", { text }),
+  tellApply: (changes: Omit<TellChange, "current" | "reason">[]) =>
+    req<TellApplied>("POST", "/api/tell/apply", { changes }),
   sortPlan: (topic?: string | null) => req<SortRow[]>("GET", `/api/sort${topic ? `?topic=${enc(topic)}` : ""}`),
   sortMove: (moves: { memory_id: string; topic: string }[]) => req<{ moved: number }>("POST", "/api/sort", { moves }),
   async exportText(format: string, includePrivate: boolean): Promise<string> {

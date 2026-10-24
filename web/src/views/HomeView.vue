@@ -3,12 +3,13 @@ import { computed, ref, watch } from "vue";
 import { api, type Brief, type Overview, type SafetyIssue, type SafetyScore } from "../api";
 import AppIcon from "../components/AppIcon.vue";
 import PageHeader from "../components/PageHeader.vue";
+import TellBox from "../components/TellBox.vue";
 import { relTime, t, tn } from "../i18n";
 import { act, store } from "../store";
 
 /**
  * Home (product-design.md §18.1): the safety score, what waits, the memory at a glance, the connected apps and the
- * last 7 days. It summarises and links; the work happens on the other pages. No memory text is shown here.
+ * last 7 days, under the Tell OpenMyMemo box (§19). It summarises and links; the work happens on the other pages.
  */
 const data = ref<Overview | null>(null);
 const checks = ref<SafetyScore | null>(null);
@@ -177,6 +178,8 @@ function access(a: Overview["apps"][number]): string[] {
 <template>
   <div class="mx-auto max-w-[880px] space-y-5">
     <PageHeader :title="t('nav.home')" :subtitle="t('home.subtitle')" />
+
+    <TellBox />
 
     <div v-if="!data" class="py-16 text-center text-muted">{{ t("common.loading") }}</div>
     <div v-else class="grid gap-5 md:grid-cols-2">

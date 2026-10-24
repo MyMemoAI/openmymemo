@@ -619,6 +619,97 @@
         "additionalProperties": false
       }
     },
+    "tell": {
+      "feature": "tell",
+      "blocks": {
+        "what they said": {
+          "min": 1,
+          "max": 1
+        },
+        "topics": {
+          "min": 0,
+          "max": 1
+        },
+        "memory": {
+          "min": 0,
+          "max": 20
+        }
+      },
+      "inputs": [],
+      "schema": {
+        "type": "object",
+        "properties": {
+          "changes": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "object",
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "add",
+                    "update",
+                    "archive"
+                  ]
+                },
+                "memory_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 64
+                },
+                "content": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 1000
+                },
+                "topic": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "kind": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "maxLength": 300
+                }
+              },
+              "required": [
+                "op",
+                "memory_id",
+                "content",
+                "topic",
+                "kind",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "skipped": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 300
+          }
+        },
+        "required": [
+          "changes",
+          "skipped"
+        ],
+        "additionalProperties": false
+      }
+    },
     "test": {
       "feature": "test",
       "blocks": {},

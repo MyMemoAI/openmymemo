@@ -43,6 +43,7 @@ from .assistant import (
 )
 from .assistant import features as assistant_features
 from .assistant import mymemo as assistant_mymemo
+from .assistant import tell as assistant_tell
 from .cloud import CALLBACK_HEADERS, Cloud, CloudError, SettingLocked, callback_page
 from .cloud import load_link as cloud_link
 from .connectors import Connector, Connectors
@@ -82,6 +83,23 @@ class MemoryPatch(BaseModel):
 
 class NoticeIn(BaseModel):
     id: str
+
+
+class TellIn(BaseModel):
+    text: str
+
+
+class TellChange(BaseModel):
+    op: str
+    memory_id: str | None = None
+    content: str | None = None
+    topic: str | None = None
+    kind: str | None = None
+    version: int | None = None  # the version the preview showed; a memory that moved on is refused
+
+
+class TellApplyIn(BaseModel):
+    changes: list[TellChange]
 
 
 class DismissIn(BaseModel):
@@ -332,6 +350,22 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
             raise HTTPException(400, "date must be YYYY-MM-DD") from e
         return brief.build(vault, day)  # one day in memory (product-design.md §18.3)
 
+    # ---- Tell OpenMyMemo (product-design.md §19) ---------------------------------------------------
+
+    @api.post("/api/tell/preview")
+    def tell_preview(body: TellIn) -> dict:
+        try:
+            return assistant_tell.preview(vault, body.text)
+        except assistant_tell.TellError as e:
+            raise HTTPException(400, str(e)) from None
+
+    @api.post("/api/tell/apply")
+    def tell_apply(body: TellApplyIn) -> dict:
+        try:
+            return assistant_tell.apply(vault, [c.model_dump() for c in body.changes])
+        except assistant_tell.TellError as e:
+            raise HTTPException(400, str(e)) from None
+
     # ---- notifications the desktop app shows (product-design.md §18.4) -----------------------------
 
     @api.get("/api/notices")
@@ -344,7 +378,7 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
         try:
             notices.sent(vault, body.id)
         except ValueError as e:
-            raise HTTPException(400, str(e)) from e
+            raise HTTPException(400, str(e)) from None
         return {"ok": True}
 
     # ---- memory safety (product-design.md §18.2) -------------------------------------------------
@@ -727,7 +761,7 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
         try:
             items = assistant_features.import_preview(vault, body.source, body.text)
         except ValueError as e:
-            raise HTTPException(400, str(e)) from e
+            raise HTTPException(400, str(e)) from None
         return [i.to_dict() for i in items]
 
     # The panel reads other apps' memory files only in the home folder, so a request can't point it at the rest
@@ -910,7 +944,7 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
         try:
             return {"memory_ids": transfer.commit(vault, items, body.source)}
         except ValueError as e:
-            raise HTTPException(400, str(e)) from e
+            raise HTTPException(400, str(e)) from None
 
     @api.get("/api/sort")
     def sort_preview(topic: str | None = None) -> list[dict]:
@@ -925,7 +959,7 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
         try:
             text = transfer.export(vault, format, include_private=include_private)
         except ValueError as e:
-            raise HTTPException(400, str(e)) from e
+            raise HTTPException(400, str(e)) from None
         score.note_export(vault, full=include_private)
         ext = {"json": "json", "markdown": "md"}.get(format, "txt")
         return PlainTextResponse(text, headers={
@@ -968,7 +1002,7 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
         try:
             items = transfer.plan(vault, transfer.parse(body.source, body.text))
         except ValueError as e:
-            raise HTTPException(400, str(e)) from e
+            raise HTTPException(400, str(e)) from None
         counts = {"pending": 0, "applied": 0, "duplicate": 0}
         for it in items:
             if it.duplicate_of:

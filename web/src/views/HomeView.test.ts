@@ -58,7 +58,7 @@ function brief(extra: Partial<Brief> = {}): Brief {
 }
 
 const { api } = vi.hoisted(() => ({
-  api: { overview: vi.fn(), brief: vi.fn(), archive: vi.fn(), score: vi.fn(), dismissIssue: vi.fn(), state: vi.fn(), memories: vi.fn(),
+  api: { assistant: vi.fn(async () => ({ enabled: false })), overview: vi.fn(), brief: vi.fn(), archive: vi.fn(), score: vi.fn(), dismissIssue: vi.fn(), state: vi.fn(), memories: vi.fn(),
          proposals: vi.fn(async () => []), connectors: vi.fn(async () => []) },
 }));
 vi.mock("../api", () => ({ api }));
