@@ -200,9 +200,13 @@ def _by_rules(vault: Vault, text: str, note: str | None) -> dict:
 
 def apply(vault: Vault, changes: list[dict]) -> dict:
     """Save the changes the person kept, as their own edits. ``{"added", "updated", "archived", "ids", "errors"}``;
-    an update or archive whose memory moved on since the preview is refused (``errors``), the others are saved."""
+    an update or archive whose memory moved on since the preview is refused (``errors``), the others are saved.
+    Every change is saved: a batch bigger than any preview can make (the rules make at most one change per character
+    typed) is refused whole, before anything is written."""
+    if len(changes) > MAX_TEXT:
+        raise TellError("Too many changes at once. Preview again.")
     out: dict = {"added": 0, "updated": 0, "archived": 0, "ids": [], "errors": []}
-    for c in changes[:MAX_CHANGES * 2]:
+    for c in changes:
         op = c.get("op")
         try:
             if op == "add":

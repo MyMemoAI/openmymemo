@@ -119,6 +119,17 @@ def test_long_text_is_cut_into_memory_sized_parts_and_limits_are_checked(vault):
         tell.preview(vault, "x" * (tell.MAX_TEXT + 1))
 
 
+def test_every_paragraph_kept_by_rules_is_saved(vault):
+    p = tell.preview(vault, "\n\n".join(f"Fact number {i}" for i in range(41)))
+    assert p["by"] == "rules" and len(p["changes"]) == 41
+    done = tell.apply(vault, p["changes"])
+    assert done["added"] == 41 and done["errors"] == []
+    assert {m.content for m in vault.memories()} >= {f"Fact number {i}" for i in range(41)}
+    with pytest.raises(tell.TellError):  # more than any preview makes: refused whole, nothing written
+        tell.apply(vault, [{"op": "add", "content": "x", "topic": "identity"}] * (tell.MAX_TEXT + 1))
+    assert len(vault.memories()) == 41
+
+
 def test_a_memory_edited_since_the_preview_is_refused_and_the_rest_saved(vault, fake):
     lyon = vault.add("identity", "Lives in Lyon")
     turn_on(vault, kind="key", model="m", api_key="k")
