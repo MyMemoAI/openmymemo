@@ -16,7 +16,7 @@ def test_a_new_folder_is_a_first_run(vault):
     assert o["first_run"] is True
     assert o["memories"]["total"] == 0 and o["apps"] == [] and o["waiting"] == {
         "pending": 0, "unreviewed": 0, "review_due": 0}
-    assert o["safety"]["score"] == 85 and [i["id"] for i in o["safety"]["top"]] == ["backup"]
+    assert o["safety"]["score"] == 100 and o["safety"]["top"] == []  # nothing to back up yet
     assert len(o["memories"]["growth"]) == 30 and len(o["activity"]) == 7
 
 

@@ -35,10 +35,12 @@ def git(cwd, *args, days_ago=0):
     subprocess.run(["git", *args], cwd=cwd, env=env, check=True, capture_output=True)
 
 
-def test_a_new_folder_loses_only_the_backup(vault):
+def test_a_new_folder_has_nothing_to_back_up_until_its_first_memory(vault):
     r = score.compute(vault)
-    assert ids(r) == ["backup"]
-    assert r["score"] == 85 and r["level"] == "Good" and r["week_change"] is None
+    assert ids(r) == [] and r["score"] == 100 and r["level"] == "Excellent" and r["week_change"] is None
+    vault.add("work", "Works at Acme")
+    r = score.compute(vault)
+    assert ids(r) == ["backup"] and r["score"] == 85 and r["level"] == "Good"
     assert [(a["id"], a["max"]) for a in r["areas"]] == [
         ("sensitive", 25), ("apps", 25), ("review", 20), ("upkeep", 15), ("backup", 15)]
 
@@ -97,6 +99,7 @@ def test_a_failing_app_catalog_doesnt_hide_the_score(vault, monkeypatch):
         raise RuntimeError("unreadable config")
 
     monkeypatch.setattr(clients, "catalog", boom)
+    vault.add("work", "Works at Acme")
     assert score.compute(vault)["score"] == 85
 
 
@@ -124,6 +127,7 @@ def test_memory_upkeep(vault):
 
 
 def test_a_full_export_counts_as_a_backup_and_a_partial_one_doesnt(vault):
+    vault.add("work", "Works at Acme")
     score.note_export(vault, full=False)
     assert "backup" in ids(score.compute(vault))
     score.note_export(vault, full=True)
@@ -133,6 +137,7 @@ def test_a_full_export_counts_as_a_backup_and_a_partial_one_doesnt(vault):
 
 @needs_git
 def test_a_recent_commit_of_every_memory_file_counts_as_a_backup(vault):
+    vault.add("work", "Works at Acme")
     git(vault.root, "init", "-q")
     assert "backup" in ids(score.compute(vault))  # a repository with no commit is no copy
     git(vault.root, "add", "-A")
@@ -150,6 +155,7 @@ def test_a_recent_commit_of_every_memory_file_counts_as_a_backup(vault):
 
 @needs_git
 def test_an_old_commit_is_no_backup(vault):
+    vault.add("work", "Works at Acme")
     git(vault.root, "init", "-q")
     git(vault.root, "add", "-A")
     git(vault.root, "commit", "-qm", "memory", days_ago=40)
@@ -158,6 +164,7 @@ def test_an_old_commit_is_no_backup(vault):
 
 @needs_git
 def test_a_folder_its_repository_ignores_is_no_backup(vault, tmp_path):
+    vault.add("work", "Works at Acme")
     git(tmp_path, "init", "-q")
     (tmp_path / ".gitignore").write_text("vault/\n", encoding="utf-8")
     git(tmp_path, "add", ".gitignore")
@@ -166,6 +173,7 @@ def test_a_folder_its_repository_ignores_is_no_backup(vault, tmp_path):
 
 
 def test_dismissing_and_restoring(vault):
+    vault.add("work", "Works at Acme")
     score.dismiss(vault, "backup")  # "I back up another way"
     r = score.compute(vault)
     assert r["score"] == 100 and r["level"] == "Excellent"
@@ -189,6 +197,7 @@ def test_history_is_one_line_a_day_with_numbers_only(vault):
 
 
 def test_the_score_over_the_api(vault):
+    vault.add("work", "Works at Acme")
     api = TestClient(create_api(vault, 8787), base_url="http://127.0.0.1:8787")
     r = api.get("/api/score", headers=H)
     assert r.status_code == 200 and r.json()["score"] == 85
@@ -202,6 +211,7 @@ def test_the_score_over_the_api(vault):
 
 
 def test_status_shows_the_score(vault):
+    vault.add("work", "Works at Acme")
     runner = CliRunner()
     r = runner.invoke(app, ["--vault", str(vault.root), "status"])
     assert r.exit_code == 0 and r.stdout.startswith("Memory safety: 85 · Good\n")
