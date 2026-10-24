@@ -476,8 +476,9 @@ def estimate(chs: Sequence[Chunk], assistant: Assistant | None = None) -> dict:
     if assistant is not None:
         s = assistant.settings
         usage = s.month_usage()
-        out["calls_left"] = None if s.caps.get("calls") is None else max(0, s.caps["calls"] - usage["calls"])
-        out["tokens_left"] = None if s.caps.get("tokens") is None else max(0, s.caps["tokens"] - usage["tokens"])
+        limits = s.limits
+        out["calls_left"] = None if limits["calls"] is None else max(0, limits["calls"] - usage["calls"])
+        out["tokens_left"] = None if limits["tokens"] is None else max(0, limits["tokens"] - usage["tokens"])
         out["remote"] = assistant.remote
         out["host"] = s.host
     return out
