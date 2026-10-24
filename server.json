@@ -8,7 +8,7 @@
     "source": "github"
   },
   "websiteUrl": "https://github.com/MyMemoAI/openmymemo",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "icons": [
     {
       "src": "https://raw.githubusercontent.com/MyMemoAI/openmymemo/main/integrations/icons/icon-512.png",
@@ -23,7 +23,7 @@
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "openmymemo",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"

@@ -2,9 +2,10 @@
 
 What changed in each release, for people who use OpenMyMemo. Every release is also on [GitHub](https://github.com/MyMemoAI/openmymemo/releases).
 
-## Unreleased
+## 0.3.1 — 2026-10-24
 
 - **Tell OpenMyMemo.** Home has a box where you say what's new in your own words, such as "I moved to Berlin last month" or "I don't drink coffee any more". With the Assistant on, it works out which memories to add, update or archive, and shows each change with its reason. Untick or edit any change, then save the rest; they're saved as your own edits. Before you press Preview, the box names where the text goes. Memories in private topics, or marked private, are never sent. Without the Assistant, what you type is kept as new memories, filed by rules. Settings → Assistant has a switch for it.
+- With MyMemo's hosted model, the monthly call and token limits set on this computer no longer stop the Assistant: the plan's own monthly allowance is what counts, and Settings → Assistant and `openmymemo assistant status` show that instead.
 
 ## 0.3.0 — 2026-10-22
 
