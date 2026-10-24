@@ -204,11 +204,17 @@ def import_(ctx: typer.Context,
             max_calls: Annotated[int | None, typer.Option(
                 help="Chats only: read at most this many chunks (one model call each), newest first.")] = None,
             ) -> None:
-    """Import memories from ChatGPT, Claude, Gemini, Markdown, JSON or another AI app's memory file (CLAUDE.md,
-    AGENTS.md, GEMINI.md, Cursor rules, memory.md, …) into a from-<source> topic, in their order.
+    """Import memories from ChatGPT, Claude, Gemini, Markdown, JSON or another AI app's memory file.
 
-    With the OpenMyMemo Assistant: chat exports (chatgpt-export, claude-export: the export's conversations.json or
-    .zip) and agent sessions (claude-code-sessions, codex-sessions: a transcript or the app's folder)."""
+    Memory files are CLAUDE.md, AGENTS.md, GEMINI.md, Cursor rules, memory.md and the like.
+
+    The memories go into a from-<source> topic, in their order.
+
+    With the OpenMyMemo Assistant it also reads chats and agent sessions:
+
+    chatgpt-export and claude-export take the export's conversations.json or .zip.
+
+    claude-code-sessions and codex-sessions take a transcript or the app's folder."""
     vault = _vault(ctx)
     if source in transfer.CHAT_SOURCES:
         _import_chats(vault, source, file, yes, max_calls)
@@ -358,8 +364,9 @@ def session_end(ctx: typer.Context,
                 transcript: Annotated[Path | None, typer.Option(hidden=True)] = None,
                 session: Annotated[str, typer.Option(hidden=True)] = "",
                 event: Annotated[str, typer.Option(hidden=True)] = "SessionEnd") -> None:
-    """After a Claude Code or Codex session: with the Assistant's session feature on and your consent for that app,
-    file what the session taught about you that the app didn't save (product-design.md §17.7)."""
+    """After a Claude Code or Codex session, file what it taught about you that the app didn't save.
+
+    Needs the Assistant's session feature on, and your consent for that app."""
     from .assistant import session as sessions
 
     if hook:
@@ -452,8 +459,11 @@ def tidy_(ctx: typer.Context,
               "--schedule", help="Set when it runs by itself, on this computer, while the panel runs (the Mac "
                                  "app, `openmymemo serve` or an AI app's plugin): off, daily, weekly or monthly. "
                                  "Doesn't run it now.")] = None) -> None:
-    """Tidy up with the OpenMyMemo Assistant: one batch of suggested merges, fixes for contradictions, outdated
-    memories, review dates and rewrites, for you to keep or undo. Needs the Assistant, with tidy-up turned on."""
+    """Tidy up with the OpenMyMemo Assistant: one batch of suggested changes, for you to keep or undo.
+
+    It suggests merges, fixes for contradictions, outdated memories, review dates and rewrites.
+
+    Needs the Assistant, with tidy-up turned on."""
     from .assistant import SettingsError, tidy
 
     vault = _vault(ctx)
@@ -614,8 +624,9 @@ def recall_(
 ) -> None:
     """Print the memories most relevant to a question, ranked and cut to a budget, for a prompt or a hook.
 
-    Uses search by meaning and the OpenMyMemo Assistant when they are on; keyword search otherwise. Prints
-    nothing when no memory matches."""
+    Uses search by meaning and the OpenMyMemo Assistant when they are on, and keyword search otherwise.
+
+    Prints nothing when no memory matches."""
     from .recall import recall
 
     vault = _vault(ctx)
@@ -1407,8 +1418,9 @@ def assistant_signin(
                                                            "linked to OpenMyMemo Cloud.")] = False,
     open_browser: Annotated[bool, typer.Option("--open/--no-open", help="Open the browser.")] = True,
 ) -> None:
-    """Sign in to MyMemo to use its hosted model, and choose it for the Assistant. A computer linked to
-    OpenMyMemo Cloud needs no browser."""
+    """Sign in to MyMemo to use its hosted model, and choose it for the Assistant.
+
+    A computer linked to OpenMyMemo Cloud needs no browser."""
     import webbrowser
 
     from . import cloud
@@ -1599,8 +1611,9 @@ def semantic_on(
 ) -> None:
     """Turn search by meaning on: install ONNX Runtime if needed, download and check the model, build the index.
 
-    The model is downloaded from Hugging Face into this computer's OpenMyMemo settings folder, never into the
-    memory folder; memory text never leaves the computer."""
+    The model is downloaded from Hugging Face into this computer's OpenMyMemo settings folder.
+
+    It never goes into the memory folder, and memory text never leaves the computer."""
     from .recall import local, semantic
 
     vault = _vault(ctx)
