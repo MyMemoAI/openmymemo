@@ -150,9 +150,10 @@ class Assistant:
             if held:
                 return mymemo.hold_message(held)
         usage = s.month_usage()
-        if s.caps.get("calls") is not None and usage["calls"] >= s.caps["calls"]:
+        limits = s.limits
+        if limits["calls"] is not None and usage["calls"] >= limits["calls"]:
             return "This month's limit on calls is reached."
-        if s.caps.get("tokens") is not None and usage["tokens"] >= s.caps["tokens"]:
+        if limits["tokens"] is not None and usage["tokens"] >= limits["tokens"]:
             return "This month's limit on tokens is reached."
         return None
 
@@ -293,7 +294,7 @@ class Assistant:
                 self.last_error = "MyMemo's hosted model doesn't do this."
                 self._log(feature, "unsupported", model=self.settings.model)
                 return None
-            capped = reserve_call(self.settings.caps)
+            capped = reserve_call(self.settings.limits)
             if capped:
                 self.last_error = f"This month's limit on {capped} is reached."
                 self._log(feature, "cap", model=self.settings.model)
@@ -342,7 +343,7 @@ class Assistant:
         held = mymemo.hold(s) if s.kind == "mymemo" else None
         if held and held.get("code") in ("rate_limited", "unavailable"):  # Retry-After holds for tests too
             return {"ok": False, "model": s.model or None, "ms": None, "error": mymemo.hold_message(held)}
-        capped = reserve_call(s.caps)
+        capped = reserve_call(s.limits)
         if capped:
             return {"ok": False, "model": s.model or None, "ms": None,
                     "error": f"This month's limit on {capped} is reached."}

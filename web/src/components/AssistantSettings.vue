@@ -546,7 +546,7 @@ const fmt = (n: number) => n.toLocaleString("en-US");
         <p v-else class="text-[13px] text-muted">{{ t("ast.privateRemote") }}</p>
       </div>
 
-      <form v-if="status.enabled" class="space-y-2 px-4.5 py-3.5" @submit.prevent="saveCaps">
+      <form v-if="status.enabled && status.kind !== 'mymemo'" class="space-y-2 px-4.5 py-3.5" @submit.prevent="saveCaps">
         <div class="font-semibold">{{ t("ast.limits") }}</div>
         <p class="text-[13px] text-muted" data-test="usage">
           {{ t("ast.usage", { calls: fmt(status.usage.calls), tokens: fmt(status.usage.tokens) }) }}

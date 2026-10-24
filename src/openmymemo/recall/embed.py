@@ -336,7 +336,7 @@ class EndpointEmbedder:
         if g.refusal(blocks) is not None:  # the Assistant's own last check of everything going out
             self._log(a, s, "refused_private", ids, len(send))
             raise EmbedError("That includes text that may not be sent to this model.")
-        capped = reserve_call(s.caps)
+        capped = reserve_call(s.limits)
         if capped:
             raise EmbedError(f"This month's limit on {capped} is reached.")
         headers = {"User-Agent": f"OpenMyMemo/{__version__}", "Accept": "application/json"}
