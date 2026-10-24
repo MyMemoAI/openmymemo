@@ -98,4 +98,33 @@ describe("Tell OpenMyMemo", () => {
     expect(w.find('[data-test="tell-done"]').text()).toContain("changed since the preview");
     expect((w.find("textarea").element as HTMLTextAreaElement).value).toBe("I moved to Berlin");
   });
+
+  it("won't save a preview of text changed since, and a failed preview leaves nothing to save", async () => {
+    const w = mount(TellBox);
+    await flushPromises();
+    const box = w.find("textarea");
+    await box.setValue("I live in Berlin");
+    await w.find('[data-test="tell-preview"]').trigger("click");
+    await flushPromises();
+    await box.setValue("Actually I live in Paris");
+    expect(w.find('[data-test="tell-stale"]').exists()).toBe(true);
+    expect(w.find('[data-test="tell-save"]').attributes("disabled")).toBeDefined();
+
+    api.tellPreview.mockImplementation(async () => { throw new Error("offline"); });
+    await w.find('[data-test="tell-preview"]').trigger("click");
+    await flushPromises();
+    expect(w.find('[data-test="tell-changes"]').exists()).toBe(false);
+    expect((box.element as HTMLTextAreaElement).value).toBe("Actually I live in Paris");
+    expect(api.tellApply).not.toHaveBeenCalled();
+  });
+
+  it("keeps an edited change to one memory's length", async () => {
+    const w = mount(TellBox);
+    await flushPromises();
+    await w.find("textarea").setValue("I moved");
+    await w.find('[data-test="tell-preview"]').trigger("click");
+    await flushPromises();
+    const edit = w.find('[data-test="tell-changes"] textarea');
+    expect(edit.attributes("maxlength")).toBe("1000");
+  });
 });

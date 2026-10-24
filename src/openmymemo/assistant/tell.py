@@ -29,6 +29,7 @@ MAX_TEXT = 4000
 MAX_RELATED = 20
 PRIVATE_NEAR = 5  # a private memory among this many best matches counts as a likely match left out
 MAX_CHANGES = 20
+MAX_MEMORY = 1000  # one memory's text
 REASON_MAX = 300
 PROFILE = ("identity", "lifestyle", "how-to-work-with-me", "people", "work")  # filled in when search finds little
 OPS = ("add", "update", "archive")
@@ -208,13 +209,17 @@ def apply(vault: Vault, changes: list[dict]) -> dict:
     out: dict = {"added": 0, "updated": 0, "archived": 0, "ids": [], "errors": []}
     for c in changes:
         op = c.get("op")
+        content = _one_line(c.get("content"), MAX_TEXT + 1)
+        if op in ("add", "update") and len(content) > MAX_MEMORY:
+            out["errors"].append({"change": c, "error": f"A memory is at most {MAX_MEMORY:,} characters. Shorten it."})
+            continue
         try:
             if op == "add":
-                m = vault.add(c.get("topic") or "", _one_line(c.get("content"), 1001), kind=c.get("kind") or None,
+                m = vault.add(c.get("topic") or "", content, kind=c.get("kind") or None,
                               source="user", actor="user")
                 out["added"] += 1
             elif op == "update":
-                m = vault.update(str(c.get("memory_id") or ""), content=_one_line(c.get("content"), 1001),
+                m = vault.update(str(c.get("memory_id") or ""), content=content,
                                  topic=c.get("topic") or None, kind=c.get("kind") or None, actor="user",
                                  expected_version=c.get("version"))
                 out["updated"] += 1

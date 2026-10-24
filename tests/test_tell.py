@@ -130,6 +130,19 @@ def test_every_paragraph_kept_by_rules_is_saved(vault):
     assert len(vault.memories()) == 41
 
 
+def test_an_edited_change_too_long_for_a_memory_is_refused_not_cut(vault):
+    lyon = vault.add("identity", "Lives in Lyon")
+    long = "Lives in Berlin " + "and more " * 130
+    done = tell.apply(vault, [
+        {"op": "update", "memory_id": lyon.id, "content": long, "version": lyon.version},
+        {"op": "add", "content": long, "topic": "identity"},
+        {"op": "add", "content": "x" * tell.MAX_MEMORY, "topic": "identity"},
+    ])
+    assert (done["updated"], done["added"], len(done["errors"])) == (0, 1, 2)
+    assert "at most 1,000 characters" in done["errors"][0]["error"]
+    assert vault.get(lyon.id).content == "Lives in Lyon"
+
+
 def test_a_memory_edited_since_the_preview_is_refused_and_the_rest_saved(vault, fake):
     lyon = vault.add("identity", "Lives in Lyon")
     turn_on(vault, kind="key", model="m", api_key="k")

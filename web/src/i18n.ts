@@ -761,6 +761,7 @@ const strings: Record<string, string> = {
   "tell.archived.other": "archived {n}",
   "tell.nothingSaved": "Nothing was saved.",
   "tell.again": "Preview again",
+  "tell.stale": "You changed the text since the preview. Preview again to save.",
   "sort.title": "Sort into topics",
   "sort.explain": "A suggested topic for each memory. Only the ticked ones move; the rest stay where they are.",
   "sort.none": "No suggestion",

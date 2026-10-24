@@ -10,6 +10,7 @@ import AppIcon from "./AppIcon.vue";
  * nothing is saved until they tick and save them. Without the Assistant the server keeps the text by rules.
  */
 const MAX = 4000;
+const MEMORY_MAX = 1000; // one memory's text, as the server checks it
 const EXAMPLES = ["tell.example.move", "tell.example.coffee", "tell.example.name"];
 
 type Row = TellChange & { tick: boolean };
@@ -17,6 +18,7 @@ type Row = TellChange & { tick: boolean };
 const text = ref("");
 const busy = ref(false);
 const preview = ref<TellPreview | null>(null);
+const previewed = ref(""); // the text the preview was made from
 const rows = ref<Row[]>([]);
 const done = ref<TellApplied | null>(null);
 const assistant = ref<AssistantStatus | null>(null);
@@ -40,7 +42,11 @@ const destination = computed(() => {
 });
 
 const targets = computed(() => (store.state?.topics ?? []).filter((tp) => tp.group !== "imported"));
-const ticked = computed(() => rows.value.filter((r) => r.tick && (r.op === "archive" || (r.content ?? "").trim().length >= 3)));
+const ticked = computed(() =>
+  rows.value.filter((r) => r.tick && (r.op === "archive" || ((r.content ?? "").trim().length >= 3 && (r.content ?? "").length <= MEMORY_MAX))),
+);
+/** The text was changed after Preview: the changes no longer match it, so they can't be saved. */
+const stale = computed(() => !!preview.value && text.value !== previewed.value);
 const savedMemories = computed(() =>
   (done.value?.ids ?? []).map((id) => store.memories.find((m) => m.id === id)).filter((m) => !!m),
 );
@@ -49,9 +55,12 @@ async function runPreview() {
   if (!text.value.trim() || busy.value) return;
   busy.value = true;
   done.value = null;
+  discard(); // a failed preview must not leave the old one saveable
+  const said = text.value;
   try {
-    const p = await api.tellPreview(text.value);
+    const p = await api.tellPreview(said);
     preview.value = p;
+    previewed.value = said;
     rows.value = p.changes.map((c) => ({ ...c, tick: true }));
   } catch (e) {
     toast(e instanceof Error ? e.message : String(e), "error");
@@ -67,14 +76,15 @@ function discard() {
 
 async function save() {
   const changes = ticked.value.map(({ tick: _tick, current: _current, reason: _reason, ...c }) => c);
-  if (!changes.length) return;
+  if (!changes.length || stale.value) return;
+  const said = previewed.value;
   busy.value = true;
   const res = await act(() => api.tellApply(changes));
   busy.value = false;
   if (!res) return;
   done.value = res;
   discard();
-  if (!res.errors.length) text.value = "";
+  if (!res.errors.length && text.value === said) text.value = ""; // never what was typed after the preview
 }
 
 const summary = computed(() => {
@@ -135,7 +145,7 @@ const summary = computed(() => {
             <p v-if="r.current" class="text-sm break-words" :class="r.op === 'update' ? 'text-muted line-through' : ''">
               {{ r.current }}
             </p>
-            <textarea v-if="r.op !== 'archive'" v-model="r.content" rows="2" class="input w-full resize-y text-[15px]"
+            <textarea v-if="r.op !== 'archive'" v-model="r.content" rows="2" class="input w-full resize-y text-[15px]" :maxlength="MEMORY_MAX"
                       :aria-label="t('tell.edit')" />
             <p v-if="r.reason" class="text-[12px] text-muted">{{ r.reason }}</p>
           </div>
@@ -145,9 +155,12 @@ const summary = computed(() => {
       <p v-if="preview.private_skipped" class="flex items-center gap-1.5 text-[13px] text-muted">
         <AppIcon name="lock" :size="13" />{{ tn("tell.private", preview.private_skipped) }}
       </p>
+      <p v-if="stale" class="flex items-center gap-1.5 text-[13px] text-wait-ink" data-test="tell-stale">
+        <AppIcon name="warning" :size="13" />{{ t("tell.stale") }}
+      </p>
       <div class="flex flex-wrap justify-end gap-2">
         <button class="btn" :disabled="busy" @click="discard">{{ t("common.cancel") }}</button>
-        <button class="btn btn-primary" :disabled="busy || !ticked.length" data-test="tell-save" @click="save">
+        <button class="btn btn-primary" :disabled="busy || stale || !ticked.length" data-test="tell-save" @click="save">
           {{ tn("tell.save", ticked.length) }}
         </button>
       </div>
