@@ -215,6 +215,8 @@ def git_backup(vault: Vault, now: datetime) -> bool:
 
 
 def _backup(vault: Vault, now: datetime) -> list[Issue]:
+    if not vault.memories() and not vault.memories("archived"):
+        return []  # nothing to lose yet
     exported = _when(_state(vault).get("last_full_export"))
     if exported and now - exported <= timedelta(days=BACKUP_DAYS):
         return []
