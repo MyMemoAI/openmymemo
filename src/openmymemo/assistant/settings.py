@@ -98,6 +98,12 @@ class Settings:
     key_store: str | None = None  # where the secret in use came from: keychain | file | env | None
 
     @property
+    def limits(self) -> dict[str, int | None]:
+        """The monthly limits this computer enforces. MyMemo's hosted model has its plan's allowance, which the
+        service enforces, so the limits for a model of the person's own don't apply to it."""
+        return {k: None for k in DEFAULT_CAPS} if self.kind == "mymemo" else dict(self.caps)
+
+    @property
     def secret(self) -> str:
         """The credential for the chosen kind: the API key, or MyMemo's token."""
         return self.mymemo_token if self.kind == "mymemo" else self.api_key

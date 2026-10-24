@@ -1322,7 +1322,7 @@ def _assistant_status(vault: Vault) -> None:
         note = "" if s["local"] else " (only with a model on this computer)"
         typer.echo(f"  Private topics it may read: {', '.join(s['private_topics'])}{note}")
     caps, usage = s["caps"], s["usage"]
-    limit = lambda v: "no limit" if v is None else f"{v:,}"  # noqa: E731
+    limit = lambda v: "the plan's" if s["kind"] == "mymemo" else "no limit" if v is None else f"{v:,}"  # noqa: E731
     typer.echo(f"  This month: {usage['calls']:,} calls (limit {limit(caps['calls'])}), "
                f"{usage['tokens']:,} tokens (limit {limit(caps['tokens'])})")
     if s["from_env"]:

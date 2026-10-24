@@ -900,3 +900,17 @@ def test_the_tasks_fixture_pins_the_schemas_this_app_checks_answers_with():
         assert json.loads(json.dumps(schema)) == tasks[name]["schema"], name
     assert tasks["recall.expand"]["inputs"] == ["languages"]
     assert set(tasks) == {*local, "test"}
+
+
+def test_the_computers_own_monthly_limits_dont_stop_the_hosted_model(vault, fake):
+    """The plan's allowance is the service's to enforce (402 quota_exceeded); the limits meant for a model of the
+    person's own, 1,000 calls by default, would otherwise stop a subscriber here first."""
+    a = signed_in(vault, fake)
+    save_settings(caps={"calls": 1, "tokens": 1})
+    a = Assistant.from_settings(vault)
+    assert ask(a) == {"items": [{"text": "ok"}]}
+    assert ask(a) == {"items": [{"text": "ok"}]}
+    assert Assistant.from_settings(vault).status()["usage"]["calls"] == 2  # still counted, only not capped
+    assert a.settings.limits == {"calls": None, "tokens": None}
+    a.settings.kind = "local"
+    assert a.settings.limits == {"calls": 1, "tokens": 1}  # a model of the person's own keeps them
