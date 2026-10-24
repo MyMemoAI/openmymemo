@@ -8,7 +8,7 @@ function status(extra: Partial<AssistantStatus> = {}): AssistantStatus {
   return {
     enabled: false, kind: "local", protocol: "openai", base_url: "", endpoint: "http://127.0.0.1:11434/v1",
     host: "127.0.0.1", model: "", embeddings_model: "", embeddings: false, has_key: false, key_store: null,
-    features: { import: true, sort: true, recall: true, check: true, session: false, tidy: false },
+    features: { import: true, sort: true, recall: true, check: true, session: false, tidy: false, tell: true },
     private_topics: [], caps: { calls: 1000, tokens: 2000000 }, usage: { month: "2026-10", calls: 3, tokens: 1234 },
     timeout: 60, check_budget: 2, session_apps: { "claude-code": null, codex: null }, from_env: [], local: true, problem: "Choose a model.", ready: false, reason: "The Assistant is off.",
     where: "The Assistant is off: memory text goes nowhere.", connector_id: null, revoked: false,
@@ -290,7 +290,7 @@ describe("AssistantSettings", () => {
   });
 
   it("asks per app before reading sessions", async () => {
-    const on = status({ enabled: true, model: "llama3.2", problem: null, features: { import: true, sort: true, recall: true, check: true, session: true, tidy: false }, session_apps: { "claude-code": "asked", codex: null } });
+    const on = status({ enabled: true, model: "llama3.2", problem: null, features: { import: true, sort: true, recall: true, check: true, session: true, tidy: false, tell: true }, session_apps: { "claude-code": "asked", codex: null } });
     api.assistant.mockResolvedValue(on);
     api.assistantSessions.mockResolvedValue({ ...on, session_apps: { "claude-code": "allowed", codex: null } });
     const w = await mountIt();
