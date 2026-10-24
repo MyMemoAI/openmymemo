@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from "vue";
 import { api, type ChatJob, type ChatSource } from "../api";
-import { t } from "../i18n";
+import { assistantPlace, t } from "../i18n";
 import { toast } from "../store";
 import AppIcon from "./AppIcon.vue";
 import ImportPreview from "./ImportPreview.vue";
@@ -156,7 +156,7 @@ onBeforeUnmount(stop);
           <span v-if="job.oldest" class="font-normal text-muted">· {{ job.oldest }} – {{ job.newest }}</span>
         </p>
         <div v-if="!job.ready" class="notice notice-wait flex-wrap gap-2" data-test="chat-needs-assistant">
-          <AppIcon name="info" :size="14" />{{ t("imp.chats.needsAssistant", { reason: job.reason ?? "" }) }}
+          <AppIcon name="info" :size="14" />{{ t("imp.chats.needsAssistant", { reason: job.reason ?? "", where: assistantPlace() }) }}
         </div>
         <template v-else-if="job.estimate.calls">
           <p class="text-[13px]" data-test="chat-estimate">

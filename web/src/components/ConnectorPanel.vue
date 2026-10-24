@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { api, type AppSetup, type AppStatus, type Connector } from "../api";
-import { relTime, t } from "../i18n";
+import { assistantPlace, relTime, t } from "../i18n";
 import { act, copy, store, topicTitle } from "../store";
 import AppIcon from "./AppIcon.vue";
 import ModalDialog from "./ModalDialog.vue";
@@ -145,7 +145,7 @@ function confirmRemove() {
 
     <div v-if="builtIn" class="space-y-0.5 px-4.5 py-3.5">
       <div class="font-semibold">{{ t("con.includePrivate") }}</div>
-      <p class="text-[13px] text-muted">{{ t("con.assistantPrivate") }}</p>
+      <p class="text-[13px] text-muted">{{ t("con.assistantPrivate", { where: assistantPlace() }) }}</p>
     </div>
     <div v-else class="flex items-center justify-between gap-4 px-4.5 py-3.5">
       <div class="min-w-0 space-y-0.5">
@@ -169,7 +169,7 @@ function confirmRemove() {
       </div>
     </div>
 
-    <p v-if="builtIn" class="px-4.5 py-3.5 text-[13px] text-muted">{{ t("con.assistantSetup") }}</p>
+    <p v-if="builtIn" class="px-4.5 py-3.5 text-[13px] text-muted">{{ t("con.assistantSetup", { where: assistantPlace() }) }}</p>
     <div v-else-if="!viaCloud">
       <div class="flex flex-wrap items-center justify-between gap-3 px-4.5 py-3.5">
         <div class="min-w-0 space-y-0.5">

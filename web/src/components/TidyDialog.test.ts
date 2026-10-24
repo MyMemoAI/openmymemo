@@ -81,6 +81,8 @@ describe("Tidy up", () => {
     w = mount(TidyDialog, { global: { stubs: { teleport: true } } });
     await flushPromises();
     expect(w.get('[data-test="tidy-unavailable"]').text()).toContain("isn't used for tidy");
+    // the browser panel has no Settings; the Assistant is set up on the Connectors page there
+    expect(w.get('[data-test="tidy-unavailable"]').text()).toContain("in Connectors → OpenMyMemo Assistant.");
     expect(w.get('[data-test="tidy-run"]').attributes("disabled")).toBeDefined();
     await w.get('[data-test="tidy-schedule"]').setValue("weekly");
     await flushPromises();
