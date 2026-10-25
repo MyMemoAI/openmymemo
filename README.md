@@ -4,7 +4,7 @@ Your AI memory as a plain folder on your own computer. See exactly what models r
 
 <!-- mcp-name: io.github.MyMemoAI/openmymemo -->
 
-> v0.2. What changed in each release: [CHANGELOG.md](https://github.com/MyMemoAI/openmymemo/blob/main/CHANGELOG.md). Product design and status: [docs/product-design.md](https://github.com/MyMemoAI/openmymemo/blob/main/docs/product-design.md). The folder format, for any tool that wants to read or write it: [docs/MEMORY_FORMAT.md](https://github.com/MyMemoAI/openmymemo/blob/main/docs/MEMORY_FORMAT.md).
+> v0.3. What changed in each release: [CHANGELOG.md](https://github.com/MyMemoAI/openmymemo/blob/main/CHANGELOG.md). Product design and status: [docs/product-design.md](https://github.com/MyMemoAI/openmymemo/blob/main/docs/product-design.md). The folder format, for any tool that wants to read or write it: [docs/MEMORY_FORMAT.md](https://github.com/MyMemoAI/openmymemo/blob/main/docs/MEMORY_FORMAT.md).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/MyMemoAI/openmymemo/main/docs/images/panel-memories-dark.png">
@@ -222,7 +222,7 @@ Found a vulnerability? Please report it privately as described in [SECURITY.md](
 
 ## Privacy Policy
 
-Your memory stays on your computer: MyMemo doesn't receive it, and OpenMyMemo has no account, telemetry, analytics or update check. AI apps you connect read the topics you allow (never `health` or `finance` unless you say so) and send what they read to their own model provider under their own policies. OpenMyMemo goes online only to download Python and its libraries when it is installed or first started, and for OpenMyMemo Cloud, which does nothing until you sign in and link this computer; then the memories web apps read pass through the MyMemo service in transit. The optional OpenMyMemo Assistant sends memory text to the model you choose, and only when you turn it on: a model on your own computer keeps it there. Search by meaning on this computer downloads its model from Hugging Face when you turn it on, and sends nothing. The full policy, including what is stored where: [PRIVACY.md](https://github.com/MyMemoAI/openmymemo/blob/main/PRIVACY.md).
+Your memory stays on your computer: MyMemo doesn't receive it, and OpenMyMemo has no account, telemetry or analytics. AI apps you connect read the topics you allow (never `health` or `finance` unless you say so) and send what they read to their own model provider under their own policies. OpenMyMemo goes online only to download Python and its libraries when it is installed or first started, for the Mac and Windows apps' daily look for a new version (which sends nothing about you and can be turned off), and for OpenMyMemo Cloud, which does nothing until you sign in and link this computer; then the memories web apps read pass through the MyMemo service in transit. The optional OpenMyMemo Assistant sends memory text to the model you choose, and only when you turn it on: a model on your own computer keeps it there. Search by meaning on this computer downloads its model from Hugging Face when you turn it on, and sends nothing. The full policy, including what is stored where: [PRIVACY.md](https://github.com/MyMemoAI/openmymemo/blob/main/PRIVACY.md).
 
 ## Development
 
