@@ -150,7 +150,7 @@ A single CLI on PyPI: `uv tool install openmymemo`, or `uvx openmymemo` without 
 | `openmymemo setup codex` | Install the Codex session hook (§5.4.1) |
 | `openmymemo doctor` | Check the setup (folder, uv, panel, each app's config and folder, OpenMyMemo Cloud) and say what to fix; prints no memories and writes nothing |
 | `openmymemo cloud link\|status\|unlink\|settings` | OpenMyMemo Cloud (§16) |
-| `openmymemo assistant status\|set\|test\|off` / `tidy` | OpenMyMemo Assistant, off by default, and its tidy-up (§17) |
+| `openmymemo assistant status\|set\|test\|off\|signin\|signout\|plan\|sessions` / `tidy` | OpenMyMemo Assistant, off by default (§17): sign in to MyMemo's hosted model and show its plan (§17.8), which apps' sessions it may read (§17.7), and its tidy-up |
 | `openmymemo recall <question>` | The memories most relevant to a question, ranked and cut to a budget; search by meaning when it is on, keywords otherwise (§17.4) |
 | `openmymemo semantic on\|off\|status\|index` | Search by meaning with a local embedding model, downloaded when turned on; `index` embeds every memory that has no current vector yet (§17.4) |
 | `openmymemo session-end` | Run by the Claude Code and Codex hooks: with the Assistant's session feature on and consent for that app, files what a session taught about you (§17.7) |
