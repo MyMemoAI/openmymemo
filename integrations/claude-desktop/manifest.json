@@ -2,7 +2,7 @@
   "manifest_version": "0.4",
   "name": "openmymemo",
   "display_name": "OpenMyMemo",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Your AI memory as a local folder you own. Claude reads it and writes what it learns; you see every change and can undo it.",
   "long_description": "OpenMyMemo keeps what AI assistants know about you in a folder of Markdown files on your own computer. Claude reads your memory at the start of a conversation and writes what it learns about you. Additions apply right away and show up in a digest in the OpenMyMemo panel (http://127.0.0.1:8787 while Claude Desktop is running), where you can undo them; changes to anything you wrote yourself, and the private health and finance topics, wait for you. Turn approval on to review every change first. The same memory works in Claude Code, Codex, Cursor and VS Code.",
   "author": {
