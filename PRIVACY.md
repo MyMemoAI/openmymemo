@@ -1,12 +1,12 @@
 # Privacy Policy
 
-Last updated: 2026-10-19
+Last updated: 2026-10-24
 
-OpenMyMemo is open-source software published by MyMemo. It keeps your AI memory in a folder on your own computer. This policy covers the OpenMyMemo command-line tool, its MCP server, its review panel, the Mac app and the plugins and extensions in this repository. OpenMyMemo Cloud, an optional MyMemo service, is covered by the section of that name below and by MyMemo's own privacy policy.
+OpenMyMemo is open-source software published by MyMemo. It keeps your AI memory in a folder on your own computer. This policy covers the OpenMyMemo command-line tool, its MCP server, its review panel, the Mac and Windows apps and the plugins and extensions in this repository. OpenMyMemo Cloud, an optional MyMemo service, is covered by the section of that name below and by MyMemo's own privacy policy.
 
 ## In short
 
-- Your memory stays on your computer. MyMemo does not receive it, and OpenMyMemo has no account, telemetry, analytics, crash reporting or update check.
+- Your memory stays on your computer. MyMemo does not receive it, and OpenMyMemo has no account, telemetry, analytics or crash reporting. The Mac and Windows apps look for a new version once a day, which sends nothing about you or your memory and which you can turn off.
 - AI apps you connect read your memory and send what they read to their own model provider, under that app's privacy policy. The `health` and `finance` topics are hidden from every app unless you allow them.
 - Nothing leaves your computer through OpenMyMemo unless you sign in to OpenMyMemo Cloud and link this computer to a MyMemo account, or turn on the OpenMyMemo Assistant with a model that isn't on your computer.
 
@@ -20,15 +20,16 @@ Everything below is stored only on your computer. OpenMyMemo never uploads it.
   - pending and decided changes proposed by AI apps, with the reason and quote the app gave;
   - the list of connected apps and their permissions. Connector tokens are stored only as a hash.
   - an activity log of what each app did: when it read your memory, which memories it read, the text of its searches, its proposals and their outcome, and imports.
+  - the Memory safety score's daily history and the checks you dismissed, and which of the apps' notifications were already shown.
 - **Backups of other apps' settings:** before it first edits an AI app's MCP configuration file to connect it, OpenMyMemo keeps a copy next to that file (`<file>.openmymemo-backup`). The copy is readable by you only, whatever the original file allows (a copy made by a version before 2026-10-15 took the original's permissions; OpenMyMemo makes it private the next time it changes that file, and you can delete it yourself), but it contains whatever that file held, which may include other secrets.
 - **Other apps' memory files, when you import them:** the Import page's Files tab lists them, for example `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, Cursor rules or `memory.md`, in the folder you choose (your home folder by default). It reads a file only when you open its preview. What you import is copied into your memory folder; the originals are left as they are. Nothing is uploaded.
-- **The Mac app** keeps these under `~/Library`:
-  - its settings: your memory folder's location, the appearance and notifications switches;
-  - the Python it runs on and a download cache;
-  - a log of its background server, which never records your memories.
+- **The Mac and Windows apps** keep these under `~/Library` on a Mac and in `%LOCALAPPDATA%\ai.mymemo.openmymemo` on Windows:
+  - their settings: your memory folder's location, the appearance, notification and update switches, and the time of the daily brief;
+  - the Python they run on and a download cache;
+  - a log of the background server, which never records your memories.
 
-  When an AI app changes something, the Mac app can show a macOS notification that includes the text of the change. You can turn notifications off in Settings.
-- **OpenMyMemo Cloud:** once you change its settings, `settings.json` in OpenMyMemo's per-user application folder holds whether it is listed and which service it uses. If you link this computer, `cloud.json` next to it holds:
+  The apps can show notifications: when an AI app changes something or a change starts waiting for you, yesterday's brief, a reminder about changes that have waited more than 3 days, and new safety issues. Notifications carry counts and app names only, never what a memory says. Each kind has its own switch in Settings.
+- **OpenMyMemo Cloud:** once you change its settings, `settings.json` in OpenMyMemo's per-user application folder (`~/Library/Application Support/OpenMyMemo` on a Mac, `%APPDATA%\OpenMyMemo` on Windows, `~/.config/openmymemo` on Linux) holds whether it is listed and which service it uses. If you link this computer, `cloud.json` next to it holds:
   - the service address, a device id and token, and the private key that opens queued changes;
   - which folder is linked;
   - your MyMemo display name, masked email and plan.
@@ -48,12 +49,13 @@ What an app reads, it sends to its own model provider as part of your conversati
 
 OpenMyMemo's server listens only on `127.0.0.1`, so other devices cannot reach it. OpenMyMemo connects to the internet only in these cases:
 
-- **Installing and first start.** `uv`, the Claude Desktop extension and the Mac app's first start download Python and OpenMyMemo's open-source libraries:
+- **Installing and first start.** `uv`, the Claude Desktop extension and the Mac and Windows apps' first start download Python and OpenMyMemo's open-source libraries:
   - Python from python-build-standalone releases on GitHub;
   - the libraries from PyPI (pypi.org and files.pythonhosted.org).
 
   These are ordinary download requests. Like any `uv` download, they carry `uv`'s usual client information, such as its version and your operating system. No memory is sent.
-- **Links you click.** The panel and the Mac app open documentation and download pages in your browser. Install links open the AI app they belong to directly (for example `cursor://` or `vscode:`), never a website, because they carry the command that starts OpenMyMemo and with it the path of your memory folder.
+- **Updates of the Mac and Windows apps.** About a minute after it starts, and then once a day, the app fetches the newest release's update manifest (`latest.json`) from GitHub (github.com and the storage it redirects to). If there is a newer version, it asks you before installing it; when you agree, it downloads the update from the same place and installs it only if it is signed with OpenMyMemo's release key. These are ordinary downloads: no memory and nothing about you is sent, beyond what any download carries (your IP address, and the client's name). Settings → General turns the daily check off, and "Check for Updates…" checks at once. The command line and the plugins don't look for updates; you update them with `uv tool upgrade openmymemo` or through the AI app.
+- **Links you click.** The panel and the apps open documentation and download pages in your browser. Install links open the AI app they belong to directly (for example `cursor://` or `vscode:`), never a website, because they carry the command that starts OpenMyMemo and with it the path of your memory folder.
 - **OpenMyMemo Cloud**, only after you sign in and link this computer (see below).
 - **The OpenMyMemo Assistant**, only after you turn it on with a model that isn't on your computer (see below). With MyMemo's hosted model, signing in and refreshing the sign-in also talk to the MyMemo service.
 - **Search by meaning on this computer**, only when you turn it on or switch models: it downloads the model you chose from Hugging Face (huggingface.co and the storage it redirects to), at a fixed address, and checks each file against a SHA-256 checksum in OpenMyMemo's code, deleting a file that doesn't match. If ONNX Runtime isn't installed, it is downloaded from PyPI the same way OpenMyMemo's other libraries are. These are ordinary downloads: no memory and nothing about you is sent, beyond what any download carries (your IP address, and the client's name). Searching with it happens entirely on your computer.
@@ -119,8 +121,8 @@ How MyMemo handles your account and its metadata is governed by [MyMemo's privac
 - Disconnect an app, which removes OpenMyMemo from its settings. Unlink OpenMyMemo Cloud, or hide it in Settings. Turn the OpenMyMemo Assistant off, or limit what it is used for.
 - To remove everything:
   1. Delete the memory folder.
-  2. Delete OpenMyMemo's application folders (`~/Library/Application Support/ai.mymemo.openmymemo`, `~/Library/Application Support/OpenMyMemo` and `~/Library/Caches/ai.mymemo.openmymemo` on a Mac).
-  3. Delete the app or run `uv tool uninstall openmymemo`.
+  2. Delete OpenMyMemo's application folders: `~/Library/Application Support/ai.mymemo.openmymemo`, `~/Library/Application Support/OpenMyMemo`, `~/Library/Caches/ai.mymemo.openmymemo` and `~/Library/Logs/ai.mymemo.openmymemo` on a Mac; `%LOCALAPPDATA%\ai.mymemo.openmymemo` and `%APPDATA%\OpenMyMemo` on Windows; `~/.config/openmymemo` on Linux.
+  3. Delete the app (on Windows, Settings → Apps) or run `uv tool uninstall openmymemo`.
 
 ## Children
 
