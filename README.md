@@ -4,7 +4,7 @@ Your AI memory as a plain folder on your own computer. See exactly what models r
 
 <!-- mcp-name: io.github.MyMemoAI/openmymemo -->
 
-> v0.3. What changed in each release: [CHANGELOG.md](https://github.com/MyMemoAI/openmymemo/blob/main/CHANGELOG.md). Product design and status: [docs/product-design.md](https://github.com/MyMemoAI/openmymemo/blob/main/docs/product-design.md). The folder format, for any tool that wants to read or write it: [docs/MEMORY_FORMAT.md](https://github.com/MyMemoAI/openmymemo/blob/main/docs/MEMORY_FORMAT.md).
+> v0.3.1. What changed in each release: [CHANGELOG.md](https://github.com/MyMemoAI/openmymemo/blob/main/CHANGELOG.md). Product design and status: [docs/product-design.md](https://github.com/MyMemoAI/openmymemo/blob/main/docs/product-design.md). The folder format, for any tool that wants to read or write it: [docs/MEMORY_FORMAT.md](https://github.com/MyMemoAI/openmymemo/blob/main/docs/MEMORY_FORMAT.md).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/MyMemoAI/openmymemo/main/docs/images/panel-memories-dark.png">
@@ -35,7 +35,7 @@ For everyone: no terminal, no config files, no Python to install.
 4. The first start downloads Python and the libraries OpenMyMemo runs on, about 25 MB and usually under a minute, into `~/Library/Application Support/ai.mymemo.openmymemo/`. It happens once; after that the app starts in a couple of seconds, also offline.
 5. A short guide connects the AI apps on your Mac with one click each and brings over the memory ChatGPT, Claude or Gemini already have. Your memories live in `~/OpenMyMemo`.
 
-The app shows the panel in its own window, puts the number of changes to review in the menu bar, and notifies you when an AI app changes something. It looks for a new version once a day and asks before installing it (Settings → General turns that off; "Check for Updates…" in the OpenMyMemo menu checks at once). An update replaces the app and restarts it; your memory folder isn't touched. Versions up to 0.2.9 can't update themselves: download the new disk image once more and drag it to Applications.
+The app shows the panel in its own window and puts the number of changes to review in the menu bar. It notifies you when an AI app changes something. It can also send yesterday's brief at a time you choose, a reminder when changes have waited more than 3 days, and a note when there's a new safety issue, such as a password in a memory. Each kind has its own switch in Settings → General, and notifications carry counts and app names, never what a memory says. It looks for a new version once a day and asks before installing it (Settings → General turns that off; "Check for Updates…" in the OpenMyMemo menu checks at once). An update replaces the app and restarts it; your memory folder isn't touched. Versions up to 0.2.9 can't update themselves: download the new disk image once more and drag it to Applications.
 
 The app also installs an `openmymemo` command, which the AI apps it connects run (Settings → Advanced shows where). It is the full command line below, so you can use it in Terminal too.
 
@@ -68,6 +68,8 @@ openmymemo import chatgpt                    # paste ChatGPT's "Manage memories"
 openmymemo import auto ~/.claude/CLAUDE.md   # another app's memory file: CLAUDE.md, AGENTS.md, GEMINI.md, rules, memory.md
 openmymemo sort                              # file imported memories into topics, one suggestion at a time
 openmymemo serve                             # open the panel at http://127.0.0.1:8787
+openmymemo status                            # the Memory safety score and the three things that cost the most
+openmymemo brief                             # what happened in your memory yesterday (--date for another day)
 openmymemo review                            # what AI changed since you last looked: keep, edit or undo
 ```
 
@@ -88,7 +90,7 @@ openmymemo review                            # what AI changed since you last lo
 
 **After installing, quit the app completely and open it again** so it loads OpenMyMemo. The first launch downloads Python and the dependencies (about 5 seconds on a fast connection; Codex gives MCP servers 10). If an app then says the OpenMyMemo server failed to start, restart it once more.
 
-**Then open the panel at [http://127.0.0.1:8787](http://127.0.0.1:8787)** in your browser (the page pictured at the top); bookmark it. It's there whenever Claude Desktop, Claude Code, Codex or Gemini CLI is running: your memories, what AI changed (Changes), the exact text each app gets (What AI sees) and the connected apps (Connectors). Without a plugin, `openmymemo serve` starts it and opens the browser.
+**Then open the panel at [http://127.0.0.1:8787](http://127.0.0.1:8787)** in your browser (the page pictured at the top); bookmark it. It's there whenever Claude Desktop, Claude Code, Codex or Gemini CLI is running. It has Home (the box to tell OpenMyMemo what's new, what's waiting for you and the Memory safety score), your memories, what AI changed (Changes), the exact text each app gets (What AI sees) and the connected apps (Connectors). Without a plugin, `openmymemo serve` starts it and opens the browser.
 
 ##### Codex
 
@@ -137,6 +139,21 @@ Tools AI apps see: `memory_context`, `memory_search`, `memory_get`, `memory_prop
 4. Zero dependencies — no database, Docker, account, API key or telemetry.
 5. Open protocols and open conventions — standard MCP, Markdown + frontmatter (an [Open Knowledge Format](https://github.com/GoogleCloudPlatform/open-knowledge-format) bundle), Obsidian block ids, open import and export formats, no vendor lock-in.
 
+## Home
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/MyMemoAI/openmymemo/main/docs/images/panel-home-dark.png">
+  <img alt="The panel's Home page: the Tell OpenMyMemo box, two changes waiting for a decision and four not looked at yet, and a Memory safety score of 79 with the two issues that cost the most and a fix for each" src="https://raw.githubusercontent.com/MyMemoAI/openmymemo/main/docs/images/panel-home-light.png">
+</picture>
+
+The panel opens on Home: what needs you, and how your memory is doing. Like the rest of OpenMyMemo, it is worked out on your computer by rules, and private topics only ever show as a count.
+
+- **Tell OpenMyMemo.** Say what's new in your own words: "I moved to Berlin last month", "I don't drink coffee any more". Press Preview and you see every change before anything is saved. Untick or edit any change, then save the rest; they're saved as your own edits. With the [Assistant](#openmymemo-assistant-optional) on, it also updates or archives what you already have, and the box names where the text goes before you press Preview. Without it, what you type is kept as new memories, filed by rules.
+- **Memory safety score**, 0 to 100, with a fix for each issue it finds, such as a password, key or card number in a memory outside a private topic, an app that can read your private topics, changes that have waited more than a week, or no backup in the last 30 days. "All checks" shows or dismisses every one. `openmymemo status` gives the same, and `--json` gives the details.
+- **What's waiting:** changes that need your decision and AI changes you haven't looked at.
+- **Today:** yesterday's brief. It shows what each AI app saved, who read your memory and which topics, and one older memory to check is still true, with Keep, Edit and Archive. `openmymemo brief` prints it.
+- **Your memory at a glance** (growth over 30 days, groups, where memories came from), each connected app's use and access, and reads and changes over the last 7 days.
+
 ## OpenMyMemo Assistant (optional)
 
 OpenMyMemo needs no model. If you want help with the work rules do badly, turn on the Assistant in Settings → Assistant (in a browser: at the bottom of the Connectors page), or from the terminal:
@@ -162,6 +179,7 @@ With it on, imports are split into memories by the model (the preview flags any 
   openmymemo import claude-code-sessions                             # ~/.claude/projects, or one project or session file
   openmymemo import codex-sessions --max-calls 20                    # ~/.codex/sessions, the newest 20 parts
   ```
+- **turns what you tell OpenMyMemo into changes** on Home: new memories, and updates or archives of the ones it replaces. Only memories that may be sent go with it, never private topics, and nothing is saved until you do.
 - **saves what a Claude Code or Codex session taught** that the app didn't, when the session ends (off until you turn on "Reading sessions", then asked per app: `openmymemo assistant sessions --allow claude-code`). The plugin's session-end hook and the Codex hook from `openmymemo setup codex` run it; the transcript is read on your computer and never stored, and what it saves are the Assistant's proposals, each with your quoted words.
 
 **Tidy up** (turn it on with `--feature tidy=on` or its switch in Settings → Assistant) looks through your memories and files one batch of changes: merging near-duplicates, replacing a memory a later one contradicts, adding review dates to time-bound memories, rewriting memories that are too long, and asking about memories that may be outdated (those only go if you say so). Changes to memories you wrote wait for you too; the rest apply and can be undone. The batch shows up as "Tidy-up, <date>: N changes" with Keep all / Undo all on the Changes page and in `openmymemo review`, and a suggestion you rejected or undid isn't made again. Private topics are never included.
@@ -172,7 +190,7 @@ openmymemo tidy [--topic work]     # run it ("Tidy up" on the Changes page does 
 openmymemo tidy --schedule weekly  # off (the default), daily, weekly or monthly
 ```
 
-One run makes at most 20 calls; on a large folder the next run continues where it stopped. A schedule runs on this computer while OpenMyMemo's panel is running (the Mac app, `openmymemo serve`, or an AI app's plugin); nothing runs when none of them is. Each feature has its own switch and a fallback to the rules, and there are monthly limits. A model on this computer keeps everything on the computer; with your own key, the memories a feature uses go to that provider, never private topics. Every request is in the activity log, without its text.
+One run makes at most 20 calls; on a large folder the next run continues where it stopped. A schedule runs on this computer while OpenMyMemo's panel is running (the Mac app, `openmymemo serve`, or an AI app's plugin); nothing runs when none of them is. Each feature has its own switch and a fallback to the rules. With a model on this computer or your own key you can set monthly limits on calls and tokens; with MyMemo's hosted model, the plan's monthly allowance is the limit. A model on this computer keeps everything on the computer; with your own key, the memories a feature uses go to that provider, never private topics. Every request is in the activity log, without its text.
 
 ### Search by meaning
 
