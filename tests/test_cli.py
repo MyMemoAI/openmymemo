@@ -402,3 +402,14 @@ def test_command_help_has_no_line_breaks_inside_a_paragraph():
     broken = [" ".join(path) for path, cmd in commands(typer.main.get_command(app))
               if any("\n" in p.strip() for p in (cmd.help or "").split("\n\n"))]
     assert broken == []
+
+
+def test_search_says_so_when_nothing_matches(tmp_path):
+    root = tmp_path / "v"
+    Vault.create(root).add("work", "Works at Acme")
+    runner = CliRunner()
+    hit = runner.invoke(app, ["--vault", str(root), "search", "Acme"])
+    assert hit.exit_code == 0 and "Works at Acme" in hit.stdout and not hit.stderr
+    miss = runner.invoke(app, ["--vault", str(root), "search", "zzqqxx"])
+    assert miss.exit_code == 0 and miss.stdout == ""  # nothing on stdout for a script to mistake for a result
+    assert miss.stderr == 'No memories match "zzqqxx".\n'
