@@ -1,0 +1,109 @@
+{
+  "type": "sync_ops",
+  "v": 1,
+  "cursor": 9,
+  "more": false,
+  "ops": [
+    {
+      "seq": 3,
+      "from": "app",
+      "proposal_id": "p19a2b3c4d5e6f70",
+      "connector": {
+        "id": "cloud-askmemo",
+        "name": "AskMemo (MyMemo)"
+      },
+      "op": "add",
+      "memory_id": null,
+      "new_memory_id": "c-9x1y2z",
+      "content": "Is training for the Berlin marathon in September 2027",
+      "topic": "goals",
+      "kind": "ongoing",
+      "reason": "The user said they signed up for the Berlin marathon",
+      "evidence": "我报名了2027年9月的柏林马拉松",
+      "until": "2027-09",
+      "hold": null,
+      "created_at": "2026-10-26T09:05:00+00:00"
+    },
+    {
+      "seq": 4,
+      "from": "user",
+      "edit_id": "e8c41f2a9b3d",
+      "op": "put",
+      "memory_id": "c-7f3a9k",
+      "base_version": 1,
+      "memory": {
+        "content": "Writes the MyMemo newsletter every other Friday",
+        "topic": "work",
+        "section": null,
+        "kind": "ongoing",
+        "until": null,
+        "private": false,
+        "pinned": false,
+        "status": "active"
+      },
+      "at": "2026-10-26T09:06:00+00:00"
+    },
+    {
+      "seq": 5,
+      "from": "user",
+      "edit_id": "e8c41f2a9b3e",
+      "op": "put",
+      "memory_id": "c-4n5p6q",
+      "base_version": null,
+      "memory": {
+        "content": "Lives in Berlin since 2026-09",
+        "topic": "identity",
+        "section": null,
+        "kind": "fact",
+        "until": null,
+        "private": false,
+        "pinned": false,
+        "status": "active"
+      },
+      "at": "2026-10-26T09:07:00+00:00"
+    },
+    {
+      "seq": 6,
+      "from": "user",
+      "edit_id": "e8c41f2a9b3f",
+      "op": "topic",
+      "topic": {
+        "slug": "reading",
+        "title": "Reading",
+        "description": "Books and articles I'm reading",
+        "group": "ways",
+        "private": false
+      },
+      "at": "2026-10-26T09:08:00+00:00"
+    },
+    {
+      "seq": 7,
+      "from": "user",
+      "edit_id": "e8c41f2a9b40",
+      "op": "settings",
+      "settings": {
+        "require_approval": false
+      },
+      "at": "2026-10-26T09:09:00+00:00"
+    },
+    {
+      "seq": 8,
+      "from": "user",
+      "edit_id": "e8c41f2a9b41",
+      "op": "decide",
+      "proposal_id": "p19a2b3c4d5e6f71",
+      "decision": "reject",
+      "content": null,
+      "topic": null,
+      "at": "2026-10-26T09:10:00+00:00"
+    },
+    {
+      "seq": 9,
+      "from": "user",
+      "edit_id": "e8c41f2a9b42",
+      "op": "forget",
+      "memory_id": "q8r7s",
+      "at": "2026-10-26T09:11:00+00:00"
+    }
+  ]
+}

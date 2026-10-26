@@ -1,0 +1,220 @@
+{
+  "type": "sync_push",
+  "v": 1,
+  "seq": 2,
+  "cursor": 9,
+  "topics": [
+    {
+      "slug": "reading",
+      "type": "topic",
+      "title": "Reading",
+      "description": "Books and articles I'm reading",
+      "group": "ways",
+      "private": false,
+      "tags": []
+    }
+  ],
+  "groups": [
+    {
+      "id": "who",
+      "name": "Who I am",
+      "topics": [
+        "identity"
+      ]
+    },
+    {
+      "id": "doing",
+      "name": "What I'm doing",
+      "topics": [
+        "work",
+        "goals"
+      ]
+    },
+    {
+      "id": "ways",
+      "name": "How I work",
+      "topics": [
+        "how-to-work-with-me",
+        "reading"
+      ]
+    },
+    {
+      "id": "private",
+      "name": "Private",
+      "topics": [
+        "health"
+      ]
+    }
+  ],
+  "ops": [
+    {
+      "memory_id": "c-9x1y2z",
+      "version": 1,
+      "op": "create",
+      "content": "Is training for the Berlin marathon in September 2027",
+      "topic": "goals",
+      "section": null,
+      "kind": "ongoing",
+      "until": "2027-09",
+      "private": false,
+      "pinned": false,
+      "status": "active",
+      "actor": "connector:cloud-askmemo",
+      "source": "connector:cloud-askmemo",
+      "at": "2026-10-26T09:12:01+00:00",
+      "created_at": "2026-10-26T09:12:01+00:00",
+      "proposal_id": "p19a2b3c4d5e6f70"
+    },
+    {
+      "memory_id": "c-7f3a9k",
+      "version": 2,
+      "op": "update",
+      "content": "Writes the MyMemo newsletter every other Friday",
+      "topic": "work",
+      "section": null,
+      "kind": "ongoing",
+      "until": null,
+      "private": false,
+      "pinned": false,
+      "status": "active",
+      "actor": "user",
+      "source": "connector:cloud-mymemo",
+      "at": "2026-10-26T09:12:01+00:00",
+      "created_at": "2026-10-26T09:00:05+00:00",
+      "proposal_id": null
+    },
+    {
+      "memory_id": "c-4n5p6q",
+      "version": 1,
+      "op": "create",
+      "content": "Lives in Berlin since 2026-09",
+      "topic": "identity",
+      "section": null,
+      "kind": "fact",
+      "until": null,
+      "private": false,
+      "pinned": false,
+      "status": "active",
+      "actor": "user",
+      "source": "user",
+      "at": "2026-10-26T09:12:01+00:00",
+      "created_at": "2026-10-26T09:12:01+00:00",
+      "proposal_id": null
+    },
+    {
+      "memory_id": "k2p9d",
+      "version": 2,
+      "op": "update",
+      "content": "Engineering lead at Acme; the stack is FastAPI and Vue 3",
+      "topic": "work",
+      "actor": "file",
+      "at": "2026-10-26T09:01:00+00:00",
+      "proposal_id": null,
+      "past": true
+    },
+    {
+      "memory_id": "k2p9d",
+      "version": 3,
+      "op": "update",
+      "content": "Head of engineering at Acme; the stack is FastAPI and Vue 3",
+      "topic": "work",
+      "section": null,
+      "kind": "fact",
+      "until": "2027-03",
+      "private": false,
+      "pinned": true,
+      "status": "active",
+      "actor": "user",
+      "source": "user",
+      "at": "2026-10-26T09:02:00+00:00",
+      "created_at": "2026-10-08T09:12:00+00:00",
+      "proposal_id": null
+    },
+    {
+      "memory_id": "m7f3a",
+      "version": 3,
+      "op": "set",
+      "content": "Prefers short answers, with the code first",
+      "topic": "how-to-work-with-me",
+      "section": "Answers",
+      "kind": "instruction",
+      "until": null,
+      "private": false,
+      "pinned": false,
+      "status": "active",
+      "actor": "connector:claude-code",
+      "source": "connector:claude-code",
+      "at": "2026-10-25T17:40:00+00:00",
+      "created_at": "2026-10-09T11:00:00+00:00",
+      "proposal_id": null
+    },
+    {
+      "memory_id": "h4j5k",
+      "version": 2,
+      "op": "tombstone",
+      "at": "2026-10-26T09:03:00+00:00"
+    }
+  ],
+  "outcomes": [
+    {
+      "seq": 3,
+      "proposal_id": "p19a2b3c4d5e6f70",
+      "status": "applied",
+      "memory_id": "c-9x1y2z",
+      "hold": null,
+      "code": null
+    },
+    {
+      "seq": 4,
+      "edit_id": "e8c41f2a9b3d",
+      "status": "applied",
+      "memory_id": "c-7f3a9k",
+      "code": null
+    },
+    {
+      "seq": 5,
+      "edit_id": "e8c41f2a9b3e",
+      "status": "applied",
+      "memory_id": "c-4n5p6q",
+      "code": null
+    },
+    {
+      "seq": 6,
+      "edit_id": "e8c41f2a9b3f",
+      "status": "applied",
+      "memory_id": null,
+      "code": null
+    },
+    {
+      "seq": 7,
+      "edit_id": "e8c41f2a9b40",
+      "status": "applied",
+      "memory_id": null,
+      "code": null
+    },
+    {
+      "seq": 8,
+      "edit_id": "e8c41f2a9b41",
+      "proposal_id": "p19a2b3c4d5e6f71",
+      "status": "rejected",
+      "memory_id": null,
+      "hold": null,
+      "code": null
+    },
+    {
+      "seq": 9,
+      "edit_id": "e8c41f2a9b42",
+      "status": "applied",
+      "memory_id": "q8r7s",
+      "code": null
+    },
+    {
+      "seq": null,
+      "proposal_id": "p19a2b3c4d5e6f72",
+      "status": "accepted",
+      "memory_id": "k2p9d",
+      "hold": null,
+      "code": null
+    }
+  ]
+}

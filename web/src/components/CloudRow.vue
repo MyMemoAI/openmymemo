@@ -5,12 +5,14 @@ import { desktop } from "../desktop";
 import { relTime, t, tn } from "../i18n";
 import { copy, refresh, store, toast } from "../store";
 import AppIcon from "./AppIcon.vue";
+import SyncSection from "./SyncSection.vue";
 
 /**
  * OpenMyMemo Cloud (product-design.md §16): sign in to link this computer, its status, what to paste into ChatGPT and
  * claude.ai, how many changes wait in its offline queue (from the service's `welcome`, counted down as they are
  * filed; only once this OpenMyMemo takes the queue, `queue_enabled`, which it doesn't since the launch), and the web apps using it, each a normal connector row (`manage` shows a row's permissions, as in
- * ConnectApps). Polls /api/cloud while it is on screen.
+ * ConnectApps). Polls /api/cloud while it is on screen. MyMemo Memory sync (product-design.md §20) is its own section
+ * (`SyncSection`) while this computer is linked to this folder.
  */
 const props = defineProps<{ open?: string | null }>();
 const emit = defineEmits<{ manage: [id: string | null] }>();
@@ -134,9 +136,11 @@ async function signIn() {
 
 async function unlink() {
   if (!confirm(t("cloud.unlinkConfirm"))) return;
+  // With MyMemo Memory sync on, MyMemo keeps a copy: ask whether it goes too (product-design.md §20.5).
+  const deleteCopy = !!s.value?.sync?.enabled && confirm(t("cloud.unlinkDeleteCopy"));
   busy.value = true;
   try {
-    const res = await api.cloudUnlink();
+    const res = await api.cloudUnlink(deleteCopy);
     take(res.cloud);
     showSetup.value = false;
     toast(res.message);
@@ -227,6 +231,8 @@ defineExpose({ reload: load });
       <span class="min-w-0 flex-1">{{ t("cloud.waiting") }}</span>
       <a :href="signInUrl" target="_blank" rel="noopener" class="btn btn-link btn-sm">{{ t("cloud.openAgain") }}</a>
     </div>
+
+    <SyncSection v-if="s && linkedHere && s.sync?.available" :sync="s.sync" @changed="take" />
 
     <div v-if="s && linkedHere && s.queue_enabled && s.queued" class="flex items-start gap-2.5 bg-sunken px-4.5 py-3 text-[13px]" role="status" data-queued>
       <AppIcon name="clock" :size="15" class="mt-px text-wait-ink" />

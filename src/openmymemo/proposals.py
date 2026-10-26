@@ -129,9 +129,13 @@ class Proposal:
     until: str | None = None  # a review date this proposal sets (`until` of MEMORY_FORMAT.md §3.5)
     before_until: str | None = None  # the memory's `until` before an update that sets one, for undo
     batch_id: str | None = None  # proposals filed together by one run, e.g. a tidy-up: grouped in the digest
+    new_memory_id: str | None = None  # an add's id for the new memory, if free (MyMemo's c- id, sync.py)
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        d = asdict(self)
+        if d["new_memory_id"] is None:
+            del d["new_memory_id"]  # only MyMemo Memory sync's adds carry one; other files stay as they were
+        return d
 
 
 _last_ms = 0
@@ -263,7 +267,8 @@ class Proposals:
                 evidence: str | None = None, idempotency_key: str | None = None,
                 created_at: str | None = None, queue_id: str | None = None, until: str | None = None,
                 hold: str | None = None, batch_id: str | None = None,
-                expected: Mapping[str, tuple[int, str | None]] | None = None, check: bool = False) -> dict:
+                expected: Mapping[str, tuple[int, str | None]] | None = None, check: bool = False,
+                new_memory_id: str | None = None) -> dict:
         """`created_at`: when the AI proposed it, if that was earlier, and `queue_id`: the receipt it got then
         (both from OpenMyMemo Cloud's offline queue). `until`: a review date to set (``YYYY-MM`` or ``YYYY-MM-DD``).
         `hold`: make it wait for the person with this reason even where the rules would apply it (a reason the
@@ -273,7 +278,8 @@ class Proposals:
         that version and review date, so a suggestion made from older text never lands on newer text.
         `check`: give the OpenMyMemo Assistant a look first, when it is on for that (an app's own
         `memory_propose`; imports and the Assistant's own proposals aren't checked). The check never lifts a
-        hold the rules or the proposer set."""
+        hold the rules or the proposer set. `new_memory_id`: on an add, the id the new memory gets if the folder
+        doesn't use it yet (MyMemo Memory sync keeps MyMemo's id, product-design.md §20)."""
         v = self.vault
         if connector.write == "none":
             raise PermissionDenied("This connector is read-only. The user can allow proposals in the OpenMyMemo panel.")
@@ -317,7 +323,7 @@ class Proposals:
                     raise Conflict(f"Memory {mid} has changed since this was suggested")
             args = dict(op=op, content=content, memory_id=memory_id, topic=topic, kind=kind, reason=reason,
                         evidence=evidence, idempotency_key=idempotency_key, created_at=created_at,
-                        queue_id=queue_id, until=until, batch_id=batch_id)
+                        queue_id=queue_id, until=until, batch_id=batch_id, new_memory_id=new_memory_id)
             # The rules first, exactly as without a check: the baseline the check may only make stricter.
             routed = self._route(connector, private, topics, verdict=None, **args)
             if isinstance(routed, dict):
@@ -364,7 +370,8 @@ class Proposals:
     def _route(self, connector: Connector, private: set[str], topics: list[dict], *, verdict, op: str,
                content: str | None, memory_id: str | None, topic: str | None, kind: str | None, reason: str | None,
                evidence: str | None, idempotency_key: str | None, created_at: str | None, queue_id: str | None,
-               until: str | None = None, batch_id: str | None = None) -> tuple[Proposal, Memory | None] | dict:
+               until: str | None = None, batch_id: str | None = None,
+               new_memory_id: str | None = None) -> tuple[Proposal, Memory | None] | dict:
         """Where a proposal goes (its op, topic, target), without saving anything: a Proposal and its target, or a
         ``duplicate`` result. ``verdict``: the Assistant's check, or None for the rules alone. Raises
         PermissionDenied for a blocked topic, VaultError for a bad target."""
@@ -406,7 +413,7 @@ class Proposals:
                      content=content, topic=topic, memory_id=memory_id, kind=kind, reason=reason,
                      evidence=(evidence or None) and evidence[:2000], idempotency_key=idempotency_key,
                      created_at=created_at or now_iso(), queue_id=queue_id, topic_confidence=confidence,
-                     until=until, batch_id=batch_id)
+                     until=until, batch_id=batch_id, new_memory_id=new_memory_id if op == "add" else None)
         if target:
             p.before_content, p.before_topic = target.content, target.topic
             if until is not None:
@@ -539,7 +546,7 @@ class Proposals:
         op = "add" if as_new else p.op
         if op == "add":
             m = v.add(topic, content, kind=kind or p.kind, source=f"connector:{p.connector_id}", actor=actor,
-                      evidence=p.evidence, proposal_id=p.id, until=p.until)
+                      evidence=p.evidence, proposal_id=p.id, until=p.until, memory_id=p.new_memory_id)
         elif op == "update":
             m = v.update(p.memory_id, content=content, topic=topic, kind=kind or p.kind, until=p.until, actor=actor,
                          proposal_id=p.id)

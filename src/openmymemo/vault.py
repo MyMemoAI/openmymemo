@@ -49,6 +49,7 @@ from .topics import DEFAULT_PRIVATE, DEFAULT_TOPICS, REVIEW_MONTHS, default_grou
 STATE_DIR = ".openmymemo"
 META_FORMAT = 2
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,47}$")
+FOREIGN_ID_RE = re.compile(r"^[A-Za-z0-9-]{1,64}$")  # an id another tool wrote (MEMORY_FORMAT.md §3.7)
 RESERVED_FILES = {"index", "log"}  # the Open Knowledge Format's names: never topics
 _ID_ALPHABET = string.ascii_lowercase + string.digits
 
@@ -679,7 +680,9 @@ class Vault:
     def add(self, topic: str, content: str, *, kind: str | None = None, section: str | None = None,
             source: str = "user", actor: str = "user", private: bool = False, until: str | None = None,
             evidence: str | None = None, pinned: bool = False, proposal_id: str | None = None,
-            created_at: str | None = None) -> Memory:
+            created_at: str | None = None, memory_id: str | None = None) -> Memory:
+        """Add a memory. ``memory_id``: the id to give it (a foreign id, such as MyMemo's ``c-`` ids through MyMemo
+        Memory sync, MEMORY_FORMAT.md §3.7) when the folder doesn't use it yet; otherwise a new one is made."""
         content = " ".join(content.split())
         if not content:
             raise VaultError("Memory content is empty")
@@ -694,7 +697,9 @@ class Vault:
             if until is None and topic in REVIEW_MONTHS and source != "user":
                 d = date.today() + timedelta(days=30 * REVIEW_MONTHS[topic])
                 until = f"{d.year:04d}-{d.month:02d}"
-            mid = self._new_id(set(self._meta["memories"]))()
+            used = set(self._meta["memories"])
+            mid = memory_id if memory_id and FOREIGN_ID_RE.match(memory_id) and memory_id not in used \
+                else self._new_id(used)()
             attrs: dict = {}
             if until:
                 attrs["until"] = until
@@ -715,10 +720,14 @@ class Vault:
             self._after_write()
             return self._memory(mid, entry)
 
+    _KEEP = object()
+
     def update(self, memory_id: str, *, content: str | None = None, topic: str | None = None,
                kind: str | None = None, pinned: bool | None = None, private: bool | None = None,
                until: str | None = None, actor: str = "user", proposal_id: str | None = None,
-               expected_version: int | None = None) -> Memory:
+               expected_version: int | None = None, section: str | None | object = _KEEP) -> Memory:
+        """``section``: the ``## Section`` to put the memory under in its topic file (None: none); left as it is
+        when not given, and dropped when the memory moves to another topic without one."""
         with self.lock():
             self.sync()
             e = self._meta["memories"].get(memory_id)
@@ -742,12 +751,20 @@ class Vault:
                 attrs["private"] = True
             file_changed = (new_content != e["content"] or new_topic != e["topic"]
                             or new_until != e.get("until") or new_private != bool(e.get("private")))
+            new_section = (None if new_topic != e["topic"] else e.get("section")) if section is self._KEEP else section
+            moved_section = new_topic == e["topic"] and new_section != e.get("section")
             if new_topic != e["topic"]:
                 if new_topic not in self._headers:
                     raise NotFound(f"Unknown topic: {new_topic}")
                 self._edit_file(e["topic"], lambda mf: mf.remove(memory_id))
-                self._edit_file(new_topic, lambda mf: mf.add(new_content, memory_id, attrs))
-                e["section"] = None
+                self._edit_file(new_topic, lambda mf: mf.add(new_content, memory_id, attrs, new_section))
+                e["section"] = new_section
+            elif moved_section:
+                def move(mf: MemoryFile) -> None:
+                    mf.remove(memory_id)
+                    mf.add(new_content, memory_id, attrs, new_section)
+                self._edit_file(e["topic"], move)
+                e["section"] = new_section
             elif file_changed:
                 def edit(mf: MemoryFile) -> None:
                     item = mf.find(memory_id)
@@ -756,8 +773,8 @@ class Vault:
                     else:
                         mf.set_line(item, new_content, attrs)
                 self._edit_file(e["topic"], edit)
-            op = "move" if new_topic != e["topic"] and new_content == e["content"] else "update"
-            content_changed = new_content != e["content"] or new_topic != e["topic"]
+            op = "move" if (new_topic != e["topic"] or moved_section) and new_content == e["content"] else "update"
+            content_changed = new_content != e["content"] or new_topic != e["topic"] or moved_section
             e.update(content=new_content, topic=new_topic, updated_at=now_iso())
             for key, value in (("until", new_until), ("private", new_private or None)):
                 if value is None:

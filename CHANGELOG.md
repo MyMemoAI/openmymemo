@@ -2,6 +2,10 @@
 
 What changed in each release, for people who use OpenMyMemo. Every release is also on [GitHub](https://github.com/MyMemoAI/openmymemo/releases).
 
+## Unreleased
+
+- **MyMemo Memory sync (optional).** With this computer linked to OpenMyMemo Cloud, Connectors → OpenMyMemo Cloud → MyMemo Memory sync keeps a copy of your folder in your MyMemo Memory, so MyMemo's AI (AskMemo, MyMemo's Agent) and the AI apps on the web can use your memory while this computer is off. It is a separate consent that names what MyMemo stores, who can read it and how to delete it. Private topics stay here unless you pick them, and moving a memory into a private topic or marking it private deletes it from MyMemo. Your folder wins: what MyMemo's AI or the web apps change there comes back as changes from `cloud-*` apps that you review like any other, and your own edits on MyMemo's memory page come back as your edits. The first sync shows a preview of what MyMemo already has before anything is sent. Turn it off with "Also delete the copy in MyMemo", or choose the same when you unlink. Also `openmymemo cloud sync on | merge | topics | status | off [--delete-copy]` and `openmymemo cloud unlink --delete-copy`. Nothing changes for anyone who doesn't turn it on. PRIVACY.md has a section on it.
+
 ## 0.3.1 — 2026-10-24
 
 - **Tell OpenMyMemo.** Home has a box where you say what's new in your own words, such as "I moved to Berlin last month" or "I don't drink coffee any more". With the Assistant on, it works out which memories to add, update or archive, and shows each change with its reason. Untick or edit any change, then save the rest; they're saved as your own edits. Before you press Preview, the box names where the text goes. Memories in private topics, or marked private, are never sent. Without the Assistant, what you type is kept as new memories, filed by rules. Settings → Assistant has a switch for it.

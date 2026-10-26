@@ -1,0 +1,40 @@
+{
+  "type": "sync_ops",
+  "v": 1,
+  "cursor": 2,
+  "more": false,
+  "ops": [
+    {
+      "seq": 1,
+      "from": "merge",
+      "memory_id": "c-7f3a9k",
+      "memory": {
+        "content": "Writes the MyMemo newsletter every Friday",
+        "topic": "work",
+        "section": null,
+        "kind": "ongoing",
+        "until": null,
+        "private": false,
+        "pinned": false,
+        "status": "active"
+      },
+      "created_at": "2026-10-20T08:00:00+00:00"
+    },
+    {
+      "seq": 2,
+      "from": "merge",
+      "memory_id": "c-2b8m4q",
+      "memory": {
+        "content": "Prefers answers in Chinese, with code comments in English",
+        "topic": "how-to-work-with-me",
+        "section": null,
+        "kind": "preference",
+        "until": null,
+        "private": false,
+        "pinned": true,
+        "status": "active"
+      },
+      "created_at": "2026-10-21T10:30:00+00:00"
+    }
+  ]
+}

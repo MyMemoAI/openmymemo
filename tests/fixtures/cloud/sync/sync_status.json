@@ -1,0 +1,12 @@
+{
+  "type": "sync_status",
+  "v": 1,
+  "accepted": true,
+  "reason": null,
+  "merge": "needed",
+  "seq": 0,
+  "cursor": 0,
+  "cloud": {
+    "memories": 2
+  }
+}

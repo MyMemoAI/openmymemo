@@ -267,6 +267,33 @@ export interface CloudSettings {
   service_from_env: string | null;
 }
 
+/** MyMemo Memory sync (product-design.md §20) on this computer: counts and states, never memory text. */
+export interface CloudSync {
+  /** This computer is linked to OpenMyMemo Cloud for this folder: sync can be turned on. */
+  available: boolean;
+  enabled: boolean;
+  /** off · waiting (on, not connected or no answer yet) · refused (MyMemo said no: `reason`) · preview (the first
+   * merge waits for the person) · merging · syncing */
+  state: "off" | "waiting" | "refused" | "preview" | "merging" | "syncing";
+  /** Why MyMemo refused: memory_off · unavailable · off · invalid. */
+  reason: string | null;
+  merge: "pending" | "preview" | "confirmed" | "done" | null;
+  /** The first merge's counts: MyMemo's memories (already here, similar, new) and this folder's. */
+  preview: { cloud: number; here: number; same: number; similar: number; new: number } | null;
+  /** Private topics synced too (the person picked them). */
+  picked: string[];
+  private_topics: { slug: string; title: string }[];
+  last_sync_at: string | null;
+  /** Memories MyMemo didn't store (secrets by its never-save list, or its limit). */
+  skipped: number;
+  /** "mymemo": sync was turned off on MyMemo's memory page. */
+  off_by: string | null;
+  /** Turned off here; MyMemo hears it at the next connection. */
+  pending_off: boolean;
+  consent_version: string;
+  consent_at: string | null;
+}
+
 /** OpenMyMemo Cloud on this computer (GET /api/cloud). */
 export interface CloudStatus {
   linked: boolean;
@@ -303,6 +330,8 @@ export interface CloudStatus {
    * the live relay only: then nothing about the queue is shown, whatever `plan.queue` says. */
   queue_enabled: boolean;
   apps: CloudApp[];
+  /** MyMemo Memory sync; absent from an older OpenMyMemo. */
+  sync?: CloudSync;
 }
 
 export interface ConnectorCreated {
@@ -761,7 +790,12 @@ export const api = {
   cloud: () => req<CloudStatus>("GET", "/api/cloud"),
   /** Start signing in: returns MyMemo's page to open in the browser. */
   cloudLink: () => req<{ url: string }>("POST", "/api/cloud/link"),
-  cloudUnlink: () => req<{ message: string; cloud: CloudStatus }>("DELETE", "/api/cloud"),
+  cloudUnlink: (deleteCopy = false) =>
+    req<{ message: string; cloud: CloudStatus }>("DELETE", deleteCopy ? "/api/cloud?delete_copy=true" : "/api/cloud"),
+  cloudSync: (body: { on: boolean; consent?: boolean; private_topics?: string[]; delete_copy?: boolean }) =>
+    req<CloudStatus>("POST", "/api/cloud/sync", body),
+  cloudSyncTopics: (private_topics: string[]) => req<CloudStatus>("PATCH", "/api/cloud/sync", { private_topics }),
+  cloudSyncMerge: () => req<CloudStatus>("POST", "/api/cloud/sync/merge"),
   cloudReconnect: () => req<CloudStatus>("POST", "/api/cloud/reconnect"),
   cloudAllow: (id: string) => req<CloudStatus>("POST", `/api/cloud/apps/${enc(id)}/allow`),
   /** Show or hide OpenMyMemo Cloud, or choose its service ("" for MyMemo's own). */

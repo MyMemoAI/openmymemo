@@ -1,0 +1,11 @@
+{
+  "type": "sync_ack",
+  "v": 1,
+  "seq": 2,
+  "skipped": [
+    {
+      "memory_id": "z9y8x",
+      "code": "memory_secret"
+    }
+  ]
+}
