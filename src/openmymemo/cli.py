@@ -610,7 +610,10 @@ def search_(ctx: typer.Context, query: str) -> None:
     """Search your memories: by keywords, and by meaning when that is on (`openmymemo semantic`)."""
     from .recall import search
 
-    for h in search(_vault(ctx), None, query, limit=20).hits:
+    hits = search(_vault(ctx), None, query, limit=20).hits
+    if not hits:
+        typer.echo(f'No memories match "{query}".', err=True)
+    for h in hits:
         typer.echo(f"{h.memory.id}  {_pad(h.memory.topic, 20)} {h.memory.content}")
 
 
