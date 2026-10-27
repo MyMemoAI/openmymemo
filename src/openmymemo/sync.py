@@ -64,7 +64,8 @@ CONSENT_TEXT = """MyMemo Memory sync keeps a copy of this folder in your MyMemo 
   your topics' names and groups, and your approval switch. It never gets memories you marked private, other private
   topics (only their short name), evidence quotes, your apps or the activity log.
 - MyMemo's AI (AskMemo, MyMemo's Agent) uses the copy when it answers you, and so do the AI apps on the web you connect
-  through OpenMyMemo Cloud while this computer is off. What they change there comes back here as changes you review.
+  through OpenMyMemo Cloud, whether or not this computer is on. What they change there comes back here as changes you
+  review.
 - Your folder wins: when the two disagree, MyMemo takes the folder's version.
 - To delete the copy: turn sync off with "Also delete the copy in MyMemo" (`openmymemo cloud sync off --delete-copy`),
   choose the same when you unlink this computer, or delete it on MyMemo's memory page."""

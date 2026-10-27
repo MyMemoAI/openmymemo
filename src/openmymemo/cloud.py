@@ -717,7 +717,8 @@ def unlink() -> str:
         reached, why = False, f" ({e})"
     forget_link(link.device_id, _linked_vault(link))
     if reached:
-        return "Unlinked this computer from OpenMyMemo Cloud. ChatGPT and claude.ai on the web can't reach your memory anymore."
+        return ("Unlinked this computer from OpenMyMemo Cloud. ChatGPT and claude.ai on the web can't reach the memory on "
+                "this computer anymore.")
     return ("Unlinked this computer here, but MyMemo couldn't be told" + why.rstrip(".") + ". It stops working either "
             "way; remove it from your MyMemo account settings too.")
 

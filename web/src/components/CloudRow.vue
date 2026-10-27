@@ -258,6 +258,9 @@ defineExpose({ reload: load });
         </li>
       </ul>
       <p class="text-muted">{{ t(queueOn(s) ? "cloud.whileRunningQueue" : "cloud.whileRunning") }}</p>
+      <!-- MyMemo answers web apps from MyMemo Memory when the account has it on (product-design.md §16.12); this
+           computer isn't told, so it is said for everyone. -->
+      <p class="text-muted" data-mymemo-memory>{{ t("cloud.mymemoMemory") }}</p>
     </div>
 
     <template v-for="app in apps" :key="app.id">

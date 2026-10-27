@@ -40,9 +40,13 @@ describe("SyncSection", () => {
     const w = mountIt(sync());
     expect(w.text()).toContain("MyMemo Memory sync");
     expect(w.text()).toContain("Keep a copy of this folder in your MyMemo Memory");
+    // product-design.md §16.12: with MyMemo Memory on, web apps use it instead of this computer; sync brings their
+    // changes here.
+    expect(w.text()).toContain("ChatGPT and claude.ai use it instead of this computer; sync brings their changes here");
     await button(w, "Turn on…")!.trigger("click");
     const consent = document.body.querySelector("[data-consent]")!;
     expect(consent.textContent).toContain("MyMemo stores your memories outside private topics");
+    expect(consent.textContent).toContain("through OpenMyMemo Cloud, whether or not this computer is on");
     expect(consent.textContent).toContain("never gets memories you marked private");
     expect(consent.textContent).toContain("Your folder wins");
     expect(consent.textContent).toContain("Also delete the copy in MyMemo");

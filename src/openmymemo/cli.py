@@ -26,11 +26,12 @@ app.add_typer(connector_app, name="connector")
 setup_app = typer.Typer(help="Set up AI apps that need more than an MCP config.", no_args_is_help=True)
 app.add_typer(setup_app, name="setup")
 cloud_app = typer.Typer(help="OpenMyMemo Cloud: use your memory in ChatGPT and claude.ai on the web, relayed by MyMemo "
-                             "while your memory stays on this computer (optional; needs MyMemo Pro, Ultra or Lifetime).",
+                             "while your memory stays on this computer (optional; needs MyMemo Pro, Ultra or Lifetime; "
+                             "if you also use MyMemo Memory, they use that instead).",
                         no_args_is_help=True)
 app.add_typer(cloud_app, name="cloud")
 cloud_sync_app = typer.Typer(help="MyMemo Memory sync: keep a copy of this folder in your MyMemo Memory, so MyMemo's AI "
-                                  "and web apps can use it while this computer is off (optional; your folder wins).",
+                                  "and web apps can use it even while this computer is off (optional; your folder wins).",
                              no_args_is_help=True)
 cloud_app.add_typer(cloud_sync_app, name="sync")
 assistant_app = typer.Typer(help="OpenMyMemo Assistant: optional model help with imports, sorting and more "
@@ -1119,11 +1120,19 @@ BRIDGE_STATES = {
 }
 
 
+# product-design.md §16.12: MyMemo answers web apps from MyMemo Memory when the account has it on, and doesn't tell
+# this computer, so the CLI says it to everyone (as the panel does, web/src/i18n.ts "cloud.mymemoMemory").
+MYMEMO_MEMORY_NOTE = ("If you also use MyMemo Memory, ChatGPT and claude.ai read and change it instead of this computer, "
+                      "whether or not this computer is on. With MyMemo Memory sync on (`openmymemo cloud sync on`), "
+                      "what they change comes here as changes you review; without it, it stays in MyMemo.")
+
+
 def _web_steps(endpoint: str) -> None:
     typer.echo(f"\nAdd this URL as a custom connector in ChatGPT or claude.ai, exactly as shown:\n  {endpoint}")
     typer.echo("- claude.ai: Settings → Connectors → Add custom connector; Claude signs you in with your MyMemo "
                "account.\n- ChatGPT: turn on Developer Mode in Settings, then add a connector with this URL "
                "(OAuth). Whether ChatGPT may use write tools can depend on your ChatGPT plan.")
+    typer.echo(MYMEMO_MEMORY_NOTE)
 
 
 def _cloud_link(ctx: typer.Context, port: int, open_browser: bool) -> None:
@@ -1201,6 +1210,7 @@ def cloud_status(ctx: typer.Context,
     here = link.serves(root)
     typer.echo(f"Folder: {link.vault}" + ("" if here else f"  (not {root}: link again from that folder to move it)"))
     typer.echo(f"Endpoint for ChatGPT and claude.ai: {cloud.endpoint(link.service)}")
+    typer.echo(MYMEMO_MEMORY_NOTE)
     panel = _panel_for(Path(link.vault), port)
     if panel:
         status = _panel_call(panel, "GET", "/api/cloud")
@@ -1222,7 +1232,7 @@ def _cloud_unlink(port: int, yes: bool, delete_copy: bool = False) -> None:
         typer.echo("This computer isn't linked to OpenMyMemo Cloud.")
         return
     if not yes and not typer.confirm("Unlink this computer from OpenMyMemo Cloud? ChatGPT and claude.ai on the web won't "
-                                     "reach your memory anymore.", default=True):
+                                     "reach the memory on this computer anymore.", default=True):
         raise typer.Exit()
     panel = _panel_for(Path(link.vault), port)
     if panel:
