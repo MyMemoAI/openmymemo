@@ -501,8 +501,8 @@ single piece of code or repository, what the assistant said or suggested, guesse
 to be remembered.
 - Only what the person said themselves, in a message marked "user". For each memory give that message's number \
 ("message") and quote the person's words it rests on ("quote", at most 200 characters, copied exactly).
-- Write each memory as one standalone statement in the language the person used, e.g. "Is vegetarian". Keep \
-names, numbers and dates as written. Don't merge unrelated facts.
+- Write each memory as one standalone statement in the language the person wrote in, e.g. "Is vegetarian", or \
+"是素食者" for a person who writes in Chinese. Keep names, numbers and dates as written. Don't merge unrelated facts.
 - Pick the topic it belongs in from the topic list, by slug, or null. Pick a kind: fact, preference, ongoing or \
 instruction, or null.
 - Set "sensitive" to true when it is about the person's health, money, or a password, key or other secret.
