@@ -38,9 +38,10 @@ def fx(name: str) -> dict:
 
 
 def digest(folder: Path) -> str:
+    # LF line endings: a Windows checkout (core.autocrlf) writes the same fixtures with CRLF.
     h = hashlib.sha256()
     for path in sorted(folder.iterdir()):
-        h.update(path.name.encode() + b"\0" + path.read_bytes() + b"\0")
+        h.update(path.name.encode() + b"\0" + path.read_bytes().replace(b"\r\n", b"\n") + b"\0")
     return h.hexdigest()
 
 
