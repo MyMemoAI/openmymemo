@@ -325,6 +325,34 @@ def test_an_edit_from_mymemo_never_undoes_a_privacy_choice_made_here(vault):
     assert vault.get("m7f3a").content == "Prefers answers in Chinese, with code comments in English"
 
 
+def test_mymemos_own_edits_one_after_another_all_apply(vault):
+    """Edits made one after another on MyMemo's memory page apply in turn, in one batch or across frames before the
+    next push is acknowledged; a change made here in between (if only in what a version doesn't count) conflicts."""
+    st = _merged_state(vault)
+    frame, commit = sync.build_push(vault, st)
+    sync.apply_ack(st, commit, {"seq": commit.seq, "skipped": []})
+    v = vault.get("k2p9d").version
+    first, second = _put("k2p9d", v, "Engineering lead at Acme (web)"), _put("k2p9d", v + 1, "CTO at Acme (web)")
+    outcomes, _ = sync.file_ops(vault, st, [first, {**second, "seq": 4, "edit_id": "e2"}])
+    assert [o["status"] for o in outcomes] == ["applied", "applied"]
+    assert (vault.get("k2p9d").content, vault.get("k2p9d").version) == ("CTO at Acme (web)", v + 2)
+    # Separate frames, still before the push that carries them is acknowledged.
+    for i, text in enumerate(["CTO at Acme since 2026", "CTO and co-founder at Acme"]):
+        out, _ = sync.file_ops(vault, st, [{**_put("k2p9d", v + 2 + i, text), "seq": 5 + i, "edit_id": f"f{i}"}])
+        assert out[0]["status"] == "applied"
+    frame, commit = sync.build_push(vault, st)  # the folder states what it now has
+    assert [(op["memory_id"], op["version"]) for op in frame["ops"]] == [("k2p9d", v + 4)]
+    sync.apply_ack(st, commit, {"seq": commit.seq, "skipped": []})
+    assert "k2p9d" not in st.received
+    # A change here between two of MyMemo's edits still conflicts.
+    out, _ = sync.file_ops(vault, st, [{**_put("k2p9d", v + 4, "CTO at Acme, part time"), "seq": 7}])
+    assert out[0]["status"] == "applied"
+    vault.update("k2p9d", pinned=True)
+    out, _ = sync.file_ops(vault, st, [{**_put("k2p9d", v + 5, "CTO at Acme, full time"), "seq": 8}])
+    assert out[0]["status"] == "conflict"
+    assert vault.get("k2p9d").content == "CTO at Acme, part time" and vault.get("k2p9d").pinned
+
+
 def test_a_private_memory_from_the_first_merge_stays_private(vault):
     """MyMemo's memory marked private is filed as a private add: it waits, and accepting it keeps it private (even
     when it resembles a memory here that isn't private, it is not merged into that one)."""

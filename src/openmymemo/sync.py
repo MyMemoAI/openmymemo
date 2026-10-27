@@ -97,6 +97,9 @@ class SyncState:
     cursor: int = 0  # the last sync_ops seq filed here
     acked_cursor: int = 0  # the last cursor MyMemo acknowledged having received
     pushed: dict[str, dict] = field(default_factory=dict)  # memory id → {"v": version, "h": hash of what was sent}
+    # memory id → hash of the memory right after MyMemo's own edit applied here, until a push says the same: MyMemo
+    # knows that state, so its next edit on it is no conflict.
+    received: dict[str, str] = field(default_factory=dict)
     topics: dict[str, str] = field(default_factory=dict)  # slug → hash of the frontmatter sent
     groups: str | None = None
     settings: str | None = None
@@ -391,6 +394,8 @@ def apply_ack(st: SyncState, commit: Commit, ack: dict) -> None:
             st.pushed.pop(mid, None)
         else:
             st.pushed[mid] = fp
+        if fp is None or st.received.get(mid) == fp.get("h"):
+            st.received.pop(mid, None)
     for slug, h in commit.topics.items():
         if h is None:
             st.topics.pop(slug, None)
@@ -561,9 +566,10 @@ def _same(m: Any, want: dict) -> bool:
 
 def _put(vault: Vault, st: SyncState, op: dict, touched: set[str]) -> tuple[str, str | None]:
     """The person's own edit on MyMemo's memory page, as their own edit here: applied when the memory is still at
-    the version the edit was made on and, once it has gone up, unchanged since in what a version doesn't count
-    (private, pinned, kind…); else a conflict and the folder's memory stays as it is. A memory MyMemo isn't sent
-    (marked private, in a private topic not picked) is never changed from there."""
+    the version the edit was made on and, once it has gone up, unchanged here since in what a version doesn't count
+    (private, pinned, kind…): it is still as last pushed, or as MyMemo's own last edit left it (``received``), so
+    edits made one after another on MyMemo all apply; else a conflict and the folder's memory stays as it is. A
+    memory MyMemo isn't sent (marked private, in a private topic not picked) is never changed from there."""
     mid, base, want = op.get("memory_id"), op.get("base_version"), op.get("memory") or {}
     with vault.lock():
         try:
@@ -580,24 +586,30 @@ def _put(vault: Vault, st: SyncState, op: dict, touched: set[str]) -> tuple[str,
                       until=want.get("until") or None, pinned=bool(want.get("pinned")), memory_id=mid)
             return "applied", mid
         touched.add(m.id)
+        fp = st.pushed.get(mid)
         if _same(m, want):
+            if fp is not None:
+                st.received[mid] = _memory_hash(m)
             return "applied", mid
         if base is None or m.version != base:
             return "conflict", mid
         if not eligible(m, vault.private_topics(), set(st.picked), set(st.forgotten)):
             return "conflict", mid  # made private here (no new version): MyMemo's edit never undoes that
-        fp = st.pushed.get(mid)
-        if fp is not None and fp.get("h") != _memory_hash(m):
-            return "conflict", mid  # changed here since it went up, if only in what a version doesn't count
+        if fp is not None and _memory_hash(m) not in (fp.get("h"), st.received.get(mid)):
+            # Changed here since it went up (or since MyMemo's last edit applied), if only in what a version doesn't
+            # count.
+            return "conflict", mid
         if want.get("status") == "archived":
             if m.status == "active":
                 vault.archive(mid, actor="user", expected_version=base)
-            return "applied", mid
-        if m.status == "archived":
-            vault.restore(mid, actor="user")
-        vault.update(mid, content=want.get("content"), topic=want.get("topic"), section=want.get("section"),
-                     kind=want.get("kind"), pinned=bool(want.get("pinned")), private=bool(want.get("private")),
-                     until=want.get("until") or "", actor="user")
+        else:
+            if m.status == "archived":
+                vault.restore(mid, actor="user")
+            vault.update(mid, content=want.get("content"), topic=want.get("topic"), section=want.get("section"),
+                         kind=want.get("kind"), pinned=bool(want.get("pinned")), private=bool(want.get("private")),
+                         until=want.get("until") or "", actor="user")
+        if fp is not None:
+            st.received[mid] = _memory_hash(vault.get(mid))
         return "applied", mid
 
 
