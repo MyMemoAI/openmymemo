@@ -413,3 +413,12 @@ def test_search_says_so_when_nothing_matches(tmp_path):
     miss = runner.invoke(app, ["--vault", str(root), "search", "zzqqxx"])
     assert miss.exit_code == 0 and miss.stdout == ""  # nothing on stdout for a script to mistake for a result
     assert miss.stderr == 'No memories match "zzqqxx".\n'
+
+
+def test_add_to_an_unknown_topic_lists_the_topics(tmp_path):
+    root = tmp_path / "v"
+    Vault.create(root)
+    r = CliRunner().invoke(app, ["--vault", str(root), "add", "how-i-work", "Prefers short answers"])
+    assert r.exit_code == 1 and r.stdout == ""
+    assert r.stderr.startswith("Unknown topic: how-i-work. Topics: identity, history, ")
+    assert "how-to-work-with-me" in r.stderr
