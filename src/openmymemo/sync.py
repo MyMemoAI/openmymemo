@@ -10,16 +10,18 @@ the MyMemo service tests against the same files.
   link's device. It holds the consent, the picked private topics, the push and cursor counters, the version and a
   short hash of each memory last sent (so a change is noticed whatever made it: the panel, an editor, an app), the
   outcomes not yet reported, and counts for the panel. Never memory text.
-* **Up** (``sync_push``): every memory outside private topics (and inside the topics the person picked), as the
-  versions ``history.jsonl`` has after what was last sent, plus its state; ``set`` for a change without a new version
-  (a review date, pinned, kind) and to state the folder's version after MyMemo changed something provisionally; a
-  ``tombstone`` when a memory leaves the sync (made private, or moved into a private topic that isn't picked). Topic
-  frontmatter, groups and ``require_approval`` when they change. One push in flight, about 512 KB at most.
+* **Up** (``sync_push``): every memory outside private topics (and inside the topics the person picked), as its
+  state at its version (earlier versions since the last push are not sent: their privacy then is unknown); ``set``
+  for a change without a new version (a review date, pinned, kind) and to state the folder's version after MyMemo
+  changed something provisionally; a ``tombstone`` when a memory leaves the sync (made private, or moved into a
+  private topic that isn't picked). Topic frontmatter, groups and ``require_approval`` when they change. One push in
+  flight, about 512 KB at most.
 * **Down** (``sync_ops``): MyMemo's AI and web apps' proposals, filed as their ``cloud-*`` connectors with MyMemo's
   proposal id as the idempotency key (``cloud-askmemo``, ``cloud-agent``, a web app's ``cloud-<slug>``,
   ``cloud-mymemo``); the person's own edits on MyMemo's memory page, applied as ``actor: user`` edits after a version
-  check; and, on a first merge, MyMemo's memories, held in memory for the preview and filed as ``cloud-mymemo``
-  proposals once the person starts syncing.
+  check, never to a memory that changed here since it went up or that MyMemo isn't sent; and, on a first merge,
+  MyMemo's memories, held in memory for the preview and filed as ``cloud-mymemo`` proposals once the person starts
+  syncing (a private one as a private add).
 * **The session** (``Session``) runs on the bridge's event loop for one connection (``cloud.Bridge``); building a
   push and filing are done on a worker thread, under the vault's lock where they write.
 
@@ -50,7 +52,6 @@ CONSENT_VERSION = "2026-10-26"
 MERGE_CONNECTOR = ("cloud-mymemo", "MyMemo")
 PUSH_BYTES = 512 * 1024
 PUSH_OPS = 500
-PAST_VERSIONS = 20  # earlier versions sent per memory and push, newest kept
 FILED_KEEP_DAYS = 30
 APPLIED = ("applied", "accepted", "edited_accepted")
 TERMINAL = ("rejected", "expired", "undone", "duplicate", "refused")
@@ -326,7 +327,7 @@ def build_push(vault: Vault, st: SyncState, *, max_bytes: int = PUSH_BYTES,
         frame["merge"] = "done"
         frame["known"] = sorted(mid for mid, fp in after.items() if fp is not None)
         commit.merge_done = True
-    commit.counts = {"pushed": len([o for o in ops if not o.get("past")]), "tombstones": tombstones}
+    commit.counts = {"pushed": len(ops), "tombstones": tombstones}
     if not ({"settings", "groups", "topics", "ops", "outcomes", "merge"} & set(frame)) and st.cursor <= st.acked_cursor:
         if commit.pushed:  # only fingerprints of memories MyMemo forgot: keep them out of the next look
             for mid in commit.pushed:
@@ -336,20 +337,15 @@ def build_push(vault: Vault, st: SyncState, *, max_bytes: int = PUSH_BYTES,
 
 
 def _memory_ops(m: Any, fp: dict | None, versions: dict[int, dict], reverse: dict[str, str]) -> list[dict]:
-    """A memory as operations: earlier versions not sent yet (``past``), then its state at its version."""
+    """A memory as operations: its state at its version. Earlier versions made since the last push are not sent
+    (the protocol's ``past``): ``history.jsonl`` doesn't say whether the memory or its topic was private when each
+    was written, so one of them may hold text the person kept from MyMemo."""
     def proposal(row: dict | None) -> str | None:
         pid = (row or {}).get("proposal_id")
         return reverse.get(pid, pid) if isinstance(pid, str) else None
 
     out: list[dict] = []
     sent = int(fp.get("v") or 0) if fp else m.version - 1
-    if fp is not None:
-        for v in sorted(x for x in versions if sent < x < m.version)[-PAST_VERSIONS:]:
-            row = versions[v]
-            op = row.get("op") if row.get("op") in VERSIONED else "update"
-            out.append({"memory_id": m.id, "version": v, "op": op, "content": str(row.get("content") or ""),
-                        "topic": str(row.get("topic") or m.topic), "actor": str(row.get("actor") or "file"),
-                        "at": row.get("at") or m.updated_at, "proposal_id": proposal(row), "past": True})
     row = versions.get(m.version)
     if fp is not None and m.version <= sent:
         op = "set"  # the same version: attributes only, or the folder restating what it has
@@ -495,7 +491,7 @@ def _file_one(vault: Vault, st: SyncState, op: dict, touched: set[str]) -> dict:
             args = dict(content=mem.get("content"), topic=mem.get("topic"), kind=mem.get("kind"),
                         until=mem.get("until") or None, idempotency_key=f"merge:{op.get('memory_id')}",
                         new_memory_id=op.get("memory_id"), created_at=op.get("created_at"),
-                        hold="private" if mem.get("private") else None)
+                        private=bool(mem.get("private")))
             name, key = "add", {"merge_id": op.get("memory_id")}
         else:
             c = op.get("connector") or {}
@@ -518,7 +514,7 @@ def _file_one(vault: Vault, st: SyncState, op: dict, touched: set[str]) -> dict:
     edit = {"seq": seq, "edit_id": op.get("edit_id")}
     what = op.get("op")
     if what == "put":
-        status, memory_id = _put(vault, op, touched)
+        status, memory_id = _put(vault, st, op, touched)
         return {**edit, "status": status, "memory_id": memory_id}
     if what == "forget":
         mid = op.get("memory_id")
@@ -563,9 +559,11 @@ def _same(m: Any, want: dict) -> bool:
             and m.status == want.get("status", "active"))
 
 
-def _put(vault: Vault, op: dict, touched: set[str]) -> tuple[str, str | None]:
-    """The person's own edit on MyMemo's memory page, as their own edit here: applied when the memory is still at the
-    version the edit was made on, else a conflict (the folder's version stays)."""
+def _put(vault: Vault, st: SyncState, op: dict, touched: set[str]) -> tuple[str, str | None]:
+    """The person's own edit on MyMemo's memory page, as their own edit here: applied when the memory is still at
+    the version the edit was made on and, once it has gone up, unchanged since in what a version doesn't count
+    (private, pinned, kind…); else a conflict and the folder's memory stays as it is. A memory MyMemo isn't sent
+    (marked private, in a private topic not picked) is never changed from there."""
     mid, base, want = op.get("memory_id"), op.get("base_version"), op.get("memory") or {}
     with vault.lock():
         try:
@@ -586,6 +584,11 @@ def _put(vault: Vault, op: dict, touched: set[str]) -> tuple[str, str | None]:
             return "applied", mid
         if base is None or m.version != base:
             return "conflict", mid
+        if not eligible(m, vault.private_topics(), set(st.picked), set(st.forgotten)):
+            return "conflict", mid  # made private here (no new version): MyMemo's edit never undoes that
+        fp = st.pushed.get(mid)
+        if fp is not None and fp.get("h") != _memory_hash(m):
+            return "conflict", mid  # changed here since it went up, if only in what a version doesn't count
         if want.get("status") == "archived":
             if m.status == "active":
                 vault.archive(mid, actor="user", expected_version=base)

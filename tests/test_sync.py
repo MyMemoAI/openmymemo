@@ -203,12 +203,31 @@ def test_changes_go_up_as_versions_and_sets(vault):
                  until="2027-03")
     vault.update("m7f3a", kind="instruction")  # no new version: a `set`
     frame, commit = sync.build_push(vault, st)
+    # Version 2 (made between two pushes) doesn't go up: the protocol's `past` ops are never sent (below).
     ops = [(op["memory_id"], op["version"], op["op"], bool(op.get("past"))) for op in frame["ops"]]
-    assert ops == [("k2p9d", 2, "update", True), ("k2p9d", 3, "update", False), ("m7f3a", 1, "set", False)]
+    assert ops == [("k2p9d", 3, "update", False), ("m7f3a", 1, "set", False)]
     expected = {("past" if op.get("past") else op["op"]): sorted(op) for op in fx("sync_push.json")["ops"]}
-    assert _keys(frame) == {"past": expected["past"], "update": expected["update"], "set": expected["set"]}
-    final = frame["ops"][1]
+    assert _keys(frame) == {"update": expected["update"], "set": expected["set"]}
+    final = frame["ops"][0]
     assert (final["pinned"], final["until"], final["actor"]) == (True, "2027-03", "user")
+
+
+def test_text_written_while_a_memory_was_private_never_goes_up(vault):
+    """Between two pushes a memory is made private, edited, edited again and made public: only its last state goes
+    up, never the version written while it was private (history.jsonl doesn't record privacy)."""
+    linked(vault)
+    seeded(vault)
+    st = sync.turn_on(vault, [])
+    st.merge = "done"
+    frame, commit = sync.build_push(vault, st)
+    sync.apply_ack(st, commit, {"seq": commit.seq, "skipped": []})
+    vault.update("q8r7s", private=True)
+    vault.update("q8r7s", content="Cycles to work; private: sees a cardiologist every Tuesday")
+    vault.update("q8r7s", content="Cycles to work every day")
+    vault.update("q8r7s", private=False)
+    frame, _ = sync.build_push(vault, st)
+    assert [(op["memory_id"], op["version"], op["op"]) for op in frame["ops"]] == [("q8r7s", 3, "update")]
+    assert "cardiologist" not in json.dumps(frame) and not any(op.get("past") for op in frame["ops"])
 
 
 # ---- what comes down --------------------------------------------------------------------------------------------
@@ -275,6 +294,63 @@ def test_an_edit_on_an_older_version_is_a_conflict_and_the_folder_stays(vault):
     outcomes, touched = sync.file_ops(vault, st, [put, missing])
     assert [o["status"] for o in outcomes] == ["conflict", "missing"]
     assert vault.get("k2p9d").content == "CTO at Acme" and "k2p9d" in touched
+
+
+def _put(memory_id: str, base: int, content: str, **memory) -> dict:
+    return {"seq": 3, "from": "user", "edit_id": "e1", "op": "put", "memory_id": memory_id, "base_version": base,
+            "memory": {"content": content, "topic": "work", "section": None, "kind": "fact", "until": None,
+                       "private": False, "pinned": False, "status": "active", **memory},
+            "at": "2026-10-26T09:06:00+00:00"}
+
+
+def test_an_edit_from_mymemo_never_undoes_a_privacy_choice_made_here(vault):
+    """Marking a memory private makes no new version: an edit MyMemo made on the same version, before it heard,
+    is a conflict and the memory stays private and as it was."""
+    st = _merged_state(vault)
+    frame, commit = sync.build_push(vault, st)
+    sync.apply_ack(st, commit, {"seq": commit.seq, "skipped": []})
+    before = vault.get("k2p9d")
+    vault.update("k2p9d", private=True)
+    assert vault.get("k2p9d").version == before.version
+    outcomes, _ = sync.file_ops(vault, st, [_put("k2p9d", before.version, "Engineering lead (web)")])
+    assert [o["status"] for o in outcomes] == ["conflict"]
+    after = vault.get("k2p9d")
+    assert after.private and after.content == before.content
+    # Likewise anything else a version doesn't count, changed here since the memory went up.
+    st.cursor = 0
+    vault.update("m7f3a", pinned=True)
+    outcomes, _ = sync.file_ops(vault, st, [_put("m7f3a", vault.get("m7f3a").version, "Prefers answers in English",
+                                                 topic="how-to-work-with-me", kind="preference")])
+    assert [o["status"] for o in outcomes] == ["conflict"]
+    assert vault.get("m7f3a").content == "Prefers answers in Chinese, with code comments in English"
+
+
+def test_a_private_memory_from_the_first_merge_stays_private(vault):
+    """MyMemo's memory marked private is filed as a private add: it waits, and accepting it keeps it private (even
+    when it resembles a memory here that isn't private, it is not merged into that one)."""
+    linked(vault)
+    seeded(vault)
+    st = sync.turn_on(vault, [])
+    st.merge = "confirmed"
+    merge = [{"seq": 1, "from": "merge", "memory_id": "c-pr1vat", "created_at": "2026-10-20T08:00:00+00:00",
+              "memory": {"content": "Sees a cardiologist every Tuesday", "topic": "work", "section": None,
+                         "kind": "fact", "until": None, "private": True, "pinned": False, "status": "active"}},
+             {"seq": 2, "from": "merge", "memory_id": "c-pr2vat", "created_at": "2026-10-20T08:00:00+00:00",
+              "memory": {"content": "Cycles to work most days", "topic": "lifestyle", "section": None,
+                         "kind": "fact", "until": None, "private": True, "pinned": False, "status": "active"}}]
+    outcomes, _ = sync.file_ops(vault, st, merge)
+    assert [(o["status"], o["hold"]) for o in outcomes] == [("pending", "private"), ("pending", "private")]
+    props = Proposals(vault)
+    pending = {p.new_memory_id: p for p in props.list() if p.connector_id == "cloud-mymemo"}
+    assert set(pending) == {"c-pr1vat", "c-pr2vat"}
+    assert all(p.private and p.op == "add" for p in pending.values())  # read back from disk
+    for p in pending.values():
+        props.accept(p.id)
+    assert vault.get("c-pr1vat").private and vault.get("c-pr2vat").private
+    assert not vault.get("q8r7s").private and vault.get("q8r7s").content == "Cycles to work"
+    st.merge = "done"
+    frame, _ = sync.build_push(vault, st)
+    assert "cardiologist" not in json.dumps(frame) and "most days" not in json.dumps(frame)
 
 
 def test_a_revoked_cloud_connector_refuses(vault):

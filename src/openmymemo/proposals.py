@@ -130,11 +130,14 @@ class Proposal:
     before_until: str | None = None  # the memory's `until` before an update that sets one, for undo
     batch_id: str | None = None  # proposals filed together by one run, e.g. a tidy-up: grouped in the digest
     new_memory_id: str | None = None  # an add's id for the new memory, if free (MyMemo's c- id, sync.py)
+    private: bool = False  # an add of a memory marked private (MyMemo Memory sync's first merge): it stays private
 
     def to_dict(self) -> dict:
         d = asdict(self)
         if d["new_memory_id"] is None:
             del d["new_memory_id"]  # only MyMemo Memory sync's adds carry one; other files stay as they were
+        if not d["private"]:
+            del d["private"]  # likewise
         return d
 
 
@@ -268,7 +271,7 @@ class Proposals:
                 created_at: str | None = None, queue_id: str | None = None, until: str | None = None,
                 hold: str | None = None, batch_id: str | None = None,
                 expected: Mapping[str, tuple[int, str | None]] | None = None, check: bool = False,
-                new_memory_id: str | None = None) -> dict:
+                new_memory_id: str | None = None, private: bool = False) -> dict:
         """`created_at`: when the AI proposed it, if that was earlier, and `queue_id`: the receipt it got then
         (both from OpenMyMemo Cloud's offline queue). `until`: a review date to set (``YYYY-MM`` or ``YYYY-MM-DD``).
         `hold`: make it wait for the person with this reason even where the rules would apply it (a reason the
@@ -279,8 +282,11 @@ class Proposals:
         `check`: give the OpenMyMemo Assistant a look first, when it is on for that (an app's own
         `memory_propose`; imports and the Assistant's own proposals aren't checked). The check never lifts a
         hold the rules or the proposer set. `new_memory_id`: on an add, the id the new memory gets if the folder
-        doesn't use it yet (MyMemo Memory sync keeps MyMemo's id, product-design.md §20)."""
+        doesn't use it yet (MyMemo Memory sync keeps MyMemo's id, product-design.md §20). `private`: on an add, the
+        new memory is marked private (a memory MyMemo has as private, filed by sync's first merge); it always waits
+        for the person, and accepting it never makes it less private."""
         v = self.vault
+        private_memory = bool(private)  # `private` names the private topics below
         if connector.write == "none":
             raise PermissionDenied("This connector is read-only. The user can allow proposals in the OpenMyMemo panel.")
         if op not in OPS:
@@ -323,7 +329,8 @@ class Proposals:
                     raise Conflict(f"Memory {mid} has changed since this was suggested")
             args = dict(op=op, content=content, memory_id=memory_id, topic=topic, kind=kind, reason=reason,
                         evidence=evidence, idempotency_key=idempotency_key, created_at=created_at,
-                        queue_id=queue_id, until=until, batch_id=batch_id, new_memory_id=new_memory_id)
+                        queue_id=queue_id, until=until, batch_id=batch_id, new_memory_id=new_memory_id,
+                        private_memory=private_memory)
             # The rules first, exactly as without a check: the baseline the check may only make stricter.
             routed = self._route(connector, private, topics, verdict=None, **args)
             if isinstance(routed, dict):
@@ -371,7 +378,7 @@ class Proposals:
                content: str | None, memory_id: str | None, topic: str | None, kind: str | None, reason: str | None,
                evidence: str | None, idempotency_key: str | None, created_at: str | None, queue_id: str | None,
                until: str | None = None, batch_id: str | None = None,
-               new_memory_id: str | None = None) -> tuple[Proposal, Memory | None] | dict:
+               new_memory_id: str | None = None, private_memory: bool = False) -> tuple[Proposal, Memory | None] | dict:
         """Where a proposal goes (its op, topic, target), without saving anything: a Proposal and its target, or a
         ``duplicate`` result. ``verdict``: the Assistant's check, or None for the rules alone. Raises
         PermissionDenied for a blocked topic, VaultError for a bad target."""
@@ -413,7 +420,8 @@ class Proposals:
                      content=content, topic=topic, memory_id=memory_id, kind=kind, reason=reason,
                      evidence=(evidence or None) and evidence[:2000], idempotency_key=idempotency_key,
                      created_at=created_at or now_iso(), queue_id=queue_id, topic_confidence=confidence,
-                     until=until, batch_id=batch_id, new_memory_id=new_memory_id if op == "add" else None)
+                     until=until, batch_id=batch_id, new_memory_id=new_memory_id if op == "add" else None,
+                     private=bool(private_memory) and op == "add")
         if target:
             p.before_content, p.before_topic = target.content, target.topic
             if until is not None:
@@ -430,8 +438,9 @@ class Proposals:
             if best and best_sim >= DUPLICATE_AT:
                 return {"status": "duplicate", "memory_id": best.id,
                         "message": "The user already has this memory; nothing to do."}
-            if best and best_sim >= SIMILAR_AT:
-                # An update of that memory from here on, so its protection applies too.
+            if best and best_sim >= SIMILAR_AT and (best.private or not p.private):
+                # An update of that memory from here on, so its protection applies too. A private add never
+                # becomes an update of a memory that isn't private: its text would lose its privacy.
                 target = best
                 p.original_op, p.op, p.memory_id = "add", "update", best.id
                 p.before_content, p.before_topic = best.content, best.topic
@@ -463,7 +472,7 @@ class Proposals:
 
     def _hold(self, connector: Connector, p: Proposal, target: Memory | None, private: set[str]) -> str | None:
         """Why this proposal must wait for the user, or None when it applies now (the table in §5.5)."""
-        if p.topic in private or (target is not None and (target.topic in private or target.private)):
+        if p.private or p.topic in private or (target is not None and (target.topic in private or target.private)):
             return "private"  # nothing writes into a private topic without the user, not even `auto`
         if p.hold == "sensitive":
             return "sensitive"  # the Assistant's check flagged it: it waits, whatever the writing mode
@@ -546,7 +555,8 @@ class Proposals:
         op = "add" if as_new else p.op
         if op == "add":
             m = v.add(topic, content, kind=kind or p.kind, source=f"connector:{p.connector_id}", actor=actor,
-                      evidence=p.evidence, proposal_id=p.id, until=p.until, memory_id=p.new_memory_id)
+                      evidence=p.evidence, proposal_id=p.id, until=p.until, memory_id=p.new_memory_id,
+                      private=p.private)
         elif op == "update":
             m = v.update(p.memory_id, content=content, topic=topic, kind=kind or p.kind, until=p.until, actor=actor,
                          proposal_id=p.id)

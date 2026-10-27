@@ -336,6 +336,7 @@ One file per proposal, named by its id (`p` plus hexadecimal; the id must be alp
 | `created_at` | |
 | `queue_id` | Optional: the OpenMyMemo Cloud queue id of a proposal filed from the offline queue (product-design.md §16.3), so the AI can match its `queued` receipt to it |
 | `new_memory_id` | Optional, on an `add`: the id the new memory gets when the proposal applies, if the folder doesn't use it yet (otherwise a new one). MyMemo Memory sync (product-design.md §20) sets it to MyMemo's `c-` id, so a memory MyMemo's AI added keeps the same id on both sides |
+| `private` | Optional, on an `add`: `true` when the new memory is marked private once it applies (a memory MyMemo has as private, filed by MyMemo Memory sync's first merge). Such a proposal always waits (`hold: "private"`). Absent means `false` |
 | `status` | `pending`, `accepted`, `edited_accepted`, `rejected`, `expired`, `applied`, `undone` |
 | `decided_at` | When the status left `pending` or `applied` was set |
 | `reviewed_at` | Version 2: when the person saw an applied change in the digest. Applied proposals without it are "unreviewed". |
