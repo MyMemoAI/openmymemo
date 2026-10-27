@@ -480,6 +480,8 @@ def tidy_(ctx: typer.Context,
             typer.echo(f"Tidy-up runs {schedule} on this computer while the panel runs; next: {s['next_run']}.")
             typer.echo("Nothing runs when no panel does (the Mac app, `openmymemo serve`, or an AI app's plugin).")
         return
+    if topic is not None and topic not in {t["slug"] for t in vault.topics()}:
+        _unknown_topic(vault, f"Unknown topic: {topic}")
     result = tidy.run(vault, topic=topic, dry_run=dry_run, max_calls=max_calls or tidy.MAX_CALLS)
     if dry_run:
         typer.echo(f"Memories it would look at: {result.memories}"
@@ -644,16 +646,21 @@ def recall_(
         typer.echo(result["text"], nl=False)
 
 
+def _unknown_topic(vault: Vault, error: object) -> NoReturn:
+    """Stop with the error and the folder's topic slugs: the slug is the file name, not the title."""
+    slugs = ", ".join(t["slug"] for t in vault.topics())
+    typer.secho(f"{error}. Topics: {slugs}.", fg="red", err=True)
+    raise typer.Exit(1)
+
+
 @app.command()
 def add(ctx: typer.Context, topic: str, content: str) -> None:
     """Add a memory yourself."""
     vault = _vault(ctx)
     try:
         m = vault.add(topic, content)
-    except NotFound as e:  # the slug is the file name, not the title: name the ones there are
-        slugs = ", ".join(t["slug"] for t in vault.topics())
-        typer.secho(f"{e}. Topics: {slugs}.", fg="red", err=True)
-        raise typer.Exit(1) from None
+    except NotFound as e:
+        _unknown_topic(vault, e)
     except VaultError as e:
         typer.secho(str(e), fg="red", err=True)
         raise typer.Exit(1) from None
