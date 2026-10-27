@@ -647,8 +647,13 @@ def recall_(
 @app.command()
 def add(ctx: typer.Context, topic: str, content: str) -> None:
     """Add a memory yourself."""
+    vault = _vault(ctx)
     try:
-        m = _vault(ctx).add(topic, content)
+        m = vault.add(topic, content)
+    except NotFound as e:  # the slug is the file name, not the title: name the ones there are
+        slugs = ", ".join(t["slug"] for t in vault.topics())
+        typer.secho(f"{e}. Topics: {slugs}.", fg="red", err=True)
+        raise typer.Exit(1) from None
     except VaultError as e:
         typer.secho(str(e), fg="red", err=True)
         raise typer.Exit(1) from None
