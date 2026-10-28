@@ -422,3 +422,11 @@ def test_add_to_an_unknown_topic_lists_the_topics(tmp_path):
     assert r.exit_code == 1 and r.stdout == ""
     assert r.stderr.startswith("Unknown topic: how-i-work. Topics: identity, history, ")
     assert "how-to-work-with-me" in r.stderr
+
+
+def test_tidy_checks_the_topic_before_estimating(tmp_path):
+    root = tmp_path / "v"
+    Vault.create(root).add("work", "Works at Acme")
+    r = CliRunner().invoke(app, ["--vault", str(root), "tidy", "--dry-run", "--topic", "wrok"])
+    assert r.exit_code == 1 and r.stdout == ""  # no estimate for a topic that isn't there
+    assert r.stderr.startswith("Unknown topic: wrok. Topics: identity, history, ")
