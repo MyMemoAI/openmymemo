@@ -1,7 +1,7 @@
 # OpenMyMemo product design
 
-> Status: v0.2 implemented (2026-10-08), except the PyPI release and the first installs in the real apps. §13 lists what changed against v0.1 and what is still open; §14 describes the Mac app (2026-10-10); §15 the two ways in, one-click connections and the first-run guide (2026-10-12); §16 the optional OpenMyMemo Cloud connector (2026-10-12, design; launched 2026-10-19 with the live relay for MyMemo Pro, Ultra and Lifetime, listed on the Connectors page by default, the offline queue not offered yet, §16.11); §17 the optional OpenMyMemo Assistant (2026-10-18); §18 the memory guardian: Home, a safety score, a daily brief and notifications (2026-10-22, design); [MEMORY_FORMAT.md](./MEMORY_FORMAT.md) is the normative description of the folder. Differences between v0.1 and the original draft are in §12.
-> Scope: the **local, open-source** version. Cloud hosting is explicitly out of scope for now: OpenMyMemo Cloud (§16) only relays web apps' calls to the computer, and the memory stays there.
+> Status: v0.2 implemented (2026-10-08), except the PyPI release and the first installs in the real apps. §13 lists what changed against v0.1 and what is still open; §14 describes the Mac app (2026-10-10); §15 the two ways in, one-click connections and the first-run guide (2026-10-12); §16 the optional OpenMyMemo Cloud connector (2026-10-12, design; launched 2026-10-19 with the live relay for MyMemo Pro, Ultra and Lifetime, listed on the Connectors page by default, the offline queue not offered yet, §16.11; for accounts that also use MyMemo Memory, web apps use that instead since 2026-10-27, §16.12); §17 the optional OpenMyMemo Assistant (2026-10-18); §18 the memory guardian: Home, a safety score, a daily brief and notifications (2026-10-22, design); §20 MyMemo Memory sync, an optional copy of the folder in MyMemo (2026-10-26); [MEMORY_FORMAT.md](./MEMORY_FORMAT.md) is the normative description of the folder. Differences between v0.1 and the original draft are in §12.
+> Scope: the **local, open-source** version. Cloud hosting is opt-in: OpenMyMemo Cloud (§16) relays web apps' calls to the computer (for accounts that also use MyMemo Memory, web apps use that instead, §16.12), and MyMemo Memory sync (§20) keeps a copy in MyMemo for people who turn it on.
 
 ## 0. In one sentence
 
@@ -15,7 +15,7 @@ OpenMyMemo is **an AI memory folder that lives on your own computer**, plus a sm
 
 ## 2. Principles (the tie-breakers for product decisions)
 
-1. **Local files are the only source of truth.** Your memory is a folder on your computer. Any editor can open it; put it in iCloud, Dropbox, an Obsidian vault or a git repo — backup and sync are your call.
+1. **Local files are the source of truth.** Your memory is a folder on your computer. Any editor can open it; put it in iCloud, Dropbox, an Obsidian vault or a git repo — backup and sync are your call. If you turn on MyMemo Memory sync (§20), MyMemo keeps a copy that follows the folder, so MyMemo's own AI and AI apps on the web can use your memory even while the computer is off; when the two disagree, the folder wins.
 2. **AI writes; you see everything and can undo.** An AI's additions land right away and show up in a digest for you to check. Its changes to memories you wrote, imported or approved yourself, and anything in a private topic, wait for you. One switch makes every change wait, and the mode can also be set per app.
 3. **What you see is what it gets.** The panel shows the exact text an AI receives, character for character, and who read what and when.
 4. **Works with zero dependencies.** No API key, no Docker, no database: install and go. Model-powered extras (sorting, deduplication, extracting memories from chats) are optional and use a model you configure.
@@ -221,7 +221,7 @@ Hooks call `openmymemo context --hook`, which registers the connector on first u
 - **Private topics always wait:** neither the switch nor `auto` ever writes into a private topic; those proposals always need the user.
 - **The digest:** an applied proposal stays "unreviewed" until the user has seen it (`reviewed_at` on the proposal). The digest is the list of unreviewed applied proposals. It surfaces on the panel's Changes page, as the first line of the session-start hook output, in `openmymemo review` and `status`, in the generated `log.md`, and later as system notifications. "Looks good" marks everything seen; keeping, editing or undoing a single change marks that one.
 - **Undo without a window:** undo is available for as long as the change is still the memory's latest version — undoing an add archives the memory, undoing an update restores the previous text and topic, undoing an archive restores the memory. Once something else has changed the memory (the user, an editor, another app, or an undo of a later change), the panel offers its version history instead. Undoing or editing a change also marks it seen; editing makes the memory the user's, so it becomes protected. `history.jsonl` is append-only, so nothing is ever lost. (v0.1 used a 7-day window.)
-- **Proposal lifecycle:** `pending → accepted | edited_accepted | rejected | expired (30 days)`; `applied` (reviewed or not) `→ undone`. Accepted proposals can be undone the same way as applied ones.
+- **Proposal lifecycle:** `pending → accepted | edited_accepted | rejected | expired (30 days; never for a memory MyMemo Memory sync's first merge brought, §20.4)`; `applied` (reviewed or not) `→ undone`. Accepted proposals can be undone the same way as applied ones.
 - **Duplicates and conflicts:** before a proposal is stored it is compared with the memories that connector can read (Jaccard over Chinese character bigrams and English words, combined with edit distance). At ≥ 0.92 it is a duplicate and no proposal is created. An `add` at ≥ 0.6 becomes an `update` of the closest memory and is shown as a diff; the user can still "add as a new memory". If one side contains a negation and the other doesn't, it is flagged as contradicting. Embedding-based matching with a configured model is optional (§17).
 - **Revocation:** removing a connector leaves a `revoked_at` tombstone. A stdio app keeps launching with the same `--connector` after removal, and without the tombstone its next call would quietly re-register it. After revocation every call returns "revoked"; adding the same id again is an explicit re-grant.
 - **Rules:** a rejection or an undo can become a rule: "stop accepting this app's proposals about this topic", enforced per connector × topic at the point of proposal. An `add` that turns into an update of a memory in a blocked topic is refused too, so apply-now can never slip into a blocked topic.
@@ -499,13 +499,13 @@ Called MyMemo Cloud until its launch on 2026-10-19, when it was renamed for peop
 
 ChatGPT on the web and claude.ai can only reach MCP servers on the public internet (§5.4), so until now nothing they learn reaches the folder. OpenMyMemo Cloud closes that gap with a relay that a person turns on by signing in with their MyMemo account. It is an optional connector, the way §3 always anticipated MyMemo: off by default, listed in the catalog next to Claude and Cursor, with the same permissions, activity log and revocation as every other app. Nothing else in OpenMyMemo depends on it, and everything works without it.
 
-Decided by the product owner on 2026-10-12: (1) the cloud is an optional connector, and the non-negotiables in AGENTS.md change by one sentence instead of being dropped; (2) when the computer is offline, writes wait in a queue encrypted to the computer's key, so the service can't read what it stores, and reads fail (option "b"; the service never keeps a readable copy of the memory at rest, though like any MCP server it sees each call in memory as it passes through); (3) subscribers aren't billed per call for the memory tools for now; (4) the offline queue is for Ultra subscriptions and AppSumo tier 3 only.
+Decided by the product owner on 2026-10-12: (1) the cloud is an optional connector, and the non-negotiables in AGENTS.md change by one sentence instead of being dropped; (2) when the computer is offline, writes wait in a queue encrypted to the computer's key, so the service can't read what it stores, and reads fail (option "b"; the service never keeps a readable copy of the memory at rest, though like any MCP server it sees each call in memory as it passes through. Unless the person turns on MyMemo Memory sync, §20, which is a separate consent. And since 2026-10-27, none of this applies to an account that also uses MyMemo Memory: its web apps use MyMemo Memory instead of the computer, §16.12); (3) subscribers aren't billed per call for the memory tools for now; (4) the offline queue is for Ultra subscriptions and AppSumo tier 3 only.
 
 ### 16.1 What changes in the principles
 
 - AGENTS.md, "Local only": no cloud storage, sync, accounts or telemetry — **except the optional OpenMyMemo Cloud connector (§16), which does nothing until the person signs in and never holds memory in readable form at rest.**
 - AGENTS.md, "No dependency on MyMemo services": the core never depends on them; the OpenMyMemo Cloud connector is the one optional piece that talks to MyMemo, and removing it changes nothing else.
-- §3 (relationship to MyMemo) and §5.4 (web apps) point here. Principle 1 in §2 still holds: the folder is the only source of truth; the cloud relays and, offline, queues encrypted proposals.
+- §3 (relationship to MyMemo) and §5.4 (web apps) point here. Principle 1 in §2 still holds: the folder is the source of truth; the cloud relays and, offline, queues encrypted proposals (for accounts that don't use MyMemo Memory, §16.12). MyMemo Memory sync (§20) is the one way a readable copy of the folder reaches MyMemo, with its own consent.
 
 ### 16.2 How it works
 
@@ -534,6 +534,8 @@ claude.ai ─────┼──▶ MyMemo service  /openmymemo/mcp
 | Computer offline: reads (`memory_context`, `memory_search`, `memory_get`, `memory_proposals`) | Fail with a plain message: "OpenMyMemo isn't running on your computer right now" | Fail the same way (decision 2) |
 | Computer offline: `memory_propose` | Fails the same way | Queued: the service encrypts it to the computer's public key on arrival and stores the ciphertext; the AI gets `status: "queued"` with a `queue_id` and no `proposal_id`. That is a receipt, not an acceptance: the connector's permissions are only checked on the computer, so it may still be turned down there |
 | Kept on the service | Nothing beyond request metadata | Encrypted proposals, for at most 30 days, deleted once the computer confirms it stored them |
+
+Neither mode applies to an account that also uses MyMemo Memory (§16.12): its web apps read and change MyMemo Memory, online or offline, and nothing is relayed to this computer or queued for it.
 
 - **Encryption of the queue:** when linking, the computer creates an X25519 key pair and registers the public key. The service encrypts each queued proposal to it with HPKE (RFC 9180: X25519, HKDF-SHA256, ChaCha20-Poly1305, from `cryptography`, which both sides already have) before writing anything to storage. Plaintext exists on the service only in memory while a call passes through, as for any MCP server; it is never logged. The guarantee is about data at rest: only the computer can open what is stored, but the service does see each write as it arrives.
 - **Draining:** on reconnect the computer receives queued items in order, opens each, files it through `proposals.py` as that connector with the original time, and acknowledges by queue id. The queue id is derived on the service from the AI's own `idempotency_key` when it sent one (an HMAC, so the raw key isn't stored in the clear) and random otherwise; it names the row and the acknowledgement. The AI's own key travels inside the sealed item (the arguments are sealed whole) and becomes the proposal's `idempotency_key` locally, falling back to the queue id when the AI sent none. So a replayed item is a duplicate, and so is the same request retried live with the same key once the computer is back. An item turned down on the computer (the app was revoked, is read-only or blocked from the topic, or the item is malformed) is acknowledged as `rejected` and deleted, never retried; the refusal is recorded in the activity log. At most 500 items or 4 MB per computer. Items it can't open (a key that changed) are reported and dropped.
@@ -608,6 +610,17 @@ At launch (product owner, 2026-10-19) MyMemo Cloud was renamed **OpenMyMemo Clou
 - **Settings → OpenMyMemo Cloud → Show OpenMyMemo Cloud** (on by default) lists it on the Connectors page and in `openmymemo apps`; turning it off hides it. While this computer is linked it is always listed, whatever the switch says, so a link can always be seen and undone; the switch is disabled then. Linking from the CLI (`openmymemo cloud link`) works while it is hidden. The first-run guide (§15.3) doesn't mention it: that step connects the apps on this computer, and this is a paid sign-in that the Connectors page now lists for anyone looking for ChatGPT or claude.ai.
 - **Service** (shown with the switch on): the MyMemo service a new link goes to, MyMemo's own (`https://api.mymemo.ai`) unless the person enters another. It must be `https://` (`http://` only for a service on this computer's loopback), without user, query or fragment; it is stored without a trailing slash and is the issuer the callback must name. A link keeps the service it was made with, so the service can't change while linked (unlink first). `OPENMYMEMO_CLOUD_URL`, when set, decides the service and the field only shows it.
 - **Stored** per computer, like the link and never in the folder: `settings.json` next to `cloud.json` (mode 0600), `{"format": 2, "show": bool, "service": url | null}`; keys a later version adds are kept, and an unreadable file or an unusable service counts as listed and MyMemo's own. Only a file of format 2 or later can hide it (`"show": false`): 0.2.8 and older wrote no `format`, and wrote `"show": false` whenever anything else changed, because hidden was the default then, so their `show` says nothing about what the person chose and is ignored (their `service` is kept). Any change writes format 2 with `show` as it is then; only reading the settings writes nothing. The panel changes it with `PATCH /api/cloud/settings` (`{"show"?, "service"?}`, `""` for MyMemo's own; 400 for an unusable address, 409 while it can't change), the CLI with `openmymemo cloud settings [--show|--hide] [--service URL]`; `GET /api/cloud` reports `shown` and `settings`.
+
+### 16.12 When the account also uses MyMemo Memory (2026-10-27)
+
+Decided by MyMemo's product owner on 2026-10-27, in the MyMemo service: whenever MyMemo Memory serves the account (the person turned it on in MyMemo, on Pro, Ultra or Lifetime, and MyMemo answers web apps from it), ChatGPT, claude.ai and the other web apps connected through OpenMyMemo Cloud read and change MyMemo Memory instead of this computer, whether or not a computer is linked, syncs, or is online. Before, a linked computer always had the web apps' calls relayed to it, so a person who used both had their web apps' changes go to the folder (or wait in the offline queue) and never reach MyMemo Memory, which MyMemo's own AI uses.
+
+- **With MyMemo Memory sync on (§20):** what the web apps change in MyMemo comes here as proposals from their `cloud-*` connectors ("ChatGPT (web)", "Claude (web)", …), filed and decided by this computer's rules and permissions like any app's, and the folder still wins. What they read is MyMemo's copy, which follows the folder (private topics only if picked).
+- **Without sync:** their changes stay in MyMemo Memory and never reach the folder, and what they read is MyMemo Memory only. Turning sync on joins the two.
+- **Without MyMemo Memory:** nothing changes: the relay and, where the plan and both sides offer it, the encrypted offline queue (§16.3).
+- **What this computer sees:** the web apps' relayed calls stop arriving; nothing in OpenMyMemo works differently. The bridge stays connected for sync, and anything already queued for this computer is still delivered. MyMemo doesn't tell this computer whether MyMemo Memory serves the account, so the panel (the OpenMyMemo Cloud setup steps and the sync section) and `openmymemo cloud link` and `status` say what happens "if you also use MyMemo Memory".
+- **Permissions:** a `cloud-*` connector's read scope, writing mode and revocation here decide what is filed in this folder. What the web apps can read and change in MyMemo is set on MyMemo's memory page, where each has its own connector.
+- **Privacy:** the relay still keeps nothing readable. MyMemo Memory is readable by MyMemo, under the consent the person gave when turning it on in MyMemo and MyMemo's privacy policy; a web app's calls for an account that uses it are MyMemo Memory's, not the relay's (PRIVACY.md).
 
 ## 17. OpenMyMemo Assistant: optional model help (2026-10-18, design)
 
@@ -997,3 +1010,82 @@ Not in this step:
 - voice input.
 
 They reuse `tell.py` when wanted.
+
+## 20. MyMemo Memory sync: an optional copy of the folder in MyMemo (2026-10-26)
+
+MyMemo, the service behind OpenMyMemo Cloud (§16), has its own memory for its AI features: MyMemo Memory. People who use both have two memories: the folder on their computer and MyMemo's. MyMemo Memory sync joins them. It is a feature of the MyMemo service that the person turns on in OpenMyMemo; OpenMyMemo itself keeps memory local exactly as before, and with sync off nothing in this section happens.
+
+Decided by the product owner on 2026-10-26: OpenMyMemo keeps memory local; syncing with MyMemo is a MyMemo service feature that the person turns on, with its own consent. With it on, MyMemo keeps a copy that follows the folder; when the two disagree, the folder wins.
+
+### 20.1 How it differs from the relay
+
+| | OpenMyMemo Cloud (§16) | MyMemo Memory sync |
+| --- | --- | --- |
+| Consent | Signing in and linking this computer | A second, separate consent in the panel (or `openmymemo cloud sync on`), shown with what MyMemo stores, who can read it and how to delete it. It needs a linked computer, and the account's MyMemo Memory turned on (MyMemo Pro, Ultra or Lifetime) |
+| What MyMemo keeps | Nothing readable: calls pass through | A copy of the memories outside private topics, their versions from the day sync started, the topics' names, groups and order, and the approval switch |
+| Private topics | Hidden from web apps unless allowed per app | Never sent, unless the person picks a private topic when turning sync on (or later); only each private topic's slug and the fact that it is private go up, so MyMemo's rules can treat it as private |
+| While the computer is off | Web apps' calls fail, or their changes wait encrypted (§16.3) | MyMemo's AI features use the copy; what they propose comes to the folder as proposals |
+| Web apps (ChatGPT, claude.ai) | Relayed to this computer, unless the account also uses MyMemo Memory: then they use MyMemo Memory, online or off, and their changes stay there (§16.12) | They use MyMemo's copy, online or off (§16.12); what they propose comes to the folder as proposals from their `cloud-*` connectors |
+
+What is never sent: memories marked private, memories in private topics the person didn't pick, the evidence quotes of memories, `connectors.yaml`, the activity log, local apps' proposals (only the changes they made), the search index, and this computer's Assistant and Cloud settings.
+
+### 20.2 Who decides: the folder
+
+The topology is a star: this computer ⇄ MyMemo. One computer per MyMemo account, as for the relay (§16.4); several computers are an open question (§20.9).
+
+- **The folder is the source of truth.** MyMemo's copy follows it: each change in the folder (from the panel, an editor, a local app's proposal) goes up as an operation, one per version of a memory.
+- **MyMemo's AI features** (AskMemo, MyMemo's Agent) **and the web apps** (which use MyMemo Memory whenever the account has it on, online or off, §16.12) propose changes in MyMemo, under the same rules as here (§5.5): MyMemo applies them to its copy at once, provisionally, so its AI can use them, and sends each one down. Here it is filed through `proposals.py` like any app's proposal, as a `cloud-*` connector (`cloud-askmemo` "AskMemo (MyMemo)", `cloud-agent` "MyMemo Agent", `cloud-chatgpt` "ChatGPT (web)", …), with MyMemo's proposal id as the idempotency key, so a resent one is filed once. This computer decides by its own rules and permissions (a revoked or read-only `cloud-*` connector refuses); the outcome goes back, and MyMemo follows it: what applied here stays, anything else is reverted in MyMemo. A proposal that waits here also waits in MyMemo; deciding it on either side decides it on both.
+- **The person's own edits on MyMemo's memory page** (adding, editing, archiving, restoring or forgetting a memory, topic changes, the approval switch, and accepting, rejecting or undoing a change) are the person's own, so they apply here directly, as `actor: user` edits, like an edit in the panel. Each carries the version it was made on. If the memory changed here meanwhile — a new version, or since it last went up anything a version doesn't count, such as marking it private — the folder wins (a memory MyMemo isn't sent is never changed or forgotten from there): MyMemo takes the folder's version, keeps its own in the memory's history, and offers it back as a change from "MyMemo" (`cloud-mymemo`) that waits for the person, in both digests. A topic change applies only while the topic is as it last went up or as MyMemo's own last change (or creation) of it left it, and only ever adds privacy: making a private topic public there is refused and the topic stays private here; a private topic MyMemo knows only by its slug keeps its title and description here (only its group and privacy can change from there).
+- **Ids.** MyMemo makes ids of `c-` plus 6 characters, so they never meet OpenMyMemo's 5-character ids. A memory created in MyMemo, or added there by MyMemo's AI, keeps its `c-` id in the folder (MEMORY_FORMAT.md §3.7 already keeps foreign ids).
+- **Privacy moves.** Moving a memory into a private topic that isn't picked, marking it private, making its topic private, or unpicking a private topic sends a tombstone for each memory concerned: MyMemo deletes the memory and the text of all its versions, not just archives it. Doing the same on MyMemo's memory page comes down as an edit, and the tombstone then goes up from here.
+
+### 20.3 The protocol
+
+It reuses the bridge (§16.2, `openmymemo-bridge.v1`); the frames are pinned by `tests/fixtures/cloud/sync/`, which the MyMemo service keeps byte-identical. Sync only happens while OpenMyMemo runs, as for the relay.
+
+- `hello.features` lists `sync` only while the person has sync on here. The service accepts it only for an account whose MyMemo Memory is on and while MyMemo has the feature switched on; otherwise it answers that sync is refused, and why, and nothing is sent.
+- After `welcome`: `sync_hello` (computer → MyMemo) carries the random id of this consent; `sync_status` (MyMemo → computer) says whether sync is accepted, whether a first merge is due (§20.4), and the last push and cursor MyMemo has.
+- `sync_push` (computer → MyMemo): each memory changed since the last acknowledged push, as its state at its version (`memory_id`, `version`, `op`, `content`, `topic`, `section`, `kind`, `until`, `private`, `pinned`, `actor`, `at`, `proposal_id`). Versions made between two pushes don't go up (the protocol's `past` ops are not sent): `history.jsonl` doesn't record whether the memory or its topic was private when each was written; `set` for a change without a new version (a review date, pinned, kind) and to state what the folder has; `tombstone`. It also carries changed topic frontmatter and groups, `require_approval`, the cursor of what came down and has been filed, and the outcomes of what was filed. One push is in flight at a time, at most about 512 KB.
+- `sync_ack` (MyMemo → computer): the push was applied, with any memory MyMemo would not store (a secret by MyMemo's never-save list, or the account's memory limit).
+- `sync_ops` (MyMemo → computer): what MyMemo has for the folder after the cursor: proposals from its AI and web apps, the person's own edits, and the first merge's memories.
+- `sync_off` (computer → MyMemo): sync was turned off here, optionally deleting MyMemo's copy.
+
+### 20.4 The first merge
+
+Turning sync on for the first time (or again, after it was turned off) starts with a merge. Before anything goes up:
+
+1. MyMemo sends down the memories it already has (for example from AskMemo, before this computer was linked).
+2. The panel shows a preview: "MyMemo has 23 memories; 11 are already here, 2 look like ones you have, 10 are new. Your 140 memories will be copied to MyMemo (private topics only if you picked them)."
+3. **Start syncing** files MyMemo's memories here as proposals from "MyMemo" (`cloud-mymemo`): duplicates are dropped and similar ones become updates, by the usual rules (§5.5), and new ones keep their `c-` ids. A memory MyMemo has as private is filed as a private add: it always waits for the person, accepting it keeps it private, and it never becomes an update of a memory that isn't private. One that waits (private, or every one while the person reviews every change) never expires here, and MyMemo keeps it until the person decides: the decision goes up later, MyMemo drops a rejected one, and an edit of it on MyMemo's memory page meanwhile leaves what waits here as it is (forgetting it there rejects it). Then every memory outside unpicked private topics goes up, and MyMemo drops any copy of a memory the folder no longer has. **Cancel** turns sync off; nothing was sent.
+
+`openmymemo cloud sync on` records the consent; the merge then waits for the panel, or for `openmymemo cloud sync merge`.
+
+### 20.5 Turning it off, unlinking, deleting the copy
+
+- **Here:** the panel's Turn off (or `openmymemo cloud sync off`), with "Also delete the copy in MyMemo". With it, MyMemo deletes every memory that came from this folder and their versions. Without it, MyMemo keeps them as ordinary MyMemo Memory that no longer follows the folder. If the computer is offline, the choice is kept and sent at its next connection.
+- **Unlinking** the computer (§16.4) asks the same question first.
+- **On MyMemo's memory page:** sync can be turned off there too, with the same choice; this computer is told at its next connection and turns sync off here, saying so. Turning it on again here is a new consent and starts a new merge.
+- Deleting the MyMemo account deletes the copy.
+
+### 20.6 In the panel, the CLI and the log
+
+- **Connectors → OpenMyMemo Cloud → MyMemo Memory sync**, shown while this computer is linked to this folder: the consent (what MyMemo stores, who can read it, how to delete it, and that the folder wins) with the private-topic picker, the first-merge preview, the state ("Synced 2 minutes ago", "Refused: MyMemo Memory is off for your account", …), Private topics…, and Turn off.
+- **CLI:** `openmymemo cloud sync on [--private-topic SLUG]… [--yes]`, `sync merge`, `sync off [--delete-copy]`, `sync status`.
+- **Activity:** one `sync` entry per round that moved something, with counts only (`pushed`, `received`, `tombstones`, `result`), connector `mymemo-cloud` (MEMORY_FORMAT.md §6.5).
+
+### 20.7 Where it lives
+
+- **Per computer, never in the folder:** `sync.json` next to `cloud.json`, mode 0600: on or off, the consent's version, time and random id, the picked private topics, the last push MyMemo acknowledged and the last cursor filed, and for each memory sent its version and a short hash of what was sent, plus outcomes not yet reported. It never holds memory text. The folder may be synced or kept in git, and another computer must not inherit this one's consent.
+- **OpenMyMemo:** `src/openmymemo/sync.py` (state, building pushes, filing what comes down), the bridge in `cloud.py`, `/api/cloud/sync` in `web.py`, the panel row, the CLI.
+- **The MyMemo service** (closed source): the copy in its MyMemo Memory tables, the per-computer sync state, the rules and provisional application, answering web apps from MyMemo Memory (§16.12).
+
+### 20.8 Limits
+
+One push in flight; pushes of at most about 512 KB; the first merge's upload in several pushes. MyMemo keeps at most 5,000 active memories per account and refuses secrets (its never-save list: keys and tokens, passwords, payment cards, government ID numbers), reporting the memory id in `sync_ack`; the memory stays in the folder.
+
+### 20.9 Open questions
+
+1. Several computers per account (as §16.9 question 1): each its own sync state against one copy, with the folders merged through MyMemo, or one computer that syncs and others that only relay?
+2. Should evidence quotes sync, so MyMemo's digest can show them?
+3. Deleting a topic on MyMemo's memory page is refused here (OpenMyMemo has no topic deletion); should it archive the topic's memories instead?
+4. Proposals' "seen" state (`reviewed_at`) stays on each side; should keeping a change in one digest clear it in the other?

@@ -28,7 +28,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from mcp.server.transport_security import TransportSecuritySettings
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import __version__, brief, clients, memfiles, notices, overview, score, transfer
 from .assistant import (
@@ -207,6 +207,19 @@ class SettingsPatch(BaseModel):
 class CloudSettingsPatch(BaseModel):
     show: bool | None = None
     service: str | None = None  # "" goes back to MyMemo's own
+
+
+class SyncSwitch(BaseModel):
+    """MyMemo Memory sync on (with the person's consent and the private topics they picked) or off."""
+
+    on: bool
+    consent: bool = False  # the person agreed to the text the panel showed (sync.CONSENT_VERSION)
+    private_topics: list[str] = Field(default_factory=list, max_length=200)
+    delete_copy: bool = False  # turning off: also delete the copy in MyMemo
+
+
+class SyncPicks(BaseModel):
+    private_topics: list[str] = Field(default_factory=list, max_length=200)
 
 
 class AssistantCaps(BaseModel):
@@ -577,6 +590,7 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
         s["apps"] = apps
         seen = [a["last_seen"] for a in apps if a["last_seen"]] + ([s["last_call_at"]] if s["last_call_at"] else [])
         s["last_call_at"] = max(seen) if seen else None
+        s["sync"] = cloud.sync_status()
         return s
 
     @api.get("/api/cloud")
@@ -598,9 +612,32 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
         return {"url": cloud.begin_link()}
 
     @api.delete("/api/cloud")
-    def unlink_cloud() -> dict:
-        message = cloud.unlink()
+    def unlink_cloud(delete_copy: bool = False) -> dict:
+        """Unlink; ``?delete_copy=true`` first asks MyMemo to delete MyMemo Memory sync's copy (product-design.md §20.5)."""
+        message = cloud.unlink(delete_copy=delete_copy)
         return {"message": message, "cloud": cloud_status()}
+
+    # MyMemo Memory sync (product-design.md §20): turning it on needs the consent the panel shows.
+    @api.post("/api/cloud/sync")
+    def switch_sync(body: SyncSwitch) -> dict:
+        if body.on:
+            if not body.consent:
+                raise HTTPException(400, "Turning on MyMemo Memory sync needs your consent.")
+            cloud.sync_on(body.private_topics)
+        else:
+            cloud.sync_off(delete_copy=body.delete_copy)
+        return cloud_status()
+
+    @api.patch("/api/cloud/sync")
+    def pick_sync_topics(body: SyncPicks) -> dict:
+        cloud.sync_pick(body.private_topics)
+        return cloud_status()
+
+    @api.post("/api/cloud/sync/merge")
+    def start_sync_merge() -> dict:
+        """Start syncing after the first merge's preview."""
+        cloud.sync_merge()
+        return cloud_status()
 
     @api.post("/api/cloud/reconnect")
     def reconnect_cloud() -> dict:

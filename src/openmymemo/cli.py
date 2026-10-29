@@ -27,9 +27,14 @@ app.add_typer(connector_app, name="connector")
 setup_app = typer.Typer(help="Set up AI apps that need more than an MCP config.", no_args_is_help=True)
 app.add_typer(setup_app, name="setup")
 cloud_app = typer.Typer(help="OpenMyMemo Cloud: use your memory in ChatGPT and claude.ai on the web, relayed by MyMemo "
-                             "while your memory stays on this computer (optional; needs MyMemo Pro, Ultra or Lifetime).",
+                             "while your memory stays on this computer (optional; needs MyMemo Pro, Ultra or Lifetime; "
+                             "if you also use MyMemo Memory, they use that instead).",
                         no_args_is_help=True)
 app.add_typer(cloud_app, name="cloud")
+cloud_sync_app = typer.Typer(help="MyMemo Memory sync: keep a copy of this folder in your MyMemo Memory, so MyMemo's AI "
+                                  "and web apps can use it even while this computer is off (optional; your folder wins).",
+                             no_args_is_help=True)
+cloud_app.add_typer(cloud_sync_app, name="sync")
 assistant_app = typer.Typer(help="OpenMyMemo Assistant: optional model help with imports, sorting and more "
                                  "(off by default).", no_args_is_help=True)
 app.add_typer(assistant_app, name="assistant")
@@ -1131,11 +1136,19 @@ BRIDGE_STATES = {
 }
 
 
+# product-design.md §16.12: MyMemo answers web apps from MyMemo Memory when the account has it on, and doesn't tell
+# this computer, so the CLI says it to everyone (as the panel does, web/src/i18n.ts "cloud.mymemoMemory").
+MYMEMO_MEMORY_NOTE = ("If you also use MyMemo Memory, ChatGPT and claude.ai read and change it instead of this computer, "
+                      "whether or not this computer is on. With MyMemo Memory sync on (`openmymemo cloud sync on`), "
+                      "what they change comes here as changes you review; without it, it stays in MyMemo.")
+
+
 def _web_steps(endpoint: str) -> None:
     typer.echo(f"\nAdd this URL as a custom connector in ChatGPT or claude.ai, exactly as shown:\n  {endpoint}")
     typer.echo("- claude.ai: Settings → Connectors → Add custom connector; Claude signs you in with your MyMemo "
                "account.\n- ChatGPT: turn on Developer Mode in Settings, then add a connector with this URL "
                "(OAuth). Whether ChatGPT may use write tools can depend on your ChatGPT plan.")
+    typer.echo(MYMEMO_MEMORY_NOTE)
 
 
 def _cloud_link(ctx: typer.Context, port: int, open_browser: bool) -> None:
@@ -1213,6 +1226,7 @@ def cloud_status(ctx: typer.Context,
     here = link.serves(root)
     typer.echo(f"Folder: {link.vault}" + ("" if here else f"  (not {root}: link again from that folder to move it)"))
     typer.echo(f"Endpoint for ChatGPT and claude.ai: {cloud.endpoint(link.service)}")
+    typer.echo(MYMEMO_MEMORY_NOTE)
     panel = _panel_for(Path(link.vault), port)
     if panel:
         status = _panel_call(panel, "GET", "/api/cloud")
@@ -1226,7 +1240,7 @@ def cloud_status(ctx: typer.Context,
                    "`openmymemo serve`, or an AI app that opens the panel.")
 
 
-def _cloud_unlink(port: int, yes: bool) -> None:
+def _cloud_unlink(port: int, yes: bool, delete_copy: bool = False) -> None:
     from . import cloud
 
     link = cloud.load_link()
@@ -1234,18 +1248,176 @@ def _cloud_unlink(port: int, yes: bool) -> None:
         typer.echo("This computer isn't linked to OpenMyMemo Cloud.")
         return
     if not yes and not typer.confirm("Unlink this computer from OpenMyMemo Cloud? ChatGPT and claude.ai on the web won't "
-                                     "reach your memory anymore.", default=True):
+                                     "reach the memory on this computer anymore.", default=True):
         raise typer.Exit()
     panel = _panel_for(Path(link.vault), port)
-    message = _panel_call(panel, "DELETE", "/api/cloud")["message"] if panel else cloud.unlink()
+    if panel:
+        message = _panel_call(panel, "DELETE", "/api/cloud" + ("?delete_copy=true" if delete_copy else ""))["message"]
+    else:
+        message = cloud.unlink()
+        if delete_copy:
+            message += (" MyMemo Memory sync's copy can only be deleted while OpenMyMemo is connected: delete it on "
+                        "MyMemo's memory page (Settings → Memory).")
     typer.echo(message)
 
 
 @cloud_app.command("unlink")
 def cloud_unlink(port: Annotated[int, typer.Option(help="The port of the panel, if one is running.")] = DEFAULT_PORT,
-                 yes: Annotated[bool, typer.Option("--yes", "-y", help="Don't ask first.")] = False) -> None:
+                 yes: Annotated[bool, typer.Option("--yes", "-y", help="Don't ask first.")] = False,
+                 delete_copy: Annotated[bool, typer.Option(
+                     "--delete-copy", help="With MyMemo Memory sync on, also delete the copy in MyMemo.")] = False
+                 ) -> None:
     """Unlink this computer from OpenMyMemo Cloud: the web apps lose access and the link is deleted here and at MyMemo."""
-    _cloud_unlink(port, yes)
+    _cloud_unlink(port, yes, delete_copy)
+
+
+# ---- MyMemo Memory sync (product-design.md §20) ------------------------------------------------------
+
+SYNC_STATES = {
+    "off": "off",
+    "waiting": "on; waiting for OpenMyMemo to connect (it syncs while the Mac app, `openmymemo serve` or an AI app "
+               "that opens the panel runs)",
+    "refused": "on, but MyMemo refused it",
+    "preview": "on; the first merge waits for you (`openmymemo cloud sync merge`, or the panel)",
+    "merging": "on; merging with MyMemo",
+    "syncing": "on, syncing",
+}
+SYNC_REASONS = {
+    "memory_off": "MyMemo Memory is off for your account (turn it on in MyMemo's settings; it needs Pro, Ultra or "
+                  "Lifetime)",
+    "unavailable": "MyMemo doesn't offer it yet",
+    "off": "it was turned off on MyMemo",
+    "invalid": "MyMemo didn't understand this OpenMyMemo; update it",
+}
+
+
+def _sync_vault(ctx: typer.Context) -> Vault:
+    from . import cloud
+
+    vault = _vault(ctx)
+    link = cloud.load_link()
+    if link is None or not link.serves(vault.root):
+        typer.secho("Link this computer to OpenMyMemo Cloud for this folder first: `openmymemo cloud link`.",
+                    fg="red", err=True)
+        raise typer.Exit(1)
+    return vault
+
+
+def _preview_line(preview: dict) -> str:
+    return (f"MyMemo has {preview['cloud']} memories: {preview['same']} are already here, {preview['similar']} look "
+            f"like ones you have and {preview['new']} are new. Your {preview['here']} memories will be copied to "
+            "MyMemo; MyMemo's similar and new ones come here as changes from \"MyMemo\" for you to review.")
+
+
+@cloud_sync_app.command("on")
+def cloud_sync_on(ctx: typer.Context,
+                  private_topic: Annotated[list[str] | None, typer.Option(
+                      "--private-topic", help="A private topic to sync too (repeat for several). Private topics stay "
+                                              "on this computer otherwise.")] = None,
+                  yes: Annotated[bool, typer.Option("--yes", "-y", help="Agree without asking, and start the first "
+                                                                         "merge without its preview.")] = False) -> None:
+    """Turn on MyMemo Memory sync for this folder (a separate consent; the folder stays the source of truth)."""
+    from . import sync
+
+    vault = _sync_vault(ctx)
+    typer.echo(sync.CONSENT_TEXT)
+    if not yes and not typer.confirm("Turn on MyMemo Memory sync?", default=False):
+        raise typer.Exit()
+    try:
+        sync.turn_on(vault, private_topic or [], merge_confirmed=yes)
+    except VaultError as e:
+        typer.secho(str(e), fg="red", err=True)
+        raise typer.Exit(1) from None
+    typer.secho("MyMemo Memory sync is on.", fg="green")
+    typer.echo("It syncs while OpenMyMemo runs on this computer (the Mac app, `openmymemo serve`, or an AI app that "
+               "opens the panel)." + ("" if yes else " The first merge waits for you: see `openmymemo cloud sync "
+                                                     "status`, then `openmymemo cloud sync merge`, or the panel."))
+
+
+@cloud_sync_app.command("merge")
+def cloud_sync_merge(ctx: typer.Context,
+                     yes: Annotated[bool, typer.Option("--yes", "-y", help="Don't ask first.")] = False) -> None:
+    """Start syncing after the first merge's preview."""
+    from . import sync
+
+    vault = _sync_vault(ctx)
+    st = sync.status(vault)
+    if not st["enabled"]:
+        typer.secho("MyMemo Memory sync is off: `openmymemo cloud sync on`.", fg="red", err=True)
+        raise typer.Exit(1)
+    if st["merge"] not in ("pending", "preview"):
+        typer.echo("There is no merge waiting.")
+        return
+    if st["preview"]:
+        typer.echo(_preview_line(st["preview"]))
+    if not yes and not typer.confirm("Start syncing?", default=True):
+        raise typer.Exit()
+    sync.confirm_merge(vault)
+    typer.secho("Merging with MyMemo.", fg="green")
+
+
+@cloud_sync_app.command("off")
+def cloud_sync_off(ctx: typer.Context,
+                   delete_copy: Annotated[bool, typer.Option("--delete-copy", help="Also delete the copy in MyMemo.")]
+                   = False) -> None:
+    """Turn off MyMemo Memory sync. With --delete-copy, MyMemo deletes its copy of this folder's memories."""
+    from . import sync
+
+    _vault(ctx)
+    sync.turn_off(delete_copy=delete_copy)
+    typer.echo("MyMemo Memory sync is off." + (
+        " MyMemo deletes its copy when OpenMyMemo next connects (at once if it is running)." if delete_copy else
+        " MyMemo keeps its copy as ordinary MyMemo Memory; `--delete-copy` deletes it."))
+
+
+@cloud_sync_app.command("topics")
+def cloud_sync_topics(ctx: typer.Context,
+                      topic: Annotated[list[str] | None, typer.Argument(help="Private topics to sync too.")] = None,
+                      none: Annotated[bool, typer.Option("--none", help="Sync no private topic.")] = False) -> None:
+    """Choose which private topics MyMemo Memory sync sends too (none by default)."""
+    from . import sync
+
+    vault = _sync_vault(ctx)
+    if topic or none:
+        try:
+            sync.set_picked(vault, [] if none else list(topic or []))
+        except VaultError as e:
+            typer.secho(str(e), fg="red", err=True)
+            raise typer.Exit(1) from None
+    st = sync.status(vault)
+    names = {t["slug"]: t["title"] for t in st["private_topics"]}
+    picked = [names.get(s, s) for s in st["picked"]]
+    typer.echo("Private topics synced: " + (", ".join(picked) if picked else "none"))
+
+
+@cloud_sync_app.command("status")
+def cloud_sync_status(ctx: typer.Context,
+                      port: Annotated[int, typer.Option(help="The port of the panel, if one is running.")]
+                      = DEFAULT_PORT) -> None:
+    """Show MyMemo Memory sync's state (counts only)."""
+    from . import sync
+
+    vault = _vault(ctx)
+    panel = _panel_for(vault.root, port)
+    st = _panel_call(panel, "GET", "/api/cloud")["sync"] if panel else sync.status(vault)
+    if not st["available"]:
+        typer.echo("MyMemo Memory sync: off. It needs this computer linked to OpenMyMemo Cloud for this folder.")
+        return
+    line = SYNC_STATES.get(st["state"], st["state"])
+    if st["state"] == "refused" and st.get("reason"):
+        line += f": {SYNC_REASONS.get(st['reason'], st['reason'])}"
+    if st["state"] == "off" and st.get("off_by") == "mymemo":
+        line += " (turned off on MyMemo)"
+    typer.echo(f"MyMemo Memory sync: {line}")
+    if st.get("preview"):
+        typer.echo(_preview_line(st["preview"]))
+    if st.get("last_sync_at"):
+        typer.echo(f"Last synced: {st['last_sync_at']}")
+    if st.get("skipped"):
+        typer.echo(f"Not stored by MyMemo: {st['skipped']} (they look like secrets, or MyMemo's limit was reached); "
+                   "they stay here.")
+    if st.get("pending_off"):
+        typer.echo("MyMemo will be told that sync is off when OpenMyMemo next connects.")
 
 
 @cloud_app.command("settings")

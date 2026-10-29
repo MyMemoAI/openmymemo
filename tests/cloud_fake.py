@@ -77,6 +77,34 @@ class FakeConn:
             self.frames.append(frame)
 
 
+class FakeSync:
+    """MyMemo Memory sync's service side as tests/fixtures/cloud/sync/ describes it: answers ``sync_hello`` with
+    ``status``, acknowledges each ``sync_push`` (recording it; ``skipped`` goes into the ack) and ``sync_off``. Tests
+    send ``sync_ops`` frames themselves (``FakeConn.send``)."""
+
+    def __init__(self, status: dict | None = None):
+        self.status = status or fixture("sync/sync_status.json")
+        self.hellos: list[dict] = []
+        self.pushes: list[dict] = []
+        self.offs: list[dict] = []
+        self.skipped: list[dict] = []
+        self.ack = True
+
+    async def on_frame(self, ws: WebSocket, frame: dict) -> None:
+        kind = frame.get("type")
+        if kind == "sync_hello":
+            self.hellos.append(frame)
+            await ws.send_text(json.dumps(self.status))
+        elif kind == "sync_push":
+            self.pushes.append(frame)
+            if self.ack:
+                await ws.send_text(json.dumps({"type": "sync_ack", "v": 1, "seq": frame["seq"],
+                                               "skipped": self.skipped}))
+        elif kind == "sync_off":
+            self.offs.append(frame)
+            await ws.send_text(json.dumps(fixture("sync/sync_status_off.json")))
+
+
 class FakeService:
     def __init__(self):
         response = fixture("link/response.json")
@@ -99,6 +127,7 @@ class FakeService:
         self.device_checks: list[str | None] = []  # the Authorization header of each GET /openmymemo/device
         self.choose_subprotocol = True  # False: accept without echoing the offered subprotocol
         self.close_after_hello: int | None = None  # close with this code instead of answering welcome
+        self.sync: FakeSync | None = None  # MyMemo Memory sync's side (None: sync frames go unanswered)
         self.loop: asyncio.AbstractEventLoop | None = None
         self.app = self._build()
         self.base = ""
@@ -254,7 +283,10 @@ class FakeService:
                         conn.client_close = msg.get("code")
                         return
                     if msg.get("text"):
-                        conn._got(json.loads(msg["text"]))
+                        frame = json.loads(msg["text"])
+                        conn._got(frame)
+                        if self.sync is not None:
+                            await self.sync.on_frame(ws, frame)
             except Exception:  # the computer went away mid-way
                 return
             finally:

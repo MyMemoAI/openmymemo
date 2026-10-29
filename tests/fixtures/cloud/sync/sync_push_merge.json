@@ -1,0 +1,157 @@
+{
+  "type": "sync_push",
+  "v": 1,
+  "seq": 1,
+  "cursor": 2,
+  "settings": {
+    "require_approval": false
+  },
+  "groups": [
+    {
+      "id": "who",
+      "name": "Who I am",
+      "topics": [
+        "identity"
+      ]
+    },
+    {
+      "id": "doing",
+      "name": "What I'm doing",
+      "topics": [
+        "work"
+      ]
+    },
+    {
+      "id": "ways",
+      "name": "How I work",
+      "topics": [
+        "how-to-work-with-me"
+      ]
+    },
+    {
+      "id": "private",
+      "name": "Private",
+      "topics": [
+        "health"
+      ]
+    }
+  ],
+  "topics": [
+    {
+      "slug": "identity",
+      "type": "topic",
+      "title": "Identity",
+      "description": "Who I am: name, languages, where I live",
+      "group": "who",
+      "private": false,
+      "tags": []
+    },
+    {
+      "slug": "work",
+      "type": "topic",
+      "title": "Work",
+      "description": "Job, role, company, stack",
+      "group": "doing",
+      "private": false,
+      "tags": []
+    },
+    {
+      "slug": "how-to-work-with-me",
+      "type": "topic",
+      "title": "How to work with me",
+      "description": "How I want AI to answer and work with me",
+      "group": "ways",
+      "private": false,
+      "tags": []
+    },
+    {
+      "slug": "health",
+      "type": "topic",
+      "title": null,
+      "description": null,
+      "group": "private",
+      "private": true,
+      "tags": []
+    }
+  ],
+  "ops": [
+    {
+      "memory_id": "k2p9d",
+      "version": 1,
+      "op": "create",
+      "content": "Engineering lead at Acme; the stack is FastAPI, Vue 3 and Swift",
+      "topic": "work",
+      "section": null,
+      "kind": "fact",
+      "until": null,
+      "private": false,
+      "pinned": false,
+      "status": "active",
+      "actor": "user",
+      "source": "user",
+      "at": "2026-10-08T09:12:00+00:00",
+      "created_at": "2026-10-08T09:12:00+00:00",
+      "proposal_id": null
+    },
+    {
+      "memory_id": "m7f3a",
+      "version": 3,
+      "op": "update",
+      "content": "Prefers short answers, with the code first",
+      "topic": "how-to-work-with-me",
+      "section": "Answers",
+      "kind": "preference",
+      "until": null,
+      "private": false,
+      "pinned": false,
+      "status": "active",
+      "actor": "connector:claude-code",
+      "source": "connector:claude-code",
+      "at": "2026-10-25T17:40:00+00:00",
+      "created_at": "2026-10-09T11:00:00+00:00",
+      "proposal_id": "p19a3f0c2d1e4"
+    },
+    {
+      "memory_id": "c-7f3a9k",
+      "version": 1,
+      "op": "create",
+      "content": "Writes the MyMemo newsletter every Friday",
+      "topic": "work",
+      "section": null,
+      "kind": "ongoing",
+      "until": null,
+      "private": false,
+      "pinned": false,
+      "status": "active",
+      "actor": "connector:cloud-mymemo",
+      "source": "connector:cloud-mymemo",
+      "at": "2026-10-26T09:00:05+00:00",
+      "created_at": "2026-10-26T09:00:05+00:00",
+      "proposal_id": null
+    }
+  ],
+  "outcomes": [
+    {
+      "seq": 1,
+      "merge_id": "c-7f3a9k",
+      "status": "applied",
+      "memory_id": "c-7f3a9k",
+      "hold": null,
+      "code": null
+    },
+    {
+      "seq": 2,
+      "merge_id": "c-2b8m4q",
+      "status": "duplicate",
+      "memory_id": "m7f3a",
+      "hold": null,
+      "code": null
+    }
+  ],
+  "merge": "done",
+  "known": [
+    "k2p9d",
+    "m7f3a",
+    "c-7f3a9k"
+  ]
+}

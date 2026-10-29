@@ -112,6 +112,20 @@ describe("CloudRow", () => {
     expect(w.find("[data-queued]").exists()).toBe(false);
   });
 
+  it.each([
+    ["the live relay only", {}],
+    ["the offline queue", { queue_enabled: true }],
+  ])("says the web apps use MyMemo Memory instead when the account has it, with %s", async (_mode, extra) => {
+    // product-design.md §16.12: the service doesn't tell this computer, so the setup steps say it for everyone.
+    api.cloud.mockResolvedValue(linked(extra));
+    const w = mountRow();
+    await flushPromises();
+    await button(w, "Set up")!.trigger("click");
+    const note = w.find("[data-mymemo-memory]").text();
+    expect(note).toContain("If you also use MyMemo Memory, ChatGPT and claude.ai read and change it instead of this computer");
+    expect(note).toContain("With MyMemo Memory sync on, what they change comes here as changes you review");
+  });
+
   it("lists the web apps as connector rows, with permissions, and lets a removed one back in", async () => {
     api.cloud.mockResolvedValue(linked({ apps: [chatgpt, claude] }));
     api.cloudAllow.mockResolvedValue(linked({ apps: [chatgpt, { ...claude, revoked: false }] }));

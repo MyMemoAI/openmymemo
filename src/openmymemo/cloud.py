@@ -20,13 +20,18 @@ tool calls the service relays from web apps, by running the same tool code as th
 * **The bridge** runs on a thread of its own, starts once the panel's port is bound (``web.panel_server``) and
   closes with 1000 when the panel stops. It reconnects with backoff and follows the close codes in
   ``tests/fixtures/cloud/bridge/close_codes.json``.
+* **MyMemo Memory sync** (product-design.md §20, ``sync.py``): only when the person turned it on, a second consent,
+  ``hello`` lists ``sync`` and a ``sync.Session`` runs on the connection: the folder's changes go up as
+  ``sync_push`` frames and MyMemo's (its AI's proposals, the person's own edits there) come down as ``sync_ops``.
+  Turning it on or off here says ``hello`` again (the connection is reopened at once).
 * **The offline queue:** while this computer was offline, the service sealed web apps' ``memory_propose`` calls
   to its X25519 key (HPKE, RFC 9180). They arrive as ``item`` frames after connecting, in order; each is opened,
   filed through ``proposals.py`` as its web app with the time it was made, its ``queue_id`` and the AI's own
   ``idempotency_key`` (the qid when it sent none), so a replay or a live retry is a duplicate, and acknowledged:
   stored, duplicate, undecryptable or rejected (recorded in the activity log, never retried).
 
-The service never sees anything at rest in readable form, and nothing here logs tool arguments or results.
+The service never sees anything at rest in readable form unless the person turned on MyMemo Memory sync, and nothing
+here logs tool arguments or results.
 """
 
 from __future__ import annotations
@@ -363,6 +368,8 @@ def forget_link(device_id: str, vault: Vault | None) -> bool:
             revoke_web_apps(vault)
         with contextlib.suppress(FileNotFoundError):
             link_path().unlink()
+        with contextlib.suppress(FileNotFoundError):  # MyMemo Memory sync's consent belonged to this link
+            (cloud_dir() / "sync.json").unlink()
         return True
 
 
@@ -710,7 +717,8 @@ def unlink() -> str:
         reached, why = False, f" ({e})"
     forget_link(link.device_id, _linked_vault(link))
     if reached:
-        return "Unlinked this computer from OpenMyMemo Cloud. ChatGPT and claude.ai on the web can't reach your memory anymore."
+        return ("Unlinked this computer from OpenMyMemo Cloud. ChatGPT and claude.ai on the web can't reach the memory on "
+                "this computer anymore.")
     return ("Unlinked this computer here, but MyMemo couldn't be told" + why.rstrip(".") + ". It stops working either "
             "way; remove it from your MyMemo account settings too.")
 
@@ -793,6 +801,7 @@ def _read_queued(plaintext: bytes, qid: str) -> tuple[dict, str, dict, str | Non
 
 
 RETRY_AFTER_CAP = 300.0  # seconds: a Retry-After longer than this is taken as this
+SYNC_WATCH_S = 2.0  # how often the bridge looks whether MyMemo Memory sync was turned on or off
 
 
 def retry_after(response) -> float:
@@ -871,6 +880,9 @@ class Bridge:
         self._result_cap = RESULT_MAX_BYTES
         self._heartbeat = 25.0
         self._ignored_items = False  # logged once: the service sent queued changes this computer didn't ask for
+        self.sync_session: Any = None  # MyMemo Memory sync on the current connection (sync.Session)
+        self._sync_advertised = False  # this connection's hello listed "sync"
+        self._rehello = False  # the connection was closed to say hello again (sync turned on or off): no backoff
 
     # -- what the service is told --
 
@@ -882,12 +894,18 @@ class Bridge:
         return tools
 
     async def hello(self) -> dict:
+        from . import sync
         from .mcp_server import INSTRUCTIONS
 
         frame = {"type": "hello", "v": 1, "app_version": __version__, "key_id": self.link.key_id,
                  "max_inflight": MAX_INFLIGHT, "tools": await self.tools(), "instructions": INSTRUCTIONS}
-        if FEATURES:  # none at launch: the frame is exactly bridge/hello.json's
-            frame["features"] = list(FEATURES)
+        features = list(FEATURES)
+        # MyMemo Memory sync, only while the person has it on for this link and folder (product-design.md §20).
+        self._sync_advertised = await asyncio.to_thread(sync.wants_sync, self.link, self.vault.root)
+        if self._sync_advertised:
+            features.append(sync.FEATURE)
+        if features:  # none at launch, sync off: the frame is exactly bridge/hello.json's
+            frame["features"] = features
         return frame
 
     # -- lifecycle --
@@ -958,6 +976,8 @@ class Bridge:
                     delay = (self._bye_ms / 1000 if self._bye_ms is not None
                              else random.uniform(0, self.timing.restart_jitter))
                     attempt = 0
+                elif self._rehello:  # closed here to say hello again (sync turned on or off): at once
+                    self._rehello, delay, attempt = False, 0.0, 0
                 else:
                     delay = max(wait, backoff_delay(attempt, self.timing.backoff_base, self.timing.backoff_cap))
                     attempt += 1
@@ -1031,13 +1051,55 @@ class Bridge:
                 log.info("OpenMyMemo Cloud: connected")
                 items: asyncio.Queue[dict] = asyncio.Queue()
                 drain = asyncio.create_task(self._drain(ws, items))
+                tasks = [drain, *(await self._start_sync(ws))]
                 try:
                     await self._serve(ws, items)
                 finally:
-                    drain.cancel()  # anything not acknowledged is sent again after reconnecting
+                    for task in tasks:
+                        task.cancel()  # anything not acknowledged is sent again after reconnecting
+                    self.sync_session = None
                 return ws.close_code, time.monotonic() - since
             finally:
                 self._ws = None
+
+    async def _start_sync(self, ws) -> list[asyncio.Task]:
+        """MyMemo Memory sync on this connection: a session when sync is on (or when MyMemo still has to hear that it
+        was turned off here), and a watcher that says hello again when the person turns it on or off."""
+        from . import sync
+
+        st = await asyncio.to_thread(sync.load_state, self.link.device_id)
+        tasks = [asyncio.create_task(self._watch_sync(ws))]
+        if self._sync_advertised or st.pending_off:
+            self.sync_session = sync.Session(self.vault, self.link, lambda frame: self._send(ws, frame),
+                                             off_only=not self._sync_advertised)
+            tasks.append(asyncio.create_task(self.sync_session.run()))
+        return tasks
+
+    async def _watch_sync(self, ws) -> None:
+        from . import sync
+
+        while True:
+            await asyncio.sleep(SYNC_WATCH_S)
+            try:
+                want = await asyncio.to_thread(sync.wants_sync, self.link, self.vault.root)
+                st = await asyncio.to_thread(sync.load_state, self.link.device_id)
+            except Exception as e:  # noqa: BLE001 - try again at the next look
+                log.info("OpenMyMemo Cloud: couldn't read the sync state (%s)", type(e).__name__)
+                continue
+            session = self.sync_session
+            if want != self._sync_advertised or (st.pending_off and (session is None or session.done.is_set())) or (
+                    want and session is not None and session.done.is_set() and st.sync_id != session.sync_id):
+                log.info("OpenMyMemo Cloud: saying hello again for MyMemo Memory sync")
+                self._rehello = True
+                with contextlib.suppress(Exception):
+                    await ws.close(1000, "sync changed")
+                return
+
+    def sync_poke(self) -> None:
+        """The person changed something about sync (thread-safe): look now."""
+        session = self.sync_session
+        if session is not None and self.loop and not self.loop.is_closed():
+            self.loop.call_soon_threadsafe(session.poke)
 
     def _on_welcome(self, msg: dict) -> None:
         self.welcome = msg
@@ -1094,6 +1156,9 @@ class Bridge:
                 self._bye_ms = float(retry) if isinstance(retry, (int, float)) and retry >= 0 else None
             elif kind == "welcome":
                 self._on_welcome(msg)
+            elif kind in ("sync_status", "sync_ops", "sync_ack"):
+                if self.sync_session is not None:
+                    self.sync_session.feed(msg)
             # anything else (pong, frames from a newer protocol) is ignored
 
     def _spawn(self, coro) -> None:
@@ -1320,12 +1385,83 @@ class Cloud:
             self.start()  # the new link, or the old one again when linking failed
         return outcome
 
-    def unlink(self) -> str:
+    def unlink(self, delete_copy: bool = False) -> str:
+        """Unlink this computer; with ``delete_copy``, first ask MyMemo to delete MyMemo Memory sync's copy (which it
+        can hear only while connected)."""
+        note = ""
+        if delete_copy:
+            note = self._delete_copy_first()
         self.stop()
         message = unlink()
         with self._lock:
             self._bridge = None
-        return message
+        return message + note
+
+    def _delete_copy_first(self, timeout: float = 10.0) -> str:
+        from . import sync
+
+        link = load_link()
+        if link is None:
+            return ""
+        st = sync.load_state(link.device_id)
+        if not (st.sync_id or st.pending_off):
+            return ""
+        sync.turn_off(self.vault, delete_copy=True)
+        self._sync_changed()
+        with self._lock:
+            online = self._bridge is not None and self._bridge.state == "online"
+        deadline = time.monotonic() + (timeout if online else 0)
+        while time.monotonic() < deadline:
+            if not sync.load_state(link.device_id).pending_off:
+                return " MyMemo deleted its copy of your memory."
+            time.sleep(0.2)
+        return (" MyMemo couldn't be told to delete its copy of your memory: delete it on MyMemo's memory page "
+                "(Settings → Memory).")
+
+    # -- MyMemo Memory sync (product-design.md §20) --
+
+    def sync_status(self) -> dict:
+        from . import sync
+
+        with self._lock:
+            bridge = self._bridge
+        return sync.status(self.vault, online=bridge is not None and bridge.state == "online")
+
+    def sync_on(self, picked: list[str] | None = None, *, merge_confirmed: bool = False) -> dict:
+        from . import sync
+
+        sync.turn_on(self.vault, picked, merge_confirmed=merge_confirmed)
+        self._sync_changed()
+        return self.sync_status()
+
+    def sync_off(self, delete_copy: bool = False) -> dict:
+        from . import sync
+
+        sync.turn_off(self.vault, delete_copy=delete_copy)
+        self._sync_changed()
+        return self.sync_status()
+
+    def sync_merge(self) -> dict:
+        from . import sync
+
+        sync.confirm_merge(self.vault)
+        self._sync_changed()
+        return self.sync_status()
+
+    def sync_pick(self, picked: list[str]) -> dict:
+        from . import sync
+
+        sync.set_picked(self.vault, picked)
+        self._sync_changed()
+        return self.sync_status()
+
+    def _sync_changed(self) -> None:
+        """The bridge says hello again within a couple of seconds when sync was turned on or off, and looks at once
+        otherwise."""
+        with self._lock:
+            bridge = self._bridge
+        if bridge is not None:
+            bridge.sync_poke()
 
     # -- settings --
 

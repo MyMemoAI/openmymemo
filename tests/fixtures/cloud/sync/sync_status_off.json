@@ -1,0 +1,10 @@
+{
+  "type": "sync_status",
+  "v": 1,
+  "accepted": false,
+  "reason": "off",
+  "merge": null,
+  "seq": 2,
+  "cursor": 9,
+  "cloud": null
+}
