@@ -430,3 +430,17 @@ def test_tidy_checks_the_topic_before_estimating(tmp_path):
     r = CliRunner().invoke(app, ["--vault", str(root), "tidy", "--dry-run", "--topic", "wrok"])
     assert r.exit_code == 1 and r.stdout == ""  # no estimate for a topic that isn't there
     assert r.stderr.startswith("Unknown topic: wrok. Topics: identity, history, ")
+
+
+def test_sort_with_an_unknown_topic_lists_the_imported_ones(tmp_path):
+    root = tmp_path / "v"
+    Vault.create(root)
+    paste = tmp_path / "memories.txt"
+    paste.write_text("Likes tea\n", encoding="utf-8")
+    runner = CliRunner()
+    assert runner.invoke(app, ["--vault", str(root), "import", "chatgpt", str(paste)], input="y\n").exit_code == 0
+    imported = [t["slug"] for t in Vault(root).topics() if t["group"] == "imported"]
+    assert imported == ["from-chatgpt"]
+    r = runner.invoke(app, ["--vault", str(root), "sort", "--topic", "from-chatgtp"])
+    assert r.exit_code == 1 and r.stdout == ""
+    assert r.stderr == f"Unknown topic: from-chatgtp. Imported topics: {', '.join(imported)}.\n"
