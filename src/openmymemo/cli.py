@@ -17,6 +17,7 @@ from .connectors import Connectors
 from .context import compile_context
 from .proposals import Proposals, batch_label
 from .snippets import http_snippets, stdio_snippets
+from .topics import IMPORTED_GROUP
 from .vault import NotFound, Vault, VaultError, vault_path
 
 app = typer.Typer(help="OpenMyMemo — your AI memory as a local folder you own.", no_args_is_help=True,
@@ -398,6 +399,8 @@ def sort_(ctx: typer.Context,
     vault = _vault(ctx)
     try:
         rows = assistant_features.sort_plan(vault, topic)
+    except NotFound as e:
+        _unknown_topic(vault, e, imported=True)
     except VaultError as e:
         typer.secho(str(e), fg="red", err=True)
         raise typer.Exit(1) from None
@@ -646,10 +649,11 @@ def recall_(
         typer.echo(result["text"], nl=False)
 
 
-def _unknown_topic(vault: Vault, error: object) -> NoReturn:
-    """Stop with the error and the folder's topic slugs: the slug is the file name, not the title."""
-    slugs = ", ".join(t["slug"] for t in vault.topics())
-    typer.secho(f"{error}. Topics: {slugs}.", fg="red", err=True)
+def _unknown_topic(vault: Vault, error: object, *, imported: bool = False) -> NoReturn:
+    """Stop with the error and the topic slugs to use, only the imported ones for `sort`: the slug is the file
+    name, not the title."""
+    slugs = ", ".join(t["slug"] for t in vault.topics() if not imported or t["group"] == IMPORTED_GROUP)
+    typer.secho(f"{error}. {'Imported topics' if imported else 'Topics'}: {slugs or 'none'}.", fg="red", err=True)
     raise typer.Exit(1)
 
 
