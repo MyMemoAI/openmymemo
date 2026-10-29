@@ -446,9 +446,12 @@ def test_sort_with_an_unknown_topic_lists_the_imported_ones(tmp_path):
     assert r.stderr == f"Unknown topic: from-chatgtp. Imported topics: {', '.join(imported)}.\n"
 
 
-def test_sync_off_when_it_was_never_on_mentions_no_copy(tmp_path):
+def test_sync_off_when_it_isnt_on_points_to_mymemo_for_a_kept_copy(tmp_path):
     root = tmp_path / "v"
     Vault.create(root)
     r = CliRunner().invoke(app, ["--vault", str(root), "cloud", "sync", "off"])
     assert r.exit_code == 0
-    assert r.stdout == "MyMemo Memory sync isn't on for this folder, so MyMemo has no copy of it.\n"
+    assert r.stdout == (
+        "MyMemo Memory sync isn't on here, so there is nothing to turn off. A copy kept from an earlier sync stays in "
+        "MyMemo until you delete it on MyMemo's memory page (Settings → Memory).\n")
+    assert "keeps its copy as ordinary MyMemo Memory" not in r.stdout

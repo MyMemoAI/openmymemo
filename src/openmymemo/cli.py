@@ -1364,8 +1364,12 @@ def cloud_sync_off(ctx: typer.Context,
     from . import sync
 
     _vault(ctx)
-    if not sync.turn_off(delete_copy=delete_copy).sync_id:  # no consent was ever given here: nothing went up
-        typer.echo("MyMemo Memory sync isn't on for this folder, so MyMemo has no copy of it.")
+    if not sync.turn_off(delete_copy=delete_copy).sync_id:
+        # No consent here now. That says nothing about MyMemo: unlinking keeps the copy and forgets sync.json.
+        typer.echo("MyMemo Memory sync isn't on here, so there is nothing to turn off"
+                   + (" or delete from here" if delete_copy else "")
+                   + ". A copy kept from an earlier sync stays in MyMemo until you delete it on MyMemo's memory "
+                   "page (Settings → Memory).")
         return
     typer.echo("MyMemo Memory sync is off." + (
         " MyMemo deletes its copy when OpenMyMemo next connects (at once if it is running)." if delete_copy else

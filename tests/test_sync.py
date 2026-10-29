@@ -685,9 +685,20 @@ def test_the_cli(vault, tmp_path):
     assert not st.enabled and st.pending_off["delete_copy"] is True
 
 
-def test_the_cli_turning_off_what_was_never_on(vault):
-    linked(vault)  # linked, but sync never consented to: nothing went up, so there is no copy to keep or delete
-    result = CliRunner().invoke(cli, ["--vault", str(vault.root), "cloud", "sync", "off", "--delete-copy"])
-    assert result.exit_code == 0
-    assert result.output == "MyMemo Memory sync isn't on for this folder, so MyMemo has no copy of it.\n"
+def test_the_cli_turning_off_what_isnt_on_here(vault):
+    """Without a consent here, sync off can't know what MyMemo holds: unlinking keeps the copy and forgets sync.json."""
+    runner = CliRunner()
+    args = ["--vault", str(vault.root)]
+    link = linked(vault)
+    assert runner.invoke(cli, [*args, "cloud", "sync", "on", "--yes"]).exit_code == 0
+    cloud.forget_link(link.device_id, vault)  # unlinked, keeping MyMemo's copy (§20.5)
+    for flags, what in (([], "turn off"), (["--delete-copy"], "turn off or delete from here")):
+        result = runner.invoke(cli, [*args, "cloud", "sync", "off", *flags])
+        assert result.exit_code == 0
+        assert result.output == (
+            f"MyMemo Memory sync isn't on here, so there is nothing to {what}. A copy kept from an earlier sync stays "
+            "in MyMemo until you delete it on MyMemo's memory page (Settings → Memory).\n")
+    linked(vault)  # linked again, no consent on this link yet: the same, and nothing is queued for MyMemo
+    result = runner.invoke(cli, [*args, "cloud", "sync", "off", "--delete-copy"])
+    assert "nothing to turn off or delete from here" in result.output
     assert not sync.load_state(VECTOR["device_id"]).pending_off
