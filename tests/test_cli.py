@@ -444,3 +444,11 @@ def test_sort_with_an_unknown_topic_lists_the_imported_ones(tmp_path):
     r = runner.invoke(app, ["--vault", str(root), "sort", "--topic", "from-chatgtp"])
     assert r.exit_code == 1 and r.stdout == ""
     assert r.stderr == f"Unknown topic: from-chatgtp. Imported topics: {', '.join(imported)}.\n"
+
+
+def test_sync_off_when_it_was_never_on_mentions_no_copy(tmp_path):
+    root = tmp_path / "v"
+    Vault.create(root)
+    r = CliRunner().invoke(app, ["--vault", str(root), "cloud", "sync", "off"])
+    assert r.exit_code == 0
+    assert r.stdout == "MyMemo Memory sync isn't on for this folder, so MyMemo has no copy of it.\n"

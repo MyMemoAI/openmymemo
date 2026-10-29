@@ -683,3 +683,11 @@ def test_the_cli(vault, tmp_path):
     assert result.exit_code == 0 and "deletes its copy" in result.output
     st = sync.load_state(VECTOR["device_id"])
     assert not st.enabled and st.pending_off["delete_copy"] is True
+
+
+def test_the_cli_turning_off_what_was_never_on(vault):
+    linked(vault)  # linked, but sync never consented to: nothing went up, so there is no copy to keep or delete
+    result = CliRunner().invoke(cli, ["--vault", str(vault.root), "cloud", "sync", "off", "--delete-copy"])
+    assert result.exit_code == 0
+    assert result.output == "MyMemo Memory sync isn't on for this folder, so MyMemo has no copy of it.\n"
+    assert not sync.load_state(VECTOR["device_id"]).pending_off
