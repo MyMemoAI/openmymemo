@@ -520,6 +520,38 @@ def test_mymemo_never_makes_a_topic_less_private_or_undoes_a_change_made_here(va
     assert outcomes[0]["status"] == "conflict" and vault.topic("lifestyle")["title"] == "Daily life"
 
 
+def test_mymemos_topic_changes_apply_one_after_another_across_late_acks_and_creation(vault):
+    """MyMemo's own topic changes keep applying when a push sent before one of them is acknowledged after it, and a
+    topic MyMemo creates can be changed again in the same batch; a change made here in between still wins."""
+    linked(vault)
+    st = sync.turn_on(vault, [])
+    st.merge = "done"
+    _acked(vault, st)
+    topic = {"slug": "work", "description": "", "group": "doing", "private": False}
+    outcomes, _ = sync.file_ops(vault, st, [_edit(1, "topic", topic={**topic, "title": "Work A"})])
+    assert outcomes[0]["status"] == "applied"
+    frame, commit = sync.build_push(vault, st)  # A's push, acknowledged only after B
+    assert {t["slug"]: t for t in frame["topics"]}["work"]["title"] == "Work A"
+    outcomes, _ = sync.file_ops(vault, st, [_edit(2, "topic", topic={**topic, "title": "Work B"})])
+    assert outcomes[0]["status"] == "applied"
+    sync.apply_ack(st, commit, {"seq": commit.seq, "skipped": []})
+    outcomes, _ = sync.file_ops(vault, st, [_edit(3, "topic", topic={**topic, "title": "Work C"})])
+    assert outcomes[0]["status"] == "applied" and vault.topic("work")["title"] == "Work C"
+    assert {t["slug"]: t for t in _acked(vault, st)["topics"]}["work"]["title"] == "Work C"
+    assert "work" not in st.received_topics  # the push said the same
+
+    garden = {"slug": "garden", "description": "", "group": "life", "private": False}
+    outcomes, _ = sync.file_ops(vault, st, [_edit(4, "topic", topic={**garden, "title": "Garden"}),
+                                            _edit(5, "topic", topic={**garden, "title": "Garden plans"})])
+    assert [o["status"] for o in outcomes] == ["applied", "applied"]
+    assert vault.topic("garden")["title"] == "Garden plans"
+
+    vault.update_topic("garden", title="Allotment")  # here, before MyMemo heard
+    outcomes, _ = sync.file_ops(vault, st, [_edit(6, "topic", topic={**garden, "title": "Garden ideas"})])
+    assert outcomes[0]["status"] == "conflict" and vault.topic("garden")["title"] == "Allotment"
+    assert {t["slug"]: t for t in _acked(vault, st)["topics"]}["garden"]["title"] == "Allotment"
+
+
 def test_a_revoked_cloud_connector_refuses(vault):
     st = _merged_state(vault)
     Connectors(vault).ensure("cloud-askmemo", "AskMemo (MyMemo)", kind="cloud")

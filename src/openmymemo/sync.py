@@ -104,9 +104,12 @@ class SyncState:
     # memory id → hash of the memory right after MyMemo's own edit applied here, until a push says the same: MyMemo
     # knows that state, so its next edit on it is no conflict.
     received: dict[str, str] = field(default_factory=dict)
-    # slug → hash of the frontmatter sent; "~" + hash: as MyMemo's own change left it, to be sent again (so its next
-    # change to the topic is no conflict).
+    # slug → hash of the frontmatter sent; "~" + hash: as MyMemo's own change left it, to be sent again.
     topics: dict[str, str] = field(default_factory=dict)
+    # slug → hash of the topic right after MyMemo's own change (or creation) applied here, until a push says the same:
+    # MyMemo knows that state, so its next change to the topic is no conflict, also when an older push's
+    # acknowledgement arrives in between (``topics`` then holds what that push sent).
+    received_topics: dict[str, str] = field(default_factory=dict)
     groups: str | None = None
     settings: str | None = None
     outcomes: list[dict] = field(default_factory=list)  # filed, not yet in an acknowledged push
@@ -410,6 +413,8 @@ def apply_ack(st: SyncState, commit: Commit, ack: dict) -> None:
             st.topics.pop(slug, None)
         else:
             st.topics[slug] = h
+        if h is None or st.received_topics.get(slug) == h:
+            st.received_topics.pop(slug, None)
     if commit.groups is not None:
         st.groups = commit.groups
     if commit.settings is not None:
@@ -664,20 +669,23 @@ def _topic(vault: Vault, st: SyncState, op: dict) -> dict:
     if not isinstance(slug, str):
         raise VaultError("A topic needs a slug")
     sent = st.topics.pop(slug, None)
+    base = st.received_topics.get(slug)
     if t.get("deleted"):
         return {"status": "refused", "code": "unsupported"}
     group = t.get("group") if isinstance(t.get("group"), str) else None
+    picked = set(st.picked)
     try:
         here = vault.topic(slug)
     except NotFound:
-        if sent is not None:
-            return {"status": "conflict"}  # gone from the folder since it went up
-        vault.add_topic(slug, t.get("title") or slug, t.get("description") or None,
-                        group=None if group == "other" else group, private=bool(t.get("private")))
+        if sent is not None or base is not None:
+            return {"status": "conflict"}  # gone from the folder since it went up or MyMemo changed it
+        created = vault.add_topic(slug, t.get("title") or slug, t.get("description") or None,
+                                  group=None if group == "other" else group, private=bool(t.get("private")))
+        h = _hash(_topic_entry(created, picked))
+        st.topics[slug], st.received_topics[slug] = f"~{h}", h
         return {"status": "applied"}
-    picked = set(st.picked)
     now = _hash(_topic_entry(here, picked))
-    if sent not in (now, f"~{now}"):
+    if sent not in (now, f"~{now}") and base != now:
         return {"status": "conflict"}
     if here["private"] and not t.get("private"):
         return {"status": "conflict"}  # MyMemo's change never makes a topic less private
@@ -685,7 +693,8 @@ def _topic(vault: Vault, st: SyncState, op: dict) -> dict:
     after = vault.update_topic(slug, title=None if hidden else (t.get("title") or None),
                                description=None if hidden else t.get("description"), private=bool(t.get("private")),
                                group=group)
-    st.topics[slug] = f"~{_hash(_topic_entry(after, picked))}"
+    h = _hash(_topic_entry(after, picked))
+    st.topics[slug], st.received_topics[slug] = f"~{h}", h
     return {"status": "applied"}
 
 
@@ -869,7 +878,7 @@ class Session:
             if accepted and frame.get("merge") == "needed" and st.merge not in ("preview", "confirmed"):
                 # A first merge (again): everything goes up afresh once the person starts it.
                 st.merge, st.preview = "preview", None
-                st.pushed, st.topics, st.groups, st.settings = {}, {}, None, None
+                st.pushed, st.topics, st.received_topics, st.groups, st.settings = {}, {}, {}, None, None
                 st.outcomes, st.skipped = [], 0
             elif accepted and frame.get("merge") == "done" and st.merge in ("pending", "preview"):
                 st.merge = "done"
@@ -999,6 +1008,7 @@ def turn_off(vault: Vault | None = None, *, delete_copy: bool = False) -> SyncSt
             st.pending_off = {"sync_id": st.sync_id, "delete_copy": bool(delete_copy)}
         st.enabled, st.merge, st.preview, st.off_by = False, "pending", None, None
         st.pushed, st.topics, st.groups, st.settings, st.outcomes, st.filed = {}, {}, None, None, [], {}
+        st.received_topics = {}
     return update_state(link.device_id, off)
 
 
