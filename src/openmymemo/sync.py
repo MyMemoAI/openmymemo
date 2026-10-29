@@ -19,9 +19,10 @@ the MyMemo service tests against the same files.
 * **Down** (``sync_ops``): MyMemo's AI and web apps' proposals, filed as their ``cloud-*`` connectors with MyMemo's
   proposal id as the idempotency key (``cloud-askmemo``, ``cloud-agent``, a web app's ``cloud-<slug>``,
   ``cloud-mymemo``); the person's own edits on MyMemo's memory page, applied as ``actor: user`` edits after a version
-  check, never to a memory that changed here since it went up or that MyMemo isn't sent; and, on a first merge,
-  MyMemo's memories, held in memory for the preview and filed as ``cloud-mymemo`` proposals once the person starts
-  syncing (a private one as a private add).
+  check, never to a memory or topic that changed here since it went up or to a memory MyMemo isn't sent, and never
+  making a topic less private; and, on a first merge, MyMemo's memories, held in memory for the preview and filed as
+  ``cloud-mymemo`` proposals once the person starts syncing (a private one as a private add). One that waits here
+  never expires: MyMemo keeps the memory until the person decides it here, and the decision goes up later.
 * **The session** (``Session``) runs on the bridge's event loop for one connection (``cloud.Bridge``); building a
   push and filing are done on a worker thread, under the vault's lock where they write.
 
@@ -53,6 +54,8 @@ MERGE_CONNECTOR = ("cloud-mymemo", "MyMemo")
 PUSH_BYTES = 512 * 1024
 PUSH_OPS = 500
 FILED_KEEP_DAYS = 30
+FOLLOW_UPS = 200  # at most this many later outcomes in one push; the rest go in the next
+MERGE_KEY = "merge:"
 APPLIED = ("applied", "accepted", "edited_accepted")
 TERMINAL = ("rejected", "expired", "undone", "duplicate", "refused")
 VERSIONED = ("create", "update", "move", "archive", "restore")
@@ -101,11 +104,14 @@ class SyncState:
     # memory id → hash of the memory right after MyMemo's own edit applied here, until a push says the same: MyMemo
     # knows that state, so its next edit on it is no conflict.
     received: dict[str, str] = field(default_factory=dict)
-    topics: dict[str, str] = field(default_factory=dict)  # slug → hash of the frontmatter sent
+    # slug → hash of the frontmatter sent; "~" + hash: as MyMemo's own change left it, to be sent again (so its next
+    # change to the topic is no conflict).
+    topics: dict[str, str] = field(default_factory=dict)
     groups: str | None = None
     settings: str | None = None
     outcomes: list[dict] = field(default_factory=list)  # filed, not yet in an acknowledged push
-    filed: dict[str, dict] = field(default_factory=dict)  # MyMemo proposal id → {"local", "status", "at"}
+    # MyMemo proposal id (or "merge:" + the id of a first-merge memory that waits here) → {"local", "status", "at"}
+    filed: dict[str, dict] = field(default_factory=dict)
     forgotten: list[str] = field(default_factory=list)  # forgotten in MyMemo: archived here, never sent again
     status: dict = field(default_factory=dict)  # MyMemo's last sync_status: accepted, reason, merge
     preview: dict | None = None  # first-merge counts: cloud, here, same, similar, new
@@ -284,7 +290,7 @@ def build_push(vault: Vault, st: SyncState, *, max_bytes: int = PUSH_BYTES,
             mid, version = row.get("memory_id"), row.get("version")
             if isinstance(mid, str) and isinstance(version, int):
                 history.setdefault(mid, {})[version] = row
-    reverse = {v.get("local"): k for k, v in st.filed.items() if v.get("local")}
+    reverse = {v.get("local"): k for k, v in st.filed.items() if v.get("local") and not k.startswith(MERGE_KEY)}
 
     ops: list[dict] = []
     size = 0
@@ -367,12 +373,12 @@ def _memory_ops(m: Any, fp: dict | None, versions: dict[int, dict], reverse: dic
 
 def _follow_ups(vault: Vault, st: SyncState, commit: Commit) -> list[dict]:
     """Proposals from MyMemo decided here since their outcome went up (the person accepted one that waited, or undid
-    one): their new status goes up with ``seq: null``."""
+    one), and first-merge memories that waited (by ``merge_id``): their new status goes up with ``seq: null``."""
     from .proposals import Proposals
 
     out = []
     props = Proposals(vault)
-    for pid, entry in list(st.filed.items())[:200]:
+    for key, entry in st.filed.items():
         last = entry.get("status")
         if last in TERMINAL or not entry.get("local"):
             continue
@@ -381,10 +387,12 @@ def _follow_ups(vault: Vault, st: SyncState, commit: Commit) -> list[dict]:
         except (NotFound, ValueError, TypeError, OSError):
             continue
         if p.status != last:
-            out.append({"seq": None, "proposal_id": pid, "status": p.status,
-                        "memory_id": p.applied_memory_id or p.memory_id, "hold": p.hold if p.status == "pending"
-                        else None, "code": None})
-            commit.filed[pid] = p.status
+            ref = {"merge_id": key[len(MERGE_KEY):]} if key.startswith(MERGE_KEY) else {"proposal_id": key}
+            out.append({"seq": None, **ref, "status": p.status, "memory_id": p.applied_memory_id or p.memory_id,
+                        "hold": p.hold if p.status == "pending" else None, "code": None})
+            commit.filed[key] = p.status
+            if len(out) >= FOLLOW_UPS:
+                break
     return out
 
 
@@ -495,9 +503,9 @@ def _file_one(vault: Vault, st: SyncState, op: dict, touched: set[str]) -> dict:
             mem = op.get("memory") or {}
             connector = _connector(vault, *MERGE_CONNECTOR)
             args = dict(content=mem.get("content"), topic=mem.get("topic"), kind=mem.get("kind"),
-                        until=mem.get("until") or None, idempotency_key=f"merge:{op.get('memory_id')}",
+                        until=mem.get("until") or None, idempotency_key=f"{MERGE_KEY}{op.get('memory_id')}",
                         new_memory_id=op.get("memory_id"), created_at=op.get("created_at"),
-                        private=bool(mem.get("private")))
+                        private=bool(mem.get("private")), never_expires=True)
             name, key = "add", {"merge_id": op.get("memory_id")}
         else:
             c = op.get("connector") or {}
@@ -514,6 +522,10 @@ def _file_one(vault: Vault, st: SyncState, op: dict, touched: set[str]) -> dict:
             touched.add(memory_id)
         if kind == "app" and result.get("proposal_id") and status not in TERMINAL:
             st.filed[op["proposal_id"]] = {"local": result["proposal_id"], "status": status, "at": now_iso()}
+        elif kind == "merge" and result.get("proposal_id") and status == "pending":
+            # MyMemo keeps the memory while it waits here; the person's decision goes up later (``_follow_ups``).
+            st.filed[f"{MERGE_KEY}{op.get('memory_id')}"] = {"local": result["proposal_id"], "status": status,
+                                                             "at": now_iso()}
         return {"seq": seq, **key, "status": status, "memory_id": memory_id, "hold": hold}
     if kind != "user":
         raise VaultError("Unknown op")
@@ -523,30 +535,10 @@ def _file_one(vault: Vault, st: SyncState, op: dict, touched: set[str]) -> dict:
         status, memory_id = _put(vault, st, op, touched)
         return {**edit, "status": status, "memory_id": memory_id}
     if what == "forget":
-        mid = op.get("memory_id")
-        try:
-            m = vault.get(mid)
-        except NotFound:
-            return {**edit, "status": "missing", "memory_id": mid}
-        if m.status == "active":
-            vault.archive(mid, actor="user")
-        if mid not in st.forgotten:
-            st.forgotten.append(mid)
-        return {**edit, "status": "applied", "memory_id": mid}
+        status, memory_id = _forget(vault, st, op, touched)
+        return {**edit, "status": status, "memory_id": memory_id}
     if what == "topic":
-        t = op.get("topic") or {}
-        slug = t.get("slug")
-        st.topics.pop(slug, None)  # say what the folder has, whatever happens
-        if t.get("deleted"):
-            return {**edit, "status": "refused", "code": "unsupported"}
-        try:
-            vault.topic(slug)
-            vault.update_topic(slug, title=t.get("title") or None, description=t.get("description"),
-                               private=bool(t.get("private")))
-        except NotFound:
-            vault.add_topic(slug, t.get("title") or slug, t.get("description") or None, group=t.get("group"),
-                            private=bool(t.get("private")))
-        return {**edit, "status": "applied"}
+        return {**edit, **_topic(vault, st, op)}
     if what == "settings":
         s = op.get("settings") or {}
         st.settings = None
@@ -579,7 +571,9 @@ def _put(vault: Vault, st: SyncState, op: dict, touched: set[str]) -> tuple[str,
             m = None
         if m is None:
             if base is not None:
-                return "missing", mid
+                # One of MyMemo's memories that waits here from the first merge: the folder's version is what waits,
+                # and MyMemo keeps its copy until the person decides it here.
+                return ("conflict" if _waiting_merge(vault, st, mid) else "missing"), mid
             if want.get("status", "active") != "active":
                 return "refused", mid
             vault.add(want.get("topic"), want.get("content") or "", kind=want.get("kind"),
@@ -612,6 +606,87 @@ def _put(vault: Vault, st: SyncState, op: dict, touched: set[str]) -> tuple[str,
         if fp is not None:
             st.received[mid] = _memory_hash(vault.get(mid))
         return "applied", mid
+
+
+def _waiting_merge(vault: Vault, st: SyncState, mid: Any) -> str | None:
+    """The local proposal of MyMemo's memory ``mid`` from the first merge, while it waits here."""
+    from .proposals import Proposals
+
+    entry = st.filed.get(f"{MERGE_KEY}{mid}") or {}
+    if not entry.get("local"):
+        return None
+    try:
+        p = Proposals(vault).get(entry["local"])
+    except (NotFound, ValueError, TypeError, OSError):
+        return None
+    return p.id if p.status == "pending" else None
+
+
+def _forget(vault: Vault, st: SyncState, op: dict, touched: set[str]) -> tuple[str, str | None]:
+    """The person deleted a memory for good on MyMemo's memory page: archived here and never sent again while it
+    stays archived, by ``_put``'s rules: a memory MyMemo isn't sent, or one changed here since it went up (or since
+    MyMemo's own last edit applied), stays as it is (a conflict; the folder's goes up again). One of MyMemo's
+    memories that waits here from the first merge is rejected."""
+    from .proposals import Proposals
+
+    mid = op.get("memory_id")
+    with vault.lock():
+        try:
+            m = vault.get(mid)
+        except NotFound:
+            waiting = _waiting_merge(vault, st, mid)
+            if waiting is None:
+                return "missing", mid
+            Proposals(vault).reject(waiting)
+            return "applied", mid
+        touched.add(m.id)
+        if m.status == "archived" and mid in st.forgotten:
+            return "applied", mid
+        if not eligible(m, vault.private_topics(), set(st.picked), set(st.forgotten)):
+            return "conflict", mid  # made private here: MyMemo never had it, or it is about to hear
+        fp = st.pushed.get(mid)
+        if fp is not None and _memory_hash(m) not in (fp.get("h"), st.received.get(mid)):
+            return "conflict", mid
+        if m.status == "active":
+            vault.archive(mid, actor="user")
+        if mid not in st.forgotten:
+            st.forgotten.append(mid)
+        return "applied", mid
+
+
+def _topic(vault: Vault, st: SyncState, op: dict) -> dict:
+    """The person's own change to a topic on MyMemo's memory page (``op: "topic"``), by ``_put``'s rules: applied when
+    the topic here is as it last went up (or as MyMemo's own last change left it), else a conflict and the folder's
+    topic stays. MyMemo may make a topic private, never public; a private topic it knows only by its slug (not
+    picked) keeps its title and description here. Either way the folder's topic goes up again."""
+    t = op.get("topic") or {}
+    slug = t.get("slug")
+    if not isinstance(slug, str):
+        raise VaultError("A topic needs a slug")
+    sent = st.topics.pop(slug, None)
+    if t.get("deleted"):
+        return {"status": "refused", "code": "unsupported"}
+    group = t.get("group") if isinstance(t.get("group"), str) else None
+    try:
+        here = vault.topic(slug)
+    except NotFound:
+        if sent is not None:
+            return {"status": "conflict"}  # gone from the folder since it went up
+        vault.add_topic(slug, t.get("title") or slug, t.get("description") or None,
+                        group=None if group == "other" else group, private=bool(t.get("private")))
+        return {"status": "applied"}
+    picked = set(st.picked)
+    now = _hash(_topic_entry(here, picked))
+    if sent not in (now, f"~{now}"):
+        return {"status": "conflict"}
+    if here["private"] and not t.get("private"):
+        return {"status": "conflict"}  # MyMemo's change never makes a topic less private
+    hidden = here["private"] and slug not in picked
+    after = vault.update_topic(slug, title=None if hidden else (t.get("title") or None),
+                               description=None if hidden else t.get("description"), private=bool(t.get("private")),
+                               group=group)
+    st.topics[slug] = f"~{_hash(_topic_entry(after, picked))}"
+    return {"status": "applied"}
 
 
 def _decide(vault: Vault, st: SyncState, op: dict, edit: dict, touched: set[str]) -> dict:

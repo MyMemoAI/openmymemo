@@ -28,7 +28,7 @@ Lifecycle::
        │                                └─undo──▶ undone
        ├──(waits: hold)──▶ pending ─┬─accept──▶ accepted | edited_accepted ──undo──▶ undone
        │                            ├─reject──▶ rejected
-       │                            └─(30 days)──▶ expired
+       │                            └─(30 days)──▶ expired (never, for a proposal that ``never_expires``)
        └──(already known)──▶ duplicate (nothing is stored)
 
 Applied proposals form the user's digest until they have seen them (``reviewed_at``); keeping, editing
@@ -131,6 +131,9 @@ class Proposal:
     batch_id: str | None = None  # proposals filed together by one run, e.g. a tidy-up: grouped in the digest
     new_memory_id: str | None = None  # an add's id for the new memory, if free (MyMemo's c- id, sync.py)
     private: bool = False  # an add of a memory marked private (MyMemo Memory sync's first merge): it stays private
+    # It waits for the person however long that takes (MyMemo Memory sync's first merge: MyMemo keeps its memory
+    # until the folder decides).
+    never_expires: bool = False
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -138,6 +141,8 @@ class Proposal:
             del d["new_memory_id"]  # only MyMemo Memory sync's adds carry one; other files stay as they were
         if not d["private"]:
             del d["private"]  # likewise
+        if not d["never_expires"]:
+            del d["never_expires"]  # likewise
         return d
 
 
@@ -190,7 +195,8 @@ class Proposals:
                 p = self.get(path.stem)
             except (NotFound, json.JSONDecodeError, TypeError):
                 continue
-            if p.status == "pending" and _parse(p.created_at) and now - _parse(p.created_at) > PENDING_TTL:
+            if (p.status == "pending" and not p.never_expires and _parse(p.created_at)
+                    and now - _parse(p.created_at) > PENDING_TTL):
                 p.status, p.decided_at = "expired", now_iso()
                 self._save(p)
             if status and p.status != status:
@@ -271,7 +277,7 @@ class Proposals:
                 created_at: str | None = None, queue_id: str | None = None, until: str | None = None,
                 hold: str | None = None, batch_id: str | None = None,
                 expected: Mapping[str, tuple[int, str | None]] | None = None, check: bool = False,
-                new_memory_id: str | None = None, private: bool = False) -> dict:
+                new_memory_id: str | None = None, private: bool = False, never_expires: bool = False) -> dict:
         """`created_at`: when the AI proposed it, if that was earlier, and `queue_id`: the receipt it got then
         (both from OpenMyMemo Cloud's offline queue). `until`: a review date to set (``YYYY-MM`` or ``YYYY-MM-DD``).
         `hold`: make it wait for the person with this reason even where the rules would apply it (a reason the
@@ -284,7 +290,9 @@ class Proposals:
         hold the rules or the proposer set. `new_memory_id`: on an add, the id the new memory gets if the folder
         doesn't use it yet (MyMemo Memory sync keeps MyMemo's id, product-design.md §20). `private`: on an add, the
         new memory is marked private (a memory MyMemo has as private, filed by sync's first merge); it always waits
-        for the person, and accepting it never makes it less private."""
+        for the person, and accepting it never makes it less private. `never_expires`: if it waits, it waits until the
+        person decides, however long that takes (sync's first merge, whose `created_at` is when MyMemo got the
+        memory)."""
         v = self.vault
         private_memory = bool(private)  # `private` names the private topics below
         if connector.write == "none":
@@ -330,7 +338,7 @@ class Proposals:
             args = dict(op=op, content=content, memory_id=memory_id, topic=topic, kind=kind, reason=reason,
                         evidence=evidence, idempotency_key=idempotency_key, created_at=created_at,
                         queue_id=queue_id, until=until, batch_id=batch_id, new_memory_id=new_memory_id,
-                        private_memory=private_memory)
+                        private_memory=private_memory, never_expires=never_expires)
             # The rules first, exactly as without a check: the baseline the check may only make stricter.
             routed = self._route(connector, private, topics, verdict=None, **args)
             if isinstance(routed, dict):
@@ -378,7 +386,8 @@ class Proposals:
                content: str | None, memory_id: str | None, topic: str | None, kind: str | None, reason: str | None,
                evidence: str | None, idempotency_key: str | None, created_at: str | None, queue_id: str | None,
                until: str | None = None, batch_id: str | None = None,
-               new_memory_id: str | None = None, private_memory: bool = False) -> tuple[Proposal, Memory | None] | dict:
+               new_memory_id: str | None = None, private_memory: bool = False,
+               never_expires: bool = False) -> tuple[Proposal, Memory | None] | dict:
         """Where a proposal goes (its op, topic, target), without saving anything: a Proposal and its target, or a
         ``duplicate`` result. ``verdict``: the Assistant's check, or None for the rules alone. Raises
         PermissionDenied for a blocked topic, VaultError for a bad target."""
@@ -421,7 +430,7 @@ class Proposals:
                      evidence=(evidence or None) and evidence[:2000], idempotency_key=idempotency_key,
                      created_at=created_at or now_iso(), queue_id=queue_id, topic_confidence=confidence,
                      until=until, batch_id=batch_id, new_memory_id=new_memory_id if op == "add" else None,
-                     private=bool(private_memory) and op == "add")
+                     private=bool(private_memory) and op == "add", never_expires=bool(never_expires))
         if target:
             p.before_content, p.before_topic = target.content, target.topic
             if until is not None:

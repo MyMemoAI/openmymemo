@@ -381,6 +381,145 @@ def test_a_private_memory_from_the_first_merge_stays_private(vault):
     assert "cardiologist" not in json.dumps(frame) and "most days" not in json.dumps(frame)
 
 
+def _acked(vault, st: sync.SyncState) -> dict:
+    """The next push, as MyMemo acknowledged it ({} when there was nothing to say)."""
+    frame, commit = sync.build_push(vault, st)
+    if frame is not None:
+        sync.apply_ack(st, commit, {"seq": commit.seq, "skipped": []})
+    return frame or {}
+
+
+def _edit(seq: int, op: str, **fields) -> dict:
+    return {"seq": seq, "from": "user", "edit_id": f"e{seq}", "op": op, **fields, "at": "2026-10-29T09:00:00+00:00"}
+
+
+def test_a_memory_from_the_first_merge_waits_as_long_as_it_takes(vault):
+    """MyMemo keeps a memory of its own that waits here (private, or the person reviews every change), so here it
+    never expires, though its `created_at` is when MyMemo got it, often long ago. The person's decision goes up later
+    by `merge_id`, so MyMemo drops a rejected one. An edit of it on MyMemo's memory page is a conflict (MyMemo keeps its
+    copy); forgetting it there rejects it here."""
+    linked(vault)
+    seeded(vault)
+    vault.update_settings(require_approval=True)
+    st = sync.turn_on(vault, [])
+    st.merge = "confirmed"
+
+    def merge(seq: int, mid: str, content: str, private: bool) -> dict:
+        return {"seq": seq, "from": "merge", "memory_id": mid, "created_at": "2026-08-01T08:00:00+00:00",
+                "memory": {"content": content, "topic": "work", "section": None, "kind": "fact", "until": None,
+                           "private": private, "pinned": False, "status": "active"}}
+
+    ops = [merge(1, "c-old111", "Sees a cardiologist every Tuesday", True),
+           merge(2, "c-old222", "Keeps a diary in a paper notebook", False),
+           merge(3, "c-old333", "Learns the cello on Saturdays", False),
+           merge(4, "c-old444", "Collects vintage fountain pens", True)]
+    outcomes, _ = sync.file_ops(vault, st, ops)
+    assert [(o["merge_id"], o["status"], o["hold"]) for o in outcomes] == [
+        ("c-old111", "pending", "private"), ("c-old222", "pending", "approval"), ("c-old333", "pending", "approval"),
+        ("c-old444", "pending", "private")]
+    props = Proposals(vault)
+    waiting = {p.new_memory_id: p for p in props.list("pending")}  # listing is what expires old proposals
+    assert set(waiting) == {"c-old111", "c-old222", "c-old333", "c-old444"}
+    assert all(p.never_expires for p in waiting.values())
+    st.merge = "done"
+    _acked(vault, st)
+    # Decided here later; and on MyMemo's memory page, one is edited and one forgotten.
+    props.reject(waiting["c-old111"].id)
+    props.accept(waiting["c-old222"].id)
+    put = {**_put("c-old333", 1, "Learns the cello on Sundays"), "seq": 5, "edit_id": "e5"}
+    outcomes, _ = sync.file_ops(vault, st, [put, _edit(6, "forget", memory_id="c-old444")])
+    assert [o["status"] for o in outcomes] == ["conflict", "applied"]
+    assert props.get(waiting["c-old333"].id).status == "pending"
+    assert props.get(waiting["c-old444"].id).status == "rejected"
+    frame = _acked(vault, st)
+    later = {o["merge_id"]: (o["status"], o["memory_id"]) for o in frame["outcomes"] if o["seq"] is None}
+    assert later == {"c-old111": ("rejected", None), "c-old222": ("accepted", "c-old222"),
+                     "c-old444": ("rejected", None)}
+    assert all(set(o) == set(fx("sync_push_merge.json")["outcomes"][0]) for o in frame["outcomes"])
+    created = next(op for op in frame["ops"] if op["memory_id"] == "c-old222")
+    assert created["op"] == "create" and created["proposal_id"] == waiting["c-old222"].id
+    assert "cardiologist" not in json.dumps(frame) and "fountain" not in json.dumps(frame)
+    # Said once; the one still waiting goes up when the person decides it.
+    assert "outcomes" not in _acked(vault, st)
+    props.accept(waiting["c-old333"].id)
+    assert [(o["merge_id"], o["status"]) for o in _acked(vault, st)["outcomes"]] == [("c-old333", "accepted")]
+
+
+def test_a_forget_from_mymemo_never_reaches_past_a_privacy_choice_or_a_newer_change(vault):
+    """Forgetting a memory on MyMemo's memory page follows the rules of an edit there: a memory marked private here,
+    or changed here since it went up (if only in what a version doesn't count), stays as it is, and the folder's
+    memory goes up again."""
+    st = _merged_state(vault)
+    _acked(vault, st)
+    vault.update("k2p9d", private=True)
+    vault.update("m7f3a", pinned=True)
+    forget = [_edit(3, "forget", memory_id="k2p9d"), _edit(4, "forget", memory_id="m7f3a"),
+              _edit(5, "forget", memory_id="q8r7s")]
+    outcomes, touched = sync.file_ops(vault, st, forget)
+    assert [o["status"] for o in outcomes] == ["conflict", "conflict", "applied"]
+    assert vault.get("k2p9d").status == "active" and vault.get("m7f3a").status == "active"
+    assert vault.get("q8r7s").status == "archived" and st.forgotten == ["q8r7s"]
+    for mid in touched:  # as Session._file does
+        if mid in st.pushed:
+            st.pushed[mid] = {**st.pushed[mid], "h": ""}
+    frame = _acked(vault, st)
+    assert sorted((op["memory_id"], op["op"]) for op in frame["ops"]) == [("k2p9d", "tombstone"), ("m7f3a", "set")]
+
+
+def test_a_topic_change_from_mymemo_keeps_what_mymemo_never_had(vault):
+    """A private topic the person didn't pick goes up as its slug only, and MyMemo keeps its slug as the title: a
+    change there (here, moving it to another group) applies, but never with those stand-ins for the title and
+    description. Changes made there one after another all apply; a topic MyMemo can read takes its new title."""
+    linked(vault)
+    vault.add_topic("therapy", "Therapy notes", "Sessions with Dr. K, what we covered", private=True)
+    st = sync.turn_on(vault, [])
+    st.merge = "done"
+    sent = {t["slug"]: t for t in _acked(vault, st)["topics"]}["therapy"]
+    assert sent["title"] is None and sent["description"] is None
+    stand_in = {"slug": "therapy", "title": "therapy", "description": "", "private": True}
+    outcomes, _ = sync.file_ops(vault, st, [_edit(1, "topic", topic={**stand_in, "group": "ways"}),
+                                            _edit(2, "topic", topic={**stand_in, "group": "doing"})])
+    assert [o["status"] for o in outcomes] == ["applied", "applied"]
+    t = vault.topic("therapy")
+    assert (t["title"], t["description"], t["group"], t["private"]) == (
+        "Therapy notes", "Sessions with Dr. K, what we covered", "doing", True)
+    again = {t["slug"]: t for t in _acked(vault, st)["topics"]}["therapy"]  # the folder says what it has
+    assert (again["title"], again["description"], again["group"]) == (None, None, "doing")
+    work = {"slug": "work", "title": "Work and side projects", "description": "Acme and the newsletter",
+            "group": "doing", "private": False}
+    outcomes, _ = sync.file_ops(vault, st, [_edit(3, "topic", topic=work)])
+    assert outcomes[0]["status"] == "applied"
+    assert (vault.topic("work")["title"], vault.topic("work")["description"]) == (work["title"], work["description"])
+
+
+def test_mymemo_never_makes_a_topic_less_private_or_undoes_a_change_made_here(vault):
+    """Privacy only grows from MyMemo: making a private topic public there is a conflict, and the topic and its
+    memories stay here; making one private applies, and its memories leave MyMemo. A topic changed here since it went
+    up keeps the folder's version."""
+    linked(vault)
+    vault.add("health", "Takes sertraline 50mg daily", memory_id="h1j2k")
+    vault.add("work", "Works at Acme", memory_id="w1x2y")
+    st = sync.turn_on(vault, [])
+    st.merge = "done"
+    assert "sertraline" not in json.dumps(_acked(vault, st))
+    public = {"slug": "health", "title": "Health", "description": "", "group": "private", "private": False}
+    outcomes, _ = sync.file_ops(vault, st, [_edit(1, "topic", topic=public)])
+    assert outcomes[0]["status"] == "conflict" and vault.topic("health")["private"]
+    restated = _acked(vault, st)
+    assert "sertraline" not in json.dumps(restated)
+    assert {t["slug"]: t for t in restated["topics"]}["health"]["private"]
+    private = {"slug": "work", "title": "Work", "description": "", "group": "doing", "private": True}
+    outcomes, _ = sync.file_ops(vault, st, [_edit(2, "topic", topic=private)])
+    assert outcomes[0]["status"] == "applied" and vault.topic("work")["private"]
+    gone = _acked(vault, st)
+    assert [(op["memory_id"], op["op"]) for op in gone["ops"]] == [("w1x2y", "tombstone")]
+    assert {t["slug"]: t for t in gone["topics"]}["work"]["title"] is None
+    vault.update_topic("lifestyle", title="Daily life")  # after it last went up
+    habits = {"slug": "lifestyle", "title": "Habits", "description": "", "group": "life", "private": False}
+    outcomes, _ = sync.file_ops(vault, st, [_edit(3, "topic", topic=habits)])
+    assert outcomes[0]["status"] == "conflict" and vault.topic("lifestyle")["title"] == "Daily life"
+
+
 def test_a_revoked_cloud_connector_refuses(vault):
     st = _merged_state(vault)
     Connectors(vault).ensure("cloud-askmemo", "AskMemo (MyMemo)", kind="cloud")

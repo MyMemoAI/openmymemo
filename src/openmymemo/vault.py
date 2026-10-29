@@ -599,13 +599,15 @@ class Vault:
         return slug
 
     def update_topic(self, slug: str, *, title: str | None = None, description: str | None = None,
-                     private: bool | None = None) -> dict:
+                     private: bool | None = None, group: str | None = None) -> dict:
+        """``group``: the group id to move the topic to (frontmatter ``group``; an unknown id creates the group,
+        ``other`` or empty takes it out of every group)."""
         with self.lock():
             self.sync()
             path = self.memories_dir / f"{slug}.md"
             if slug not in self._headers or not path.exists():
                 raise NotFound(f"Unknown topic: {slug}")
-            if title is None and description is None and private is None:
+            if title is None and description is None and private is None and group is None:
                 return self.topic(slug)
             mf = MemoryFile(path.read_text(encoding="utf-8"))
             if mf.frontmatter_broken:
@@ -622,6 +624,11 @@ class Vault:
                 fm["private"] = True
                 if not private:
                     fm.pop("private")
+            if group is not None:
+                gid = slugify(group) if group.strip() else "other"
+                fm["group"] = gid
+                if gid == "other":
+                    fm.pop("group")
             mf.set_frontmatter(fm)
             _atomic_write(path, mf.render())
             self._sig = None
