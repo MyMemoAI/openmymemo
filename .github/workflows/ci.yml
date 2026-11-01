@@ -51,7 +51,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: uv run --frozen pytest
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ~/.cache/openmymemo-models
           key: models-${{ hashFiles('src/openmymemo/recall/model_pins.json') }}
