@@ -1107,7 +1107,8 @@ It never asks:
 
 - about a private topic or a memory marked private (`private`), or a change the Assistant's check found looks sensitive (`sensitive`). Those are decided in OpenMyMemo only, so their text isn't shown in another app's window (MCP also says forms must not be used for sensitive information);
 - through OpenMyMemo Cloud: the relay has no way to carry a question to the web app, and the service keeps the relayed tool descriptions (§16.2);
-- about anything that doesn't come from an app's chat: the Assistant's proposals (such as the tidy-up's `review`), imports, MyMemo Memory sync.
+- about anything that doesn't come from an app's chat: the Assistant's proposals (such as the tidy-up's `review`), imports, MyMemo Memory sync;
+- about a document (`doc:` ids, MEMORY_FORMAT.md §3.6): its change is read as a diff of a long text, which the panel shows and a dialog can't.
 
 ### 22.2 What the person sees
 

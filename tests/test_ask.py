@@ -9,7 +9,7 @@ from mcp.client.client import Client
 from mcp_types import ElicitResult, ErrorData
 
 from openmymemo import ask
-from openmymemo.connectors import Connectors
+from openmymemo.connectors import Connector, Connectors
 from openmymemo.mcp_server import build_server
 from openmymemo.proposals import Proposals
 from openmymemo.vault import NotFound
@@ -130,6 +130,14 @@ def test_never_about_private_topics_changes_that_apply_or_an_app_with_asking_off
     r, asked = run(vault, propose(op="update", memory_id=m.id, content="Works at Acme as CEO"), answer="accept")
     assert r.structured_content["status"] == "pending" and asked == []
     assert "ask: false" in vault.connectors_path.read_text()
+
+
+def test_never_about_a_document():
+    """Documents (MEMORY_FORMAT.md §3.6) are decided in OpenMyMemo, where their change shows as a diff."""
+    app = Connector(id="claude-code", name="Claude Code")
+    waiting = {"status": "pending", "hold": "protected", "memory_id": "m7f3a"}
+    assert ask.wanted(app, waiting) is True
+    assert ask.wanted(app, {**waiting, "memory_id": "doc:working-with-me"}) is False
 
 
 def test_with_approval_on_an_addition_is_asked_about_too(vault):

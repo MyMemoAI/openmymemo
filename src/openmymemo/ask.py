@@ -37,9 +37,11 @@ How = Literal["input_required", "request"]
 def wanted(connector: Connector, result: dict) -> bool:
     """Whether to ask about what ``memory_propose`` just filed: a new proposal that waits because the person wrote the
     memory or reviews every change (never a private or sensitive one), from an app on this computer that hasn't had
-    asking turned off."""
+    asking turned off. Never about a document (``doc:`` ids, MEMORY_FORMAT.md §3.6): its change is read as a diff of a
+    long text, which the panel shows and a dialog can't."""
     return (connector.ask and connector.kind in ("stdio", "http") and result.get("status") == "pending"
-            and result.get("hold") in ASKABLE and not result.get("deduplicated"))
+            and result.get("hold") in ASKABLE and not result.get("deduplicated")
+            and not str(result.get("memory_id") or "").startswith("doc:"))
 
 
 def how(ctx) -> How | None:
