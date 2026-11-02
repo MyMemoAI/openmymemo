@@ -430,6 +430,10 @@ const strings: Record<string, string> = {
   "chg.status.applied": "Kept",
   "chg.status.undone": "Undone",
   "chg.status.pending": "Waiting",
+  "chg.askAccepted": "Accepted in {app}",
+  "chg.askDeclined": "Declined in {app}",
+  "chg.askOpen": "Asked in {app}; not decided there",
+  "chg.askChanged": "Accepted in {app}, but the memory changed before it could be saved",
   "chg.hold.review": "Only if you agree",
   "chg.batch.one": "Tidy-up, {date}: 1 change",
   "chg.batch.other": "Tidy-up, {date}: {n} changes",
@@ -532,6 +536,9 @@ const strings: Record<string, string> = {
   "con.includePrivate": "Include private topics",
   "con.includePrivateOn": "On: this app can read the private topics selected above.",
   "con.includePrivateOff": "Off: private topics stay hidden from this app, whatever is selected above.",
+  "con.ask": "Ask me in the app",
+  "con.askOn": "On: when one of its changes waits for you, OpenMyMemo asks you right in {name}, if the app can show the question. Private topics are always decided here.",
+  "con.askOff": "Off: its changes that wait for you stay on the Changes page until you decide.",
   "con.blocked": "Ignore proposals about",
   "con.lastSeen": "Last seen",
   "con.stats": "Reads: {reads} · Proposals: {proposals}",
@@ -687,6 +694,13 @@ const strings: Record<string, string> = {
   "act.search": "searched “{q}”, {n} hits",
   "act.get": "read {n} memories",
   "act.propose": "proposed to {op}",
+  "act.ask": "asked you about its change in the app",
+  "act.ask.accept": "accepted",
+  "act.ask.decline": "declined",
+  "act.ask.cancel": "left for later",
+  "act.ask.timeout": "no answer",
+  "act.ask.error": "the app couldn't show it",
+  "act.ask.changed": "accepted, but the memory had changed",
   "act.import": "imported {n} ({source})",
   "act.link": "linked this computer to {who}",
   "act.duplicate": "(already known, ignored)",
@@ -915,6 +929,15 @@ export function assistantPlace(): string {
 /** Pluralised copy: `${key}.one` for one, `${key}.other` otherwise; `{n}` is filled in. */
 export function tn(key: string, n: number, params: Record<string, string | number> = {}): string {
   return t(`${key}.${n === 1 ? "one" : "other"}`, { ...params, n });
+}
+
+/** What the person answered in the app that proposed a change, when OpenMyMemo asked there (product-design.md §22). */
+export function askedNote(p: { asked_at?: string | null; answer?: string | null; status: string; connector_name: string }): string | null {
+  if (!p.asked_at) return null;
+  const app = p.connector_name;
+  if (p.answer === "accept") return t(p.status === "pending" ? "chg.askChanged" : "chg.askAccepted", { app });
+  if (p.answer === "decline") return t("chg.askDeclined", { app });
+  return p.status === "pending" ? t("chg.askOpen", { app }) : null;
 }
 
 export function sourceLabel(source: string): string {

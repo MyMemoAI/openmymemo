@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from "vue";
 import { api, type Memory, type Proposal } from "../api";
-import { relTime, t } from "../i18n";
+import { askedNote, relTime, t } from "../i18n";
 import { act, quoted, store, topicTitle } from "../store";
 import AppIcon from "./AppIcon.vue";
 
@@ -24,6 +24,8 @@ const movedOnly = computed(() => p.value.op === "update" && p.value.before_conte
 const moved = computed(() => p.value.op === "update" && !!p.value.before_topic && p.value.before_topic !== topic.value);
 const hasDetails = computed(() => !!(p.value.reason || p.value.evidence || p.value.check_note || p.value.original_op === "add"));
 const memory = computed(() => store.memories.find((m) => m.id === p.value.applied_memory_id) ?? null);
+/** "Accepted in Claude Code": the person said yes in the app (product-design.md §22), and it applied as the app's. */
+const asked = computed(() => askedNote(p.value));
 
 const OP_STYLE: Record<string, string> = { add: "chip-fresh", update: "chip-accent", archive: "font-semibold" };
 
@@ -100,6 +102,9 @@ function onKey(e: KeyboardEvent) {
         <AppIcon name="arrowRight" :size="13" />{{ t("chg.moved", { from: topicTitle(p.before_topic), to: topicTitle(topic) }) }}
       </div>
       <div v-if="p.conflict" class="flex items-center gap-1.5 text-[13px] text-danger-ink"><AppIcon name="warning" :size="13" />{{ t("rev.conflict") }}</div>
+      <div v-if="asked" class="flex items-center gap-1.5 text-[13px] text-muted" data-test="ask-note">
+        <AppIcon name="check" :size="13" />{{ asked }}
+      </div>
     </div>
 
     <div v-else class="space-y-2 pt-1">

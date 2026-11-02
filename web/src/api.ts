@@ -91,6 +91,9 @@ export interface Proposal {
   before_until?: string | null;
   /** Proposals one run filed together, e.g. "tidy-2026-10-25-1a2b" for a tidy-up. */
   batch_id?: string | null;
+  /** When OpenMyMemo asked the person about it in the app that proposed it, and what they answered there (§22). */
+  asked_at?: string | null;
+  answer?: "accept" | "decline" | "cancel" | null;
   /** Computed by the server: the change is still the memory's latest version. */
   can_undo: boolean;
 }
@@ -158,6 +161,8 @@ export interface Connector {
   include_private: boolean;
   write: "none" | "propose" | "auto";
   blocked_topics: string[];
+  /** Ask the person in the app itself about its changes that wait for them (MCP elicitation, §22). */
+  ask: boolean;
   token_preview: string | null;
   has_token: boolean;
   created_at: string;
@@ -345,7 +350,8 @@ export interface Activity {
   connector: string;
   /** link: this computer was linked to OpenMyMemo Cloud (connector "mymemo-cloud"), to `account` / `email_masked`. */
   /** call: the OpenMyMemo Assistant asked its model (connector "assistant"): feature, model, endpoint host, tokens. */
-  action: "context" | "search" | "get" | "propose" | "import" | "link" | "call";
+  /** ask: OpenMyMemo asked the person in the app about one of its proposals; `result` is how that ended. */
+  action: "context" | "search" | "get" | "propose" | "ask" | "import" | "link" | "call";
   feature?: string;
   model?: string;
   endpoint?: string;
@@ -777,7 +783,7 @@ export const api = {
   connectors: () => req<Connector[]>("GET", "/api/connectors"),
   addConnector: (body: { name: string; kind: "stdio" | "http"; write: Connector["write"] }) =>
     req<ConnectorCreated>("POST", "/api/connectors", body),
-  patchConnector: (id: string, body: Partial<Pick<Connector, "name" | "write" | "read_topics" | "include_private" | "blocked_topics">>) =>
+  patchConnector: (id: string, body: Partial<Pick<Connector, "name" | "write" | "read_topics" | "include_private" | "blocked_topics" | "ask">>) =>
     req<Connector>("PATCH", `/api/connectors/${enc(id)}`, body),
   rotate: (id: string) => req<ConnectorCreated>("POST", `/api/connectors/${enc(id)}/rotate`),
   removeConnector: (id: string) => req<{ ok: boolean }>("DELETE", `/api/connectors/${enc(id)}`),
