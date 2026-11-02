@@ -22,6 +22,7 @@ Rules the format is built on:
 │   ├── work.md
 │   ├── …
 │   ├── health.md             # private: true
+│   ├── working-with-me.md    # type: document: one text, not a list (§3.6)
 │   └── from-chatgpt.md       # created by an import
 ├── MEMORY.md                 # generated: what an AI with the default scope sees
 ├── log.md                    # generated: human-readable change log
@@ -135,14 +136,30 @@ Inside the comment, attributes are separated by `;`. Each is `key: value` or a b
 
 Unknown attributes are preserved and ignored. Everything else about a memory (kind, source, timestamps, version, pinned, evidence, status) lives in `meta.json` (§6.3), keyed by id, so that files stay readable and nobody has to write it by hand.
 
-### 3.6 Document files (reserved)
+### 3.6 Document files
 
-A `type: document` file is **one memory whose content is the whole body**, for text that is prose rather than a list: working instructions in the style of `CLAUDE.md` or `AGENTS.md`, project context, Cursor rules. Rules, fixed now so that files written later still read:
+A `type: document` file is **one memory whose content is the whole body**, for text that is prose rather than a list: working instructions in the style of `CLAUDE.md` or `AGENTS.md`, project context, Cursor rules.
+
+```markdown
+---
+type: document
+title: Working with me
+description: How I like to work with AI assistants
+---
+
+Start with the answer, then the reasons.
+
+## Code
+- Small commits with imperative messages.
+```
 
 - The memory id is `doc:<slug>`. Headings and list items in the body are plain Markdown, not sections or memories.
-- The body is at most 20,000 characters.
-- Frontmatter uses the same keys as a topic file plus, following the Open Knowledge Format: `generated: {by, at}` when the latest version was written by an AI (`by` is `connector:<id>`), `verified: [{by, at}]` when a person accepted it (`by` is `human:user`), `stale_after` as the review date.
-- Version 2 reserves the type. A reader that doesn't implement documents leaves such files untouched and doesn't show them. OpenMyMemo implements documents in v0.3.
+- The content is the body as written after the frontmatter, with line endings read as `\n`, leading blank lines and trailing whitespace left out. Writers put one blank line after the frontmatter and end the file with a newline. A document holds at most 20,000 characters: OpenMyMemo never writes a longer one, and reads a longer file whole.
+- Frontmatter has the keys of a topic file (`private: true` hides the document as it hides a topic; `group` is kept but not used), plus, following the Open Knowledge Format, `generated: {by, at}`: OpenMyMemo writes it when an app's change applies without the person (`by` is `connector:<id>`) and removes it when it writes the document for anyone else; an edit made in an editor leaves the key as it is. `verified`, `status`, `stale_after` and `sources` are kept as they are.
+- For access, a document's slug works like a topic's: `read.topics` and `blocked_topics` in `connectors.yaml` (§5) may list it. It is never a topic: no memory is filed into it, and `topics.yaml` doesn't list it.
+- Deleting the file archives the document; writing the file again, or restoring it, brings it back with the same id.
+
+OpenMyMemo 0.4 and earlier, like any reader that doesn't implement documents, leave such files untouched and don't show them.
 
 ### 3.7 Identifiers
 
@@ -281,7 +298,7 @@ Per-memory metadata, keyed by id.
 | Field | Values | Notes |
 | --- | --- | --- |
 | `content`, `topic`, `section` | | A copy of what the file says, so changes made in an editor can be detected |
-| `kind` | `fact`, `preference`, `ongoing`, `instruction`, `event` | What sort of statement it is; guessed from the text when not given |
+| `kind` | `fact`, `preference`, `ongoing`, `instruction`, `event`, `document` | What sort of statement it is; guessed from the text when not given. `document` for a document (§3.6), and only for one |
 | `source` | `user`, `import:<vendor>`, `connector:<id>` | Who created the memory |
 | `last_actor` | `user`, `file`, `import:<vendor>`, `connector:<id>` | Who wrote the latest version; `user`, `file` and `import:*` make the memory protected. Version 2. |
 | `created_at`, `updated_at`, `archived_at` | ISO 8601 with offset | |
@@ -290,6 +307,7 @@ Per-memory metadata, keyed by id.
 | `until`, `private` | as inline | Mirrors of the inline attributes |
 | `pinned` | boolean | Listed first in what AI sees |
 | `evidence` | string ≤ 2000 chars | The conversation snippet behind the proposal that created it, or, for a memory imported from a chat export or session, the person's quoted message with its source and date |
+| `frontmatter` | mapping | Documents only (§3.6): a copy of the file's frontmatter, so an archived document can be restored with its title and settings. `section`, `until`, `private` and `pinned` don't apply to documents |
 
 `meta.json` is a cache with a memory of its own: if it is lost, every memory survives — ids, content, topic, section, `until` and `private` come back from the files; `kind` is guessed again, `source` becomes `user` and `last_actor` becomes `file`, and timestamps restart. Only `history.jsonl` keeps the real past.
 
@@ -301,7 +319,7 @@ Append-only, one JSON object per line, one line per version of a memory. The ful
 {"at": "2026-10-08T09:12:00+00:00", "memory_id": "m7f3a", "version": 2, "op": "update", "content": "…", "topic": "work", "actor": "connector:claude-code", "proposal_id": "p19a3f…"}
 ```
 
-- `op`: `create`, `update`, `move`, `archive`, `restore`.
+- `op`: `create`, `update`, `move`, `archive`, `restore`. For a document (§3.6), `content` is its whole text and `topic` its slug.
 - `actor`: `user` (panel or CLI), `file` (a change noticed in the file), `import:<vendor>`, `connector:<id>`.
 - `proposal_id`: present when the change came from a proposal.
 
@@ -329,7 +347,7 @@ One file per proposal, named by its id (`p` plus hexadecimal; the id must be alp
 | --- | --- |
 | `id`, `connector_id`, `connector_name` | |
 | `op` | `add`, `update`, `archive` |
-| `content`, `topic`, `memory_id`, `kind`, `reason`, `evidence`, `idempotency_key` | What was proposed. The OpenMyMemo Assistant's tidy-up sets `idempotency_key` to `tidy:<fingerprint>` (the second step of a merge: `tidy:<fingerprint>:2`), a hash of the kind of suggestion and the ids and text of the memories it is about, so it never makes the same suggestion twice |
+| `content`, `topic`, `memory_id`, `kind`, `reason`, `evidence`, `idempotency_key` | What was proposed. An update of a document (§3.6) has its `doc:<slug>` as `memory_id` and the whole new text as `content`; `before_content` is the text it replaces. Apps only ever update a document. The OpenMyMemo Assistant's tidy-up sets `idempotency_key` to `tidy:<fingerprint>` (the second step of a merge: `tidy:<fingerprint>:2`), a hash of the kind of suggestion and the ids and text of the memories it is about, so it never makes the same suggestion twice |
 | `until` | Optional: a review date (`YYYY-MM` or `YYYY-MM-DD`, §3.5) the proposal sets on an `add` or `update`. An update may change only this; the text stays the same and, as for any change of an inline attribute, the memory gets no new version (§7) |
 | `before_until` | The memory's `until` before an update that set `until`; undo restores it (absent: there was none). Since a changed `until` makes no new version, such a change can be undone only while the memory's `until` is still the one it set |
 | `batch_id` | Optional: proposals filed together by one run share it, and the digest, `openmymemo review` and `log.md` group them ("Tidy-up, 2026-10-25: 6 changes") with Keep all / Undo all. A tidy-up's id is `tidy-YYYY-MM-DD-` plus four hexadecimal digits |
@@ -383,6 +401,9 @@ Before every read or write, OpenMyMemo compares the size and mtime of every memo
 | a line in a different file or section | the id exists | `move` |
 | a line present again | the id is archived | `restore` |
 | no line | the id is active | `archive` |
+| a document whose body differs | `doc:<slug>` exists | `update` (new version, `last_actor: file`) |
+| a document file again | `doc:<slug>` is archived | `restore` |
+| no document file | `doc:<slug>` is active | `archive` |
 | different inline attributes | | `until` / `private` updated; no new version |
 
 Other tools can rely on this: write memory lines and nothing else, and OpenMyMemo fills in the metadata, ids and history on its next read.
@@ -407,7 +428,7 @@ Writing:
 
 ## 9. What an AI receives
 
-Not part of the storage format, but documented because "what you see is what it gets" is a principle: an AI gets the Markdown in §4.1, filtered to the topics its connector may read, cut to a character budget with the most important memories first, with ids in brackets so it can reference them in proposals. The panel shows the exact text per connector, and every read is logged in `activity.jsonl`.
+Not part of the storage format, but documented because "what you see is what it gets" is a principle: an AI gets the Markdown in §4.1, filtered to the topics its connector may read, cut to a character budget with the most important memories first, with ids in brackets so it can reference them in proposals. Documents it may read come first, each under `## <Title> [doc:<slug>]` with its own headings two levels down; within a budget they take at most half of it when there are memories too, and a document cut short says so. The panel shows the exact text per connector, and every read is logged in `activity.jsonl`.
 
 ## 10. Interoperability
 
@@ -419,8 +440,8 @@ A version-2 `memories/` directory is a conformant Open Knowledge Format bundle: 
 | --- | --- |
 | `type` (required) | `topic` or `document` |
 | `title`, `description`, `tags` | the same keys |
-| `generated: {by, at}` | on documents, the AI that wrote the latest version; for topic files the equivalent per memory is `last_actor` and `updated_at` in `meta.json` |
-| `verified: [{by, at}]` | on documents, the person's acceptance; per memory, an accepted proposal in `proposals/` |
+| `generated: {by, at}` | on documents, the app whose change applied without the person, written by OpenMyMemo (§3.6); for topic files the equivalent per memory is `last_actor` and `updated_at` in `meta.json` |
+| `verified: [{by, at}]` | on documents, kept as it is; per memory, an accepted proposal in `proposals/` |
 | `status`, `stale_after` | preserved; per memory, `until` plays the role of `stale_after` |
 | `sources` | preserved; per memory, `evidence` in `meta.json` |
 | `log.md` | the generated change log (§4.2), written at the folder root |
@@ -449,14 +470,14 @@ Imports land in `memories/from-<source>.md` in the source's order; nothing is cl
 ### 10.4 Export formats produced
 
 - **The folder itself** is the complete export.
-- **JSON:** `{"format": "openmymemo/1", "exported_at", "topics": [...], "memories": [{"id", "content", "topic", "section", "kind", "source", "created_at", "updated_at", "until", "private", "pinned", "version"}]}`.
+- **JSON:** `{"format": "openmymemo/1", "exported_at", "topics": [...], "memories": [{"id", "content", "topic", "section", "kind", "source", "created_at", "updated_at", "until", "private", "pinned", "version"}], "documents": [{"id", "slug", "title", "description", "private", "content", "source", "created_at", "updated_at", "version"}]}`.
 - **Claude:** `[YYYY-MM-DD] – content`, one per line, the shape Claude's import expects.
 - **ChatGPT:** a prompt asking ChatGPT to save each listed item.
-- **Markdown:** `## Title` per topic and `- content` per memory, without ids.
+- **Markdown:** `## Title` per topic and `- content` per memory, without ids, then `## Title` and the text of each document.
 
 ### 10.5 Documents and other tools' instruction files
 
-Once documents exist (v0.3), `CLAUDE.md`, `AGENTS.md`, `.cursor/rules/*.mdc` and Claude's prose memory summary import as `type: document` files, and a document exports back to those shapes.
+`CLAUDE.md`, `AGENTS.md`, `GEMINI.md` and the rules files of Cursor, Windsurf, Cline, Kiro and GitHub Copilot import as `type: document` files by default (they can be split into memories instead); a Cursor rule's own frontmatter is dropped and its `description` kept. A document's text is exactly what such a file holds, so it exports back by writing it out (`openmymemo doc show <slug> > CLAUDE.md`).
 
 ## 11. Versions
 

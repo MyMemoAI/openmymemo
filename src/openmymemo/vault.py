@@ -18,6 +18,11 @@ Layout::
 Every durable fact lives in a plain file. There is no database to corrupt or rebuild. The format is
 specified in docs/MEMORY_FORMAT.md; format-1 vaults (OpenMyMemo v0.1) are migrated on first open.
 
+A ``type: document`` file in ``memories/`` is a document (MEMORY_FORMAT.md §3.6, product-design.md §23): one memory,
+``doc:<slug>``, whose content is the file's whole text. Documents are kept apart from topics and their memories:
+``memories()`` and ``topics()`` never include them, ``documents()`` lists them, and ``get``, ``update``, ``archive``,
+``restore`` and ``rollback`` take their ids like any other.
+
 Users can edit ``memories/*.md`` in any editor at any time. ``sync()`` reconciles the files with
 ``meta.json`` (new lines, edited lines, deleted lines, lines moved between files) and records those
 changes in history with actor ``file``. All writes happen under an inter-process lock and re-read the
@@ -42,7 +47,7 @@ from pathlib import Path
 
 import yaml
 
-from .mdfile import MemoryFile, new_topic_file, render_item
+from .mdfile import MemoryFile, new_document_file, new_topic_file, normalize_document, render_item
 from .textutil import KINDS, classify_kind
 from .topics import DEFAULT_PRIVATE, DEFAULT_TOPICS, REVIEW_MONTHS, default_group_of, default_topics_config
 
@@ -52,6 +57,12 @@ SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,47}$")
 FOREIGN_ID_RE = re.compile(r"^[A-Za-z0-9-]{1,64}$")  # an id another tool wrote (MEMORY_FORMAT.md §3.7)
 RESERVED_FILES = {"index", "log"}  # the Open Knowledge Format's names: never topics
 _ID_ALPHABET = string.ascii_lowercase + string.digits
+DOC_PREFIX = "doc:"  # a document's memory id is doc:<slug> (MEMORY_FORMAT.md §3.6)
+DOC_MAX = 20_000  # characters in a document
+
+
+def is_document_id(memory_id: str | None) -> bool:
+    return bool(memory_id) and str(memory_id).startswith(DOC_PREFIX)
 
 
 class VaultError(Exception):
@@ -128,6 +139,49 @@ class Memory:
         return d
 
 
+@dataclass
+class Document:
+    """A document (MEMORY_FORMAT.md §3.6): a file's title and privacy, and the one memory that is its text."""
+    slug: str
+    title: str
+    description: str | None
+    private: bool
+    memory: Memory
+
+    @property
+    def id(self) -> str:
+        return self.memory.id
+
+    @property
+    def content(self) -> str:
+        return self.memory.content
+
+    def to_dict(self, *, content: bool = True) -> dict:
+        m = self.memory
+        d = {"id": m.id, "slug": self.slug, "title": self.title, "description": self.description,
+             "private": self.private, "chars": len(m.content), "version": m.version, "status": m.status,
+             "source": m.source, "last_actor": m.last_actor, "created_at": m.created_at,
+             "updated_at": m.updated_at, "archived_at": m.archived_at}
+        if content:
+            d["content"] = m.content
+        return d
+
+
+def _plain(value):
+    """Frontmatter as plain JSON values (YAML reads dates as dates), for the copy kept in meta.json."""
+    return json.loads(json.dumps(value, ensure_ascii=False, default=str))
+
+
+def _doc_header(slug: str, fm: dict, mf: MemoryFile | None = None) -> dict:
+    title = mf.title if mf is not None else (str(fm["title"]) if fm.get("title") is not None else None)
+    description = mf.description if mf is not None else (
+        str(fm["description"]) if fm.get("description") is not None else None)
+    value = fm.get("private")
+    private = mf.private if mf is not None else bool(value) and str(value).strip().lower() not in (
+        "false", "no", "off", "0")
+    return {"title": title or slug, "description": description or None, "private": private}
+
+
 def _check_version(memory_id: str, e: dict, expected: int | None) -> None:
     """Checked under the lock after re-reading the files, so an edit made in the meantime is never overwritten."""
     if expected is not None and int(e.get("version", 1)) != expected:
@@ -161,6 +215,7 @@ class Vault:
         self._meta: dict = {"format": 1, "memories": {}}
         self._topics_cfg: dict = {}
         self._headers: dict[str, dict] = {}  # topic -> title, description, group, private, sections (from the file)
+        self._docs: dict[str, dict] = {}  # document slug -> title, description, private (from the file)
         self._order: dict[str, list[str]] = {}  # topic -> ids in file order
         self._render_pending = False
 
@@ -293,13 +348,22 @@ class Vault:
         used = set(entries)
         files: dict[str, MemoryFile] = {}
         headers: dict[str, dict] = {}
+        docs: dict[str, MemoryFile] = {}
+        unreadable_docs: set[str] = set()
         for path in sorted(self._topic_paths()):
             slug = path.stem
             mf = MemoryFile(path.read_text(encoding="utf-8"))
+            known_doc = entries.get(DOC_PREFIX + slug)
+            if mf.frontmatter_broken and known_doc is not None and known_doc.get("status", "active") == "active":
+                unreadable_docs.add(DOC_PREFIX + slug)  # a document whose frontmatter can't be read now: kept as is
+                continue
             if mf.migrate_header(group=cfg_group_of.get(slug), private=slug in legacy_private):
                 _atomic_write(path, mf.render())  # format 1 header → frontmatter, once
+            if mf.frontmatter_type == "document":
+                docs[slug] = mf
+                continue
             if mf.frontmatter_type not in (None, "topic"):
-                continue  # documents and unknown types are left untouched and not shown (MEMORY_FORMAT.md §3.2)
+                continue  # unknown types are left untouched and not shown (MEMORY_FORMAT.md §3.2)
             used.update(i.id for i in mf.items if i.id)
             files[slug] = mf
             headers[slug] = {"title": mf.title, "description": mf.description, "group": mf.group,
@@ -358,6 +422,34 @@ class Vault:
                         else:
                             e[key] = attrs[key]
                         changed = True
+        doc_headers: dict[str, dict] = {}
+        for slug, mf in docs.items():
+            mid = DOC_PREFIX + slug
+            body, fm = mf.body, _plain(mf.frontmatter or {})
+            present.add(mid)
+            doc_headers[slug] = _doc_header(slug, fm, mf)
+            e = entries.get(mid)
+            if e is None:
+                entries[mid] = {"content": body, "topic": slug, "section": None, "kind": "document", "source": "user",
+                                "last_actor": "file", "created_at": now, "updated_at": now, "version": 1,
+                                "status": "active", "frontmatter": fm}
+                self._history(mid, 1, "create", body, slug, "file")
+                changed = True
+                continue
+            op = "restore" if e.get("status") == "archived" else "update" if e.get("content") != body else None
+            if op:
+                e.update(content=body, topic=slug, status="active", updated_at=now,
+                         version=int(e.get("version", 1)) + 1, last_actor="file")
+                e.pop("archived_at", None)
+                self._history(mid, e["version"], op, body, slug, "file")
+                changed = True
+            if e.get("frontmatter") != fm:
+                e["frontmatter"] = fm
+                changed = True
+        present |= unreadable_docs
+        for mid in unreadable_docs:
+            fm = entries[mid].get("frontmatter") or {}
+            doc_headers[mid[len(DOC_PREFIX):]] = _doc_header(mid[len(DOC_PREFIX):], fm)
         for mid, e in entries.items():
             if e.get("status", "active") == "active" and mid not in present:
                 e.update(status="archived", archived_at=now, updated_at=now,
@@ -387,9 +479,10 @@ class Vault:
         if new_cfg != original_cfg:
             _atomic_write(self.topics_path, yaml.safe_dump(new_cfg, allow_unicode=True, sort_keys=False))
         self._topics_cfg = new_cfg
-        if headers != self._headers:
+        if headers != self._headers or doc_headers != self._docs:
             self._render_pending = True  # titles and privacy show up in MEMORY.md
         self._headers = headers
+        self._docs = doc_headers
         self._meta = meta
         if changed or not self.meta_path.exists():
             self._write_meta()
@@ -524,8 +617,11 @@ class Vault:
     # ---- topics --------------------------------------------------------------------------------
 
     def private_topics(self) -> set[str]:
+        """Slugs of the private topics, and of the private documents (a document's slug decides access like a
+        topic's, MEMORY_FORMAT.md §3.6)."""
         self.sync()
-        return {slug for slug, h in self._headers.items() if h["private"]}
+        return ({slug for slug, h in self._headers.items() if h["private"]}
+                | {slug for slug, h in self._docs.items() if h["private"]})
 
     def topics(self) -> list[dict]:
         self.sync()
@@ -658,8 +754,191 @@ class Vault:
                 out.extend(self._memory(mid, entries[mid]) for mid in self._order.get(t["slug"], [])
                            if mid in entries and entries[mid].get("status", "active") == "active")
             return out
-        rows = [self._memory(mid, e) for mid, e in entries.items() if e.get("status", "active") == status]
+        rows = [self._memory(mid, e) for mid, e in entries.items()
+                if e.get("status", "active") == status and not is_document_id(mid)]
         return sorted(rows, key=lambda m: m.archived_at or m.updated_at, reverse=True)
+
+    # ---- documents (MEMORY_FORMAT.md §3.6) -----------------------------------------------------
+
+    def documents(self, status: str = "active") -> list[Document]:
+        """The documents, by title (``active``), or the archived ones, most recently archived first."""
+        self.sync()
+        out = []
+        for mid, e in self._meta["memories"].items():
+            if not is_document_id(mid) or e.get("status", "active") != status:
+                continue
+            slug = mid[len(DOC_PREFIX):]
+            h = self._docs.get(slug) if status == "active" else None
+            h = h or _doc_header(slug, e.get("frontmatter") or {})
+            out.append(Document(slug, h["title"], h["description"], h["private"], self._memory(mid, e)))
+        if status == "active":
+            return sorted(out, key=lambda d: (d.title.casefold(), d.slug))
+        return sorted(out, key=lambda d: d.memory.archived_at or d.memory.updated_at, reverse=True)
+
+    def document(self, slug: str) -> Document:
+        for d in self.documents():
+            if d.slug == slug:
+                return d
+        raise NotFound(f"No document {slug}")
+
+    def add_document(self, title: str, content: str = "", *, slug: str | None = None,
+                     description: str | None = None, private: bool = False, source: str = "user",
+                     actor: str = "user") -> Document:
+        """A new document file. Without ``slug`` one is made from the title: never one a topic, a document or an
+        archived document uses, since ids aren't reused."""
+        title = " ".join((title or "").split())
+        if not title:
+            raise VaultError("A document needs a title")
+        body = normalize_document(content or "")
+        if len(body) > DOC_MAX:
+            raise VaultError(f"A document holds at most {DOC_MAX:,} characters")
+        with self.lock():
+            self.sync()
+            taken = set(self._headers) | {mid[len(DOC_PREFIX):] for mid in self._meta["memories"]
+                                          if is_document_id(mid)} | RESERVED_FILES
+
+            def free(name: str) -> bool:
+                return name not in taken and not (self.memories_dir / f"{name}.md").exists()
+
+            if slug is not None:
+                slug = slug.strip().lower()
+                if not SLUG_RE.match(slug) or not free(slug):
+                    raise VaultError(f"The name {slug} is taken, or isn't lowercase letters, digits and dashes")
+            else:
+                base = slugify(title) if re.search(r"[a-z0-9]", title.lower()) else "document"
+                slug, n = base, 2
+                while not free(slug):
+                    slug, n = f"{base[:44]}-{n}", n + 1
+            fm: dict = {"type": "document", "title": title}
+            if description:
+                fm["description"] = description
+            if private:
+                fm["private"] = True
+            _atomic_write(self.memories_dir / f"{slug}.md", new_document_file(fm, body))
+            mid, now = DOC_PREFIX + slug, now_iso()
+            self._meta["memories"][mid] = {
+                "content": body, "topic": slug, "section": None, "kind": "document", "source": source,
+                "last_actor": actor, "created_at": now, "updated_at": now, "version": 1, "status": "active",
+                "frontmatter": _plain(fm)}
+            self._history(mid, 1, "create", body, slug, actor)
+            self._docs[slug] = _doc_header(slug, fm)
+            self._after_write()
+        return self.document(slug)
+
+    def update_document(self, slug: str, *, title: str | None = None, description: str | None = None,
+                        private: bool | None = None) -> Document:
+        """Rename a document, describe it, or make it private: its frontmatter, never its text."""
+        with self.lock():
+            self.sync()
+            path = self.memories_dir / f"{slug}.md"
+            if slug not in self._docs or not path.exists():
+                raise NotFound(f"No document {slug}")
+            mf = MemoryFile(path.read_text(encoding="utf-8"))
+            if mf.frontmatter_broken or mf.frontmatter_type != "document":
+                raise VaultError(f"The frontmatter of {path.name} isn't readable; fix it in an editor first")
+            fm = dict(mf.frontmatter or {})
+            if title is not None:
+                title = " ".join(title.split())
+                if not title:
+                    raise VaultError("A document needs a title")
+                fm["title"] = title
+            if description is not None:
+                fm["description"] = description
+                if not description:
+                    fm.pop("description")
+            if private is not None:
+                fm["private"] = True
+                if not private:
+                    fm.pop("private")
+            mf.set_frontmatter(fm)
+            _atomic_write(path, mf.render())
+            self._sig = None
+            self.sync()
+        return self.document(slug)
+
+    def _update_document(self, memory_id: str, *, content: str | None, topic: str | None, actor: str,
+                         proposal_id: str | None, expected_version: int | None) -> Memory:
+        """A new version of a document's text. ``generated`` in its frontmatter names the app when an app's change
+        applies without the person, and goes when anyone else writes it (MEMORY_FORMAT.md §3.6)."""
+        slug = memory_id[len(DOC_PREFIX):]
+        with self.lock():
+            self.sync()
+            e = self._meta["memories"].get(memory_id)
+            if e is None:
+                raise NotFound(f"No memory with id {memory_id}")
+            _check_version(memory_id, e, expected_version)
+            if e.get("status") == "archived":
+                raise VaultError(f"The document {slug} is archived; restore it first")
+            if topic not in (None, "", slug):
+                raise VaultError("A document can't move into a topic")
+            body = normalize_document(content) if content is not None else e["content"]
+            if len(body) > DOC_MAX:
+                raise VaultError(f"A document holds at most {DOC_MAX:,} characters")
+            if body == e["content"]:
+                return self._memory(memory_id, e)
+            path = self.memories_dir / f"{slug}.md"
+            mf = MemoryFile(path.read_text(encoding="utf-8"))
+            if mf.frontmatter_broken or mf.frontmatter_type != "document":
+                raise VaultError(f"The frontmatter of {path.name} isn't readable; fix it in an editor first")
+            fm = dict(mf.frontmatter or {})
+            new_fm = {k: v for k, v in fm.items() if k != "generated"}
+            if actor.startswith("connector:"):
+                new_fm["generated"] = {"by": actor, "at": now_iso()}
+            if new_fm != fm:
+                mf.set_frontmatter(new_fm)
+            mf.set_body(body)
+            _atomic_write(path, mf.render())
+            e.update(content=body, updated_at=now_iso(), version=int(e.get("version", 1)) + 1, last_actor=actor,
+                     frontmatter=_plain(new_fm))
+            self._history(memory_id, e["version"], "update", body, slug, actor, proposal_id)
+            self._after_write()
+            return self._memory(memory_id, e)
+
+    def _archive_document(self, memory_id: str, *, actor: str, proposal_id: str | None,
+                          expected_version: int | None) -> Memory:
+        """The file goes; its text and frontmatter stay in meta.json and history.jsonl, for restore."""
+        slug = memory_id[len(DOC_PREFIX):]
+        with self.lock():
+            self.sync()
+            e = self._meta["memories"].get(memory_id)
+            if e is None:
+                raise NotFound(f"No memory with id {memory_id}")
+            _check_version(memory_id, e, expected_version)
+            if e.get("status") == "archived":
+                return self._memory(memory_id, e)
+            (self.memories_dir / f"{slug}.md").unlink(missing_ok=True)
+            now = now_iso()
+            e.update(status="archived", archived_at=now, updated_at=now, version=int(e.get("version", 1)) + 1,
+                     last_actor=actor)
+            self._history(memory_id, e["version"], "archive", e["content"], slug, actor, proposal_id)
+            self._docs.pop(slug, None)
+            self._after_write()
+            return self._memory(memory_id, e)
+
+    def _restore_document(self, memory_id: str, *, actor: str, proposal_id: str | None) -> Memory:
+        slug = memory_id[len(DOC_PREFIX):]
+        with self.lock():
+            self.sync()
+            e = self._meta["memories"].get(memory_id)
+            if e is None:
+                raise NotFound(f"No memory with id {memory_id}")
+            if e.get("status", "active") == "active":
+                return self._memory(memory_id, e)
+            path = self.memories_dir / f"{slug}.md"
+            if path.exists():
+                raise VaultError(f"memories/{slug}.md is in use; rename that file to restore this document")
+            fm = {k: v for k, v in (e.get("frontmatter") or {}).items() if k != "generated"}
+            fm = {"type": "document", "title": fm.get("title") or slug, **fm}
+            if actor.startswith("connector:"):
+                fm["generated"] = {"by": actor, "at": now_iso()}
+            _atomic_write(path, new_document_file(fm, e["content"]))
+            e.update(status="active", updated_at=now_iso(), version=int(e.get("version", 1)) + 1, last_actor=actor,
+                     frontmatter=_plain(fm))
+            e.pop("archived_at", None)
+            self._history(memory_id, e["version"], "restore", e["content"], slug, actor, proposal_id)
+            self._docs[slug] = _doc_header(slug, fm)
+            self._after_write()
+            return self._memory(memory_id, e)
 
     def get(self, memory_id: str) -> Memory:
         self.sync()
@@ -734,7 +1013,11 @@ class Vault:
                until: str | None = None, actor: str = "user", proposal_id: str | None = None,
                expected_version: int | None = None, section: str | None | object = _KEEP) -> Memory:
         """``section``: the ``## Section`` to put the memory under in its topic file (None: none); left as it is
-        when not given, and dropped when the memory moves to another topic without one."""
+        when not given, and dropped when the memory moves to another topic without one. For a document only
+        ``content`` applies (the whole new text)."""
+        if is_document_id(memory_id):
+            return self._update_document(memory_id, content=content, topic=topic, actor=actor,
+                                         proposal_id=proposal_id, expected_version=expected_version)
         with self.lock():
             self.sync()
             e = self._meta["memories"].get(memory_id)
@@ -803,6 +1086,9 @@ class Vault:
 
     def archive(self, memory_id: str, *, actor: str = "user", proposal_id: str | None = None,
                 expected_version: int | None = None) -> Memory:
+        if is_document_id(memory_id):
+            return self._archive_document(memory_id, actor=actor, proposal_id=proposal_id,
+                                          expected_version=expected_version)
         with self.lock():
             self.sync()
             e = self._meta["memories"].get(memory_id)
@@ -820,6 +1106,8 @@ class Vault:
             return self._memory(memory_id, e)
 
     def restore(self, memory_id: str, *, actor: str = "user", proposal_id: str | None = None) -> Memory:
+        if is_document_id(memory_id):
+            return self._restore_document(memory_id, actor=actor, proposal_id=proposal_id)
         with self.lock():
             self.sync()
             e = self._meta["memories"].get(memory_id)

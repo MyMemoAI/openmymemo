@@ -18,12 +18,15 @@ from .context import compile_context
 from .proposals import Proposals, batch_label
 from .snippets import http_snippets, stdio_snippets
 from .topics import IMPORTED_GROUP
-from .vault import NotFound, Vault, VaultError, vault_path
+from .vault import DOC_MAX, NotFound, Vault, VaultError, is_document_id, vault_path
 
 app = typer.Typer(help="OpenMyMemo — your AI memory as a local folder you own.", no_args_is_help=True,
                   add_completion=False, pretty_exceptions_enable=False)
 connector_app = typer.Typer(help="Manage the AI apps that can read your memory.", no_args_is_help=True)
 app.add_typer(connector_app, name="connector")
+doc_app = typer.Typer(help="Documents: longer texts AI apps get whole, such as the text of a CLAUDE.md.",
+                      no_args_is_help=True)
+app.add_typer(doc_app, name="doc")
 setup_app = typer.Typer(help="Set up AI apps that need more than an MCP config.", no_args_is_help=True)
 app.add_typer(setup_app, name="setup")
 cloud_app = typer.Typer(help="OpenMyMemo Cloud: use your memory in ChatGPT and claude.ai on the web, relayed by MyMemo "
@@ -161,6 +164,9 @@ def brief_cmd(ctx: typer.Context,
     for a in b["learned"]:
         typer.echo(f"\n{a['app']}:")
         for c in a["changes"]:
+            if c.get("document"):
+                typer.echo(f"  changed the document {c['document']}")
+                continue
             verb = {"add": "added", "archive": "archived"}.get(c["op"], "changed")
             typer.echo(f"  {verb}: {c['content']}")
         if a["private"]:
@@ -209,6 +215,9 @@ def import_(ctx: typer.Context,
             yes: Annotated[bool, typer.Option("--yes", "-y", help="Import without asking.")] = False,
             max_calls: Annotated[int | None, typer.Option(
                 help="Chats only: read at most this many chunks (one model call each), newest first.")] = None,
+            document: Annotated[bool, typer.Option(
+                "--document", help="Keep the file whole, as one document, instead of splitting it into memories.")]
+            = False,
             ) -> None:
     """Import memories from ChatGPT, Claude, Gemini, Markdown, JSON or another AI app's memory file.
 
@@ -240,6 +249,9 @@ def import_(ctx: typer.Context,
         raise typer.Exit(2)
     else:
         text = _read_input(file, source)
+    if document:
+        _import_document(vault, source, file, text)
+        return
     try:
         items = assistant_features.import_preview(vault, source, text)
     except ValueError as e:
@@ -279,6 +291,22 @@ def import_(ctx: typer.Context,
                     "named. Run `openmymemo sort` to file them into topics.", fg="green")
     else:
         typer.secho(f"Imported {len(ids)} memories into the topics they named.", fg="green")
+
+
+def _import_document(vault: Vault, source: str, file: Path | None, text: str) -> None:
+    """``import … --document``: the file whole, as a document that is the person's (product-design.md §23.4)."""
+    if file is None:
+        typer.secho("--document needs a file: openmymemo import auto ~/.claude/CLAUDE.md --document", fg="red",
+                    err=True)
+        raise typer.Exit(2)
+    doc = transfer.as_document(source, str(file), text)
+    if doc is None:
+        typer.secho(f"{file} can't be a document: it is JSON, empty or longer than {DOC_MAX:,} characters.",
+                    fg="red", err=True)
+        raise typer.Exit(1)
+    d = vault.add_document(doc["title"], doc["content"], description=doc["description"],
+                           source=f"import:{source}", actor=f"import:{source}")
+    typer.secho(f"Imported {file} as the document {d.title} ({d.id}), {len(d.content):,} characters.", fg="green")
 
 
 def _import_chats(vault: Vault, source: str, file: Path | None, yes: bool, max_calls: int | None) -> None:
@@ -695,6 +723,7 @@ def review(ctx: typer.Context) -> None:
         typer.echo("Nothing to review: no new AI changes and nothing waiting for you.")
         return
     titles = {t["slug"]: t["title"] for t in vault.topics()}
+    titles.update({d.slug: d.title for d in vault.documents()})
     if digest:
         typer.secho(f"Changed since you last looked: {len(digest)}", bold=True)
         if not _review_batches(props, digest, titles):
@@ -740,25 +769,47 @@ def _review_batches(props: Proposals, digest: list, titles: dict[str, str]) -> b
     return not singles or _review_digest(props, singles, titles)
 
 
+DIFF_LINES = 40
+
+
+def _document_diff(before: str, after: str) -> None:
+    """A document change as a unified diff with two lines of context, cut at ``DIFF_LINES`` lines."""
+    import difflib
+
+    lines = list(difflib.unified_diff(before.split("\n"), after.split("\n"), lineterm="", n=2))[2:]
+    for line in lines[:DIFF_LINES]:
+        color = "red" if line.startswith("-") else "green" if line.startswith("+") else None
+        typer.secho(f"  {line}", fg=color, dim=line.startswith("@@"))
+    if len(lines) > DIFF_LINES:
+        typer.secho(f"  … {len(lines) - DIFF_LINES} more lines: see the whole change in the panel", dim=True)
+
+
+EDIT_DOCUMENT_ELSEWHERE = "  a document is edited in the panel, or with `openmymemo doc edit`"
+
+
 def _review_digest(props: Proposals, digest: list, titles: dict[str, str]) -> bool:
     """Changes that applied without the user, newest first. Returns False when the user quits."""
     for i, p in enumerate(digest, 1):
         topic = p.final_topic or p.topic
         title = titles.get(topic, topic)
         text = p.final_content or p.content or ""
-        if p.op == "add":
-            head = f'{p.connector_name} added to {title} · "{text}"'
-        elif p.op == "update":
-            head = f"{p.connector_name} changed a memory in {title}"
+        if is_document_id(p.applied_memory_id):
+            typer.secho(f"\n[{i}/{len(digest)}] {p.connector_name} changed the document {title}", bold=True)
+            _document_diff(p.before_content or "", text)
         else:
-            head = f"{p.connector_name} archived a memory in {title}"
-        typer.secho(f"\n[{i}/{len(digest)}] {head}", bold=True)
-        if p.op in ("update", "archive") and p.before_content:
-            typer.secho(f"  - {p.before_content}", fg="red")
-        if p.op == "update":
-            typer.secho(f"  + {text}", fg="green")
-        if p.original_op == "add":
-            typer.secho("  (proposed as new; it updated a similar memory)", dim=True)
+            if p.op == "add":
+                head = f'{p.connector_name} added to {title} · "{text}"'
+            elif p.op == "update":
+                head = f"{p.connector_name} changed a memory in {title}"
+            else:
+                head = f"{p.connector_name} archived a memory in {title}"
+            typer.secho(f"\n[{i}/{len(digest)}] {head}", bold=True)
+            if p.op in ("update", "archive") and p.before_content:
+                typer.secho(f"  - {p.before_content}", fg="red")
+            if p.op == "update":
+                typer.secho(f"  + {text}", fg="green")
+            if p.original_op == "add":
+                typer.secho("  (proposed as new; it updated a similar memory)", dim=True)
         if p.reason:
             typer.echo(f"  why: {p.reason}")
         if not props.can_undo(p):
@@ -772,6 +823,9 @@ def _review_digest(props: Proposals, digest: list, titles: dict[str, str]) -> bo
                 props.undo(p.id)
                 typer.echo("  undone")
             elif choice == "e":
+                if is_document_id(p.applied_memory_id):
+                    typer.secho(EDIT_DOCUMENT_ELSEWHERE, fg="yellow")
+                    continue
                 if p.op == "archive":
                     typer.secho("  an archive has no text to edit; undo it instead", fg="yellow")
                     continue
@@ -790,12 +844,17 @@ def _review_digest(props: Proposals, digest: list, titles: dict[str, str]) -> bo
 def _review_pending(props: Proposals, pending: list, titles: dict[str, str]) -> None:
     """Proposals waiting for a decision, oldest first."""
     for i, p in enumerate(pending, 1):
-        typer.secho(f"\n[{i}/{len(pending)}] {p.connector_name} wants to {p.op} · {titles.get(p.topic, p.topic)}",
-                    bold=True)
-        if p.before_content:
-            typer.secho(f"  - {p.before_content}", fg="red")
-        if p.content:
-            typer.secho(f"  + {p.content}", fg="green")
+        if is_document_id(p.memory_id):
+            typer.secho(f"\n[{i}/{len(pending)}] {p.connector_name} wants to change the document "
+                        f"{titles.get(p.topic, p.topic)}", bold=True)
+            _document_diff(p.before_content or "", p.content or "")
+        else:
+            typer.secho(f"\n[{i}/{len(pending)}] {p.connector_name} wants to {p.op} · "
+                        f"{titles.get(p.topic, p.topic)}", bold=True)
+            if p.before_content:
+                typer.secho(f"  - {p.before_content}", fg="red")
+            if p.content:
+                typer.secho(f"  + {p.content}", fg="green")
         if p.original_op == "add":
             typer.secho("  (proposed as new; looks like an update of an existing memory)", dim=True)
         if p.conflict:
@@ -812,6 +871,9 @@ def _review_pending(props: Proposals, pending: list, titles: dict[str, str]) -> 
                 props.accept(p.id)
                 typer.secho("  accepted", fg="green")
             elif choice == "e":
+                if is_document_id(p.memory_id):
+                    typer.secho(EDIT_DOCUMENT_ELSEWHERE, fg="yellow")
+                    continue
                 text = typer.prompt("  new text", default=p.content or "")
                 props.accept(p.id, content=text)
                 typer.secho("  accepted with edits", fg="green")
@@ -825,6 +887,103 @@ def _review_pending(props: Proposals, pending: list, titles: dict[str, str]) -> 
                 break
         except VaultError as e:
             typer.secho(f"  {e}", fg="red")
+
+
+def _document(vault: Vault, slug: str):
+    try:
+        return vault.document(slug)
+    except NotFound:
+        names = ", ".join(d.slug for d in vault.documents()) or "none yet"
+        typer.secho(f"No document {slug}. Documents: {names}.", fg="red", err=True)
+        raise typer.Exit(1) from None
+
+
+def _text_from(file: Path | None) -> str:
+    """A file's text, or standard input when it isn't a terminal; empty otherwise."""
+    if file is not None:
+        try:
+            return file.expanduser().read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeDecodeError) as e:
+            typer.secho(f"Couldn't read {file}: {e}", fg="red", err=True)
+            raise typer.Exit(1) from None
+    return "" if sys.stdin.isatty() else sys.stdin.read()
+
+
+@doc_app.command("list")
+def doc_list(ctx: typer.Context) -> None:
+    """List the documents."""
+    docs = _vault(ctx).documents()
+    if not docs:
+        typer.echo("No documents yet. Start one with `openmymemo doc new`, or import a CLAUDE.md with "
+                   "`openmymemo import auto ~/.claude/CLAUDE.md --document`.")
+    for d in docs:
+        typer.echo(f"{d.slug:<24} {len(d.content):>7,} characters  {d.title}" + ("  (private)" if d.private else ""))
+
+
+@doc_app.command("show")
+def doc_show(ctx: typer.Context, slug: str) -> None:
+    """Print a document's text exactly as it is, e.g. `openmymemo doc show working-with-me > CLAUDE.md`."""
+    typer.echo(_document(_vault(ctx), slug).content)
+
+
+@doc_app.command("new")
+def doc_new(ctx: typer.Context, title: str,
+            file: Annotated[Path | None, typer.Option("--file", help="Start from this file's text.")] = None,
+            slug: Annotated[str | None, typer.Option("--slug", help="The file name, without .md (made from the "
+                                                                    "title when left out).")] = None,
+            private: Annotated[bool, typer.Option("--private", help="Hide it from apps that may not read private "
+                                                                    "topics.")] = False) -> None:
+    """Start a document: empty, from --file, or from standard input."""
+    vault = _vault(ctx)
+    try:
+        d = vault.add_document(title, _text_from(file), slug=slug, private=private)
+    except VaultError as e:
+        typer.secho(str(e), fg="red", err=True)
+        raise typer.Exit(1) from None
+    typer.secho(f"Added the document {d.title} ({d.id}): memories/{d.slug}.md.", fg="green")
+
+
+@doc_app.command("edit")
+def doc_edit(ctx: typer.Context, slug: str,
+             file: Annotated[Path | None, typer.Option("--file", help="The new text (else standard input).")] = None
+             ) -> None:
+    """Replace a document's text with a file's (or standard input) as your own edit.
+
+    Or edit memories/<slug>.md in any editor."""
+    vault = _vault(ctx)
+    d = _document(vault, slug)
+    text = _text_from(file)
+    if not text.strip():
+        typer.secho("No text given: use --file, or pipe the text in. To remove a document, archive it.", fg="red",
+                    err=True)
+        raise typer.Exit(2)
+    try:
+        m = vault.update(d.id, content=text)
+    except VaultError as e:
+        typer.secho(str(e), fg="red", err=True)
+        raise typer.Exit(1) from None
+    typer.secho(f"Saved {d.title} (version {m.version}).", fg="green")
+
+
+@doc_app.command("archive")
+def doc_archive(ctx: typer.Context, slug: str) -> None:
+    """Archive a document: its file goes, its text stays in the history (`openmymemo doc restore`)."""
+    vault = _vault(ctx)
+    d = _document(vault, slug)
+    vault.archive(d.id)
+    typer.echo(f"Archived {d.title}. `openmymemo doc restore {d.slug}` brings it back.")
+
+
+@doc_app.command("restore")
+def doc_restore(ctx: typer.Context, slug: str) -> None:
+    """Bring back an archived document."""
+    vault = _vault(ctx)
+    try:
+        vault.restore(f"doc:{slug}")
+    except VaultError as e:
+        typer.secho(str(e), fg="red", err=True)
+        raise typer.Exit(1) from None
+    typer.echo(f"Restored memories/{slug}.md.")
 
 
 @app.command()

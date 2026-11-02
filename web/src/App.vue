@@ -14,13 +14,14 @@ import ActivityView from "./views/ActivityView.vue";
 import ChangesView from "./views/ChangesView.vue";
 import ConnectorsView from "./views/ConnectorsView.vue";
 import ContextView from "./views/ContextView.vue";
+import DocumentsView from "./views/DocumentsView.vue";
 import HomeView from "./views/HomeView.vue";
 import ImportView from "./views/ImportView.vue";
 import MemoriesDesktopView from "./views/MemoriesDesktopView.vue";
 import MemoriesView from "./views/MemoriesView.vue";
 import WelcomeView from "./views/WelcomeView.vue";
 
-const ROUTES = ["home", "memories", "changes", "context", "connectors", "activity", "import", "welcome"] as const;
+const ROUTES = ["home", "memories", "documents", "changes", "context", "connectors", "activity", "import", "welcome"] as const;
 type Route = (typeof ROUTES)[number];
 /** Old names that links in the wild (MCP results, docs) still use. */
 const ALIASES: Record<string, Route> = { review: "changes" };
@@ -92,6 +93,7 @@ const nav = computed<NavItem[]>(() => [
   ...(store.state?.settings.onboarded === false ? [{ id: "welcome", label: t("onb.nav"), icon: "star" } as const] : []),
   { id: "home", label: t("nav.home"), icon: "shield" },
   { id: "memories", label: t("nav.memories"), icon: "memories", badge: store.state?.counts.active || null },
+  { id: "documents", label: t("nav.documents"), icon: "file", badge: store.state?.documents?.length || null },
   { id: "changes", label: t("nav.changes"), icon: "changes", badge: toReview.value || null, alert: toReview.value > 0 },
   { id: "context", label: t("nav.context"), icon: "eye" },
   { id: "connectors", label: t("nav.connectors"), icon: "plug", badge: store.connectors.length || null },
@@ -127,6 +129,7 @@ const moreActive = computed(() => moreItems.value.some((n) => n.id === current.v
         <main class="min-h-0 flex-1 overflow-y-auto bg-ground">
           <div class="mx-auto w-full max-w-[880px] px-8 pt-6 pb-12">
             <HomeView v-if="current.route === 'home'" />
+            <DocumentsView v-else-if="current.route === 'documents'" :initial-slug="current.param" />
             <ChangesView v-else-if="current.route === 'changes'" :initial-tab="current.param" />
             <ContextView v-else-if="current.route === 'context'" :initial-connector="current.param" />
             <ConnectorsView v-else-if="current.route === 'connectors'" :initial-connector="current.param" />
@@ -189,6 +192,7 @@ const moreActive = computed(() => moreItems.value.some((n) => n.id === current.v
         <template v-else>
           <HomeView v-if="current.route === 'home'" />
           <MemoriesView v-else-if="current.route === 'memories'" :initial-topic="current.param" />
+          <DocumentsView v-else-if="current.route === 'documents'" :initial-slug="current.param" />
           <ChangesView v-else-if="current.route === 'changes'" :initial-tab="current.param" />
           <ContextView v-else-if="current.route === 'context'" :initial-connector="current.param" />
           <ConnectorsView v-else-if="current.route === 'connectors'" :initial-connector="current.param" />

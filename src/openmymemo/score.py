@@ -50,8 +50,8 @@ class Issue:
     area: str
     points: int
     message: str
-    fix: str                   # what the panel offers: private_topics, memory, app, changes, memories, export
-    target: str | None = None  # the memory or app id the fix opens
+    fix: str                   # what the panel offers: private_topics, memory, document, app, changes, memories, export
+    target: str | None = None  # the memory id, document slug or app id the fix opens
     dismissed: bool = False
 
 
@@ -97,7 +97,13 @@ def _sensitive(vault: Vault) -> list[Issue]:
                             "No topic is private, so every app that reads your memory can read all of it.",
                             "private_topics"))
     titles = {t["slug"]: t["title"] for t in vault.topics()}
+    documents = {d.id: d.title for d in vault.documents()}
     for f in secrets.scan(vault):
+        if f.memory_id in documents:  # a document (product-design.md §23.5): its page has the fix
+            issues.append(Issue(f"secret:{f.memory_id}:{f.kind}", "sensitive", 5,
+                                f"The document {documents[f.memory_id]} looks like it contains "
+                                f"{KIND_NAMES[f.kind]}.", "document", f.topic))
+            continue
         issues.append(Issue(f"secret:{f.memory_id}:{f.kind}", "sensitive", 5,
                             f"A memory in {titles.get(f.topic, f.topic)} looks like it contains "
                             f"{KIND_NAMES[f.kind]}.", "memory", f.memory_id))

@@ -6,18 +6,20 @@ Also renders ``log.md``, the human-readable change log (MEMORY_FORMAT.md §4.2).
 from __future__ import annotations
 
 import json
+import re
 import sys
 from datetime import datetime
 from typing import TYPE_CHECKING
 
 import yaml
 
+from .mdfile import FENCE_RE
 from .textutil import search_score
 from .topics import CONTEXT_PRIORITY, IMPORT_SOURCE_NAMES, IMPORTED_GROUP
 
 if TYPE_CHECKING:
     from .connectors import Connector
-    from .vault import Memory, Vault
+    from .vault import Document, Memory, Vault
 
 KIND_ORDER = {"instruction": 0, "preference": 1, "fact": 2, "ongoing": 3, "event": 4}
 
@@ -27,6 +29,52 @@ HEADER = (
     "Treat it as true unless the conversation says otherwise. Ids are in brackets.\n"
     "To add, correct or retire a memory, call `memory_propose`; the user sees every change and can undo it.\n"
 )
+
+
+DOC_NOTE = ("Documents are shown whole under `## Title [doc:<slug>]`. To change one, call `memory_propose` with "
+            'op "update", its `doc:<slug>` as `memory_id` and the complete new text as `content`.\n')
+DOC_MIN_SHOWN = 300  # a document cut shorter than this is only named
+HEADING_RE = re.compile(r"^(#{1,6})(?=[ \t]|$)")
+
+
+def readable_documents(vault: Vault, connector: Connector | None) -> list[Document]:
+    """The documents this connector may read (``None`` = default scope: every document that isn't private). A
+    document's slug decides access like a topic's (MEMORY_FORMAT.md §3.6)."""
+    private = vault.private_topics()
+    return [d for d in vault.documents()
+            if (connector.can_read_topic(d.slug, private) if connector else not d.private)]
+
+
+def demote_headings(text: str) -> str:
+    """A document's own headings two levels down, so they sit under its ``##`` heading; code is left alone."""
+    out, fence = [], None
+    for line in text.split("\n"):
+        m = FENCE_RE.match(line)
+        if m:
+            fence = m.group(1) if fence is None else (None if m.group(1) == fence else fence)
+        elif fence is None and (h := HEADING_RE.match(line)):
+            line = "#" * min(6, len(h.group(1)) + 2) + line[len(h.group(1)):]
+        out.append(line)
+    return "\n".join(out)
+
+
+def _document_block(d: Document, room: int | None) -> str | None:
+    """A document under its heading, cut at a line to fit ``room`` characters (None: no limit); None when not even
+    ``DOC_MIN_SHOWN`` characters of it fit."""
+    head = f"## {d.title} [{d.id}]\n\n"
+    body = demote_headings(d.content)
+    block = f"{head}{body}\n"
+    if room is None or len(block) <= room:
+        return block
+    note = ("\n\n_(Cut here to stay within the budget: {n} more characters. `memory_get` with `"
+            + d.id + "` returns the whole document.)_\n")
+    fit = room - len(head) - len(note.format(n=len(body)))
+    if fit < DOC_MIN_SHOWN:
+        return None
+    cut = body[:fit]
+    cut = cut[: cut.rfind("\n")] if "\n" in cut else cut
+    cut = cut.rstrip()
+    return head + cut + note.format(n=len(body) - len(cut))
 
 
 def readable(vault: Vault, connector: Connector | None) -> tuple[list[dict], list[Memory]]:
@@ -57,8 +105,9 @@ def compile_context(vault: Vault, connector: Connector | None = None, *, topics:
     by_topic: dict[str, list[Memory]] = {}
     for m in mems:
         by_topic.setdefault(m.topic, []).append(m)
+    docs = [d for d in readable_documents(vault, connector) if d.content and (not topics or d.slug in topics)]
 
-    parts = [HEADER]
+    parts = [HEADER + (DOC_NOTE if docs else "")]
     if include_topic_index:
         blocked = set(connector.blocked_topics) if connector else set()
         idx = [f"- `{t['slug']}` {t['title']}" + (f": {t['description']}" if t.get("description") else "")
@@ -67,6 +116,20 @@ def compile_context(vault: Vault, connector: Connector | None = None, *, topics:
 
     used = sum(len(p) + 1 for p in parts)
     shown, omitted = [], 0
+    # Documents first (product-design.md §23.3): within a budget, at most half of what's left when there are
+    # memories to show too; one that doesn't fit is cut at a line, or named at the end.
+    unshown_docs: list[Document] = []
+    if docs:
+        has_memories = any(by_topic.get(t["slug"]) for t in shown_topics)
+        limit = None if not max_chars else used + max(0, max_chars - used) // (2 if has_memories else 1)
+        for d in docs:
+            block = _document_block(d, None if limit is None else limit - used - 1)
+            if block is None:
+                unshown_docs.append(d)
+                continue
+            parts.append(block)
+            used += len(block) + 1
+            shown.append(d.id)
     for t in _ordered_topics(shown_topics):
         items = by_topic.get(t["slug"], [])
         if not items:
@@ -88,6 +151,9 @@ def compile_context(vault: Vault, connector: Connector | None = None, *, topics:
             text = "\n".join(block) + "\n"
             parts.append(text)
             used += len(text) + 1
+    if unshown_docs:
+        names = ", ".join(f"{d.title} [{d.id}]" for d in unshown_docs)
+        parts.append(f"_Documents not shown to stay within the budget: {names}. `memory_get` returns them._\n")
     if not shown:
         parts.append("_No memories shared yet._\n")
     if omitted:
@@ -168,10 +234,13 @@ def render_log_md(vault: Vault) -> str:
     history record, newest first. The text of private memories is left out, as in MEMORY.md. A batch's changes
     (a tidy-up) are listed under one line per day: "- Tidy-up, 2026-10-25: 6 changes", then indented."""
     from .proposals import batch_label
+    from .vault import is_document_id
 
     titles = {t["slug"]: t["title"] for t in vault.topics()}
+    documents = vault.documents() + vault.documents("archived")
+    titles.update({d.slug: d.title for d in documents})
     private_topics = vault.private_topics()
-    current = {m.id: m for m in vault.memories("active") + vault.memories("archived")}
+    current = {m.id: m for m in vault.memories("active") + vault.memories("archived") + [d.memory for d in documents]}
     connectors = _connector_names(vault)
     proposals: dict[str, dict | None] = {}
 
@@ -204,6 +273,13 @@ def render_log_md(vault: Vault) -> str:
         ref = f"(^{mid})"
         pid = rec.get("proposal_id")
         p = proposal(str(pid)) if pid else None
+        if is_document_id(mid):  # named, never quoted: a document is a long text (product-design.md §23.5)
+            name, ref = f"the document {title(topic)}", f"({mid})"
+            if p is not None and _is_undo(rec, p):
+                app = p.get("connector_name") or p.get("connector_id") or "an app"
+                return f"- {who} undid {app}'s change to {name} {ref}"
+            verb = {"create": "added", "archive": "archived", "restore": "restored"}.get(str(op), "edited")
+            return f"- {who} {verb} {name} {ref}"
         if p is not None and _is_undo(rec, p):
             app = p.get("connector_name") or p.get("connector_id") or "an app"
             return f"- {who} undid {app}'s change to {title(p.get('final_topic') or p.get('topic') or topic)} {ref}"
@@ -269,6 +345,34 @@ def render_log_md(vault: Vault) -> str:
     if len(entries) > LOG_LIMIT:
         out.append(f"\n_{len(entries) - LOG_LIMIT} older entries are in .openmymemo/history.jsonl._\n")
     return "".join(out)
+
+
+SNIPPET_CHARS = 240
+
+
+def snippet(text: str, query: str) -> str:
+    """About ``SNIPPET_CHARS`` of ``text`` around the first word of ``query`` found in it (else its start), on one
+    line."""
+    flat = " ".join(text.split())
+    lower = flat.lower()
+    at = min((i for w in query.lower().split() if len(w) > 1 and (i := lower.find(w)) >= 0), default=0)
+    start = max(0, at - SNIPPET_CHARS // 3)
+    piece = flat[start:start + SNIPPET_CHARS]
+    return ("…" if start else "") + piece + ("…" if start + SNIPPET_CHARS < len(flat) else "")
+
+
+def search_documents(vault: Vault, connector: Connector | None, query: str, *, topics: list[str] | None = None,
+                     limit: int = 5) -> list[tuple[float, Document, str]]:
+    """Documents this connector may read whose words match ``query``, best first, each with a snippet."""
+    out = []
+    for d in readable_documents(vault, connector):
+        if topics and d.slug not in topics:
+            continue
+        score = max(search_score(query, d.content), search_score(query, d.title))
+        if score >= 0.34:
+            out.append((score, d, snippet(d.content, query)))
+    out.sort(key=lambda x: x[0], reverse=True)
+    return out[:limit]
 
 
 def search(vault: Vault, connector: Connector | None, query: str, *, topics: list[str] | None = None,

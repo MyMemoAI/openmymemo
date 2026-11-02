@@ -3,8 +3,9 @@ import { computed, ref } from "vue";
 import { api, type Proposal } from "../api";
 import type { IconName } from "../icons";
 import { relTime, t } from "../i18n";
-import { act, quoted, store, topicTitle } from "../store";
+import { act, isDocumentId, quoted, store, topicTitle } from "../store";
 import AppIcon from "./AppIcon.vue";
+import DocumentDiff from "./DocumentDiff.vue";
 
 /** A proposal that waits for the user's decision, or (in History) one that was decided. */
 const props = defineProps<{ proposal: Proposal; compact?: boolean }>();
@@ -18,6 +19,8 @@ const isPending = computed(() => p.value.status === "pending");
 const text = computed(() => p.value.final_content ?? p.value.content);
 /** An update that only sets a review date (a tidy-up's `until` suggestion): the text itself doesn't change. */
 const untilOnly = computed(() => p.value.op === "update" && !!p.value.until && text.value === p.value.before_content);
+/** A change to a document (product-design.md §23.4): shown as a line diff, edited as its whole text. */
+const isDoc = computed(() => isDocumentId(p.value.memory_id ?? p.value.applied_memory_id));
 
 const HOLD: Record<string, { cls: string; icon: IconName | null }> = {
   private: { cls: "chip-private", icon: "lock" },
@@ -42,7 +45,8 @@ async function run(fn: () => Promise<unknown>, okText?: string) {
 }
 
 const accept = () => run(() => api.accept(p.value.id));
-const acceptEdited = () => run(() => api.accept(p.value.id, { content: draft.value, topic: draftTopic.value }));
+const acceptEdited = () =>
+  run(() => api.accept(p.value.id, isDoc.value ? { content: draft.value } : { content: draft.value, topic: draftTopic.value }));
 const asNew = () => run(() => api.accept(p.value.id, { as_new: true }));
 const reject = (block = false) => run(() => api.reject(p.value.id, block));
 const undo = () => run(() => api.undo(p.value.id), t("chg.undone"));
@@ -55,20 +59,22 @@ const undo = () => run(() => api.undo(p.value.id), t("chg.undone"));
   >
     <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-muted">
       <span class="font-semibold text-ink">{{ p.connector_name }}</span>
-      <span>{{ t(isPending ? `rev.wants.${p.op}` : `rev.proposed.${p.op}`) }}</span>
+      <span>{{ t(isPending ? `rev.wants.${isDoc ? "document" : p.op}` : `rev.proposed.${isDoc ? "document" : p.op}`) }}</span>
       <span class="chip">{{ topicTitle(p.final_topic ?? p.topic) }}</span>
       <span v-if="p.kind" class="chip">{{ t(`kind.${p.kind}`) }}</span>
       <span v-if="p.batch_id" class="chip">{{ t("chg.tidyChip") }}</span>
       <span :title="p.created_at">{{ relTime(isPending ? p.created_at : p.decided_at ?? p.created_at) }}</span>
       <span v-if="isPending && p.hold" class="chip ml-auto" :class="HOLD[p.hold]?.cls">
-        <AppIcon v-if="HOLD[p.hold]?.icon" :name="HOLD[p.hold].icon!" :size="11" />{{ t(`chg.hold.${p.hold}`) }}
+        <AppIcon v-if="HOLD[p.hold]?.icon" :name="HOLD[p.hold].icon!" :size="11" />{{ t(isDoc && (p.hold === "protected" || p.hold === "private") ? `chg.hold.${p.hold}Doc` : `chg.hold.${p.hold}`) }}
       </span>
       <span v-if="!isPending" class="ml-auto font-semibold" :class="DONE.includes(p.status) ? 'text-plus' : 'text-muted'">
         {{ t(`chg.status.${p.status}`) }}
       </span>
     </div>
 
-    <div class="space-y-1 text-[15px] leading-relaxed">
+    <DocumentDiff v-if="isDoc && !editing" :before="p.before_content ?? ''" :after="text ?? ''" />
+    <textarea v-if="isDoc && editing" v-model="draft" class="input min-h-64 bg-surface font-mono text-[13px]" :aria-label="t('doc.text')" />
+    <div v-if="!isDoc" class="space-y-1 text-[15px] leading-relaxed">
       <div v-if="untilOnly && !editing" class="min-w-0 break-words">{{ text }}</div>
       <div v-if="p.before_content && p.op !== 'add' && !untilOnly" class="flex gap-2.5 text-muted">
         <span class="minus" aria-hidden="true">−</span>

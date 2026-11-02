@@ -46,7 +46,9 @@ def build(vault: Vault, day: date | None = None, *, now: datetime | None = None)
             return False
         return bool(m) and vault.is_private(m)
 
-    # 1. What AI apps learned: changes that applied that day, by app.
+    # 1. What AI apps learned: changes that applied that day, by app. A change to a document names it and never
+    # quotes it (§23.5); a private one, archived or not, is only counted.
+    docs = {d.id: d for status in ("archived", "active") for d in vault.documents(status)}
     learned: dict[str, dict] = {}
     props = Proposals(vault).list()
     for p in props:
@@ -54,11 +56,16 @@ def build(vault: Vault, day: date | None = None, *, now: datetime | None = None)
             continue
         app = learned.setdefault(p.connector_id, {"app": p.connector_name, "changes": [], "private": 0})
         topic = p.final_topic or p.topic
-        if is_private(p.applied_memory_id or p.memory_id, topic):
+        mid = p.applied_memory_id or p.memory_id
+        doc = docs.get(mid or "")
+        if (doc is not None and doc.private) or is_private(mid, topic):
             app["private"] += 1
+        elif doc is not None:
+            app["changes"].append({"op": p.op, "memory_id": mid, "content": None, "topic": None,
+                                   "document": doc.title})
         else:
-            app["changes"].append({"op": p.op, "memory_id": p.applied_memory_id or p.memory_id,
-                                   "content": p.final_content or p.content, "topic": topic})
+            app["changes"].append({"op": p.op, "memory_id": mid, "content": p.final_content or p.content,
+                                   "topic": topic})
 
     # 2. What waits now.
     mems = vault.memories()

@@ -30,7 +30,7 @@ python3 scripts/stage_desktop.py && (cd desktop/src-tauri && cargo test)  # Mac 
 | File | Responsibility |
 | --- | --- |
 | `src/openmymemo/mdfile.py` | Parse and rewrite topic files (frontmatter, sections, memory lines; format-1 header migration); untouched lines must survive byte for byte |
-| `src/openmymemo/vault.py` | The vault: sync (editor edits → meta/history), add/update/archive/restore/rollback, settings, locking |
+| `src/openmymemo/vault.py` | The vault: sync (editor edits → meta/history), add/update/archive/restore/rollback, settings, locking; documents (`type: document` files, product-design.md §23): one `doc:<slug>` memory each, kept out of `memories()` and `topics()` so sync, tidy-up, search by meaning and dedupe never see them; `documents()`, `add_document`, `update_document` |
 | `src/openmymemo/topics.py` | The 14 default topics, groups, classification keywords |
 | `docs/MEMORY_FORMAT.md` | The folder format; change it before changing what the code reads or writes |
 | `docs/distribution.md`, `llms-install.md` | Where OpenMyMemo is published and listed, the shared listing details, and the setup guide AI agents such as Cline follow |
@@ -44,7 +44,7 @@ python3 scripts/stage_desktop.py && (cd desktop/src-tauri && cargo test)  # Mac 
 | `src/openmymemo/clients.py` | The catalog of AI apps (product-design.md §15.1): detection, status, one-click connect and disconnect by editing an app's MCP config (JSON or Codex TOML) or running its `mcp add`, and the manual snippets |
 | `src/openmymemo/appfiles.py` | Writing other apps' files (their MCP configs, Codex's `hooks.json`): atomic, permissions kept from the first byte, through symlinks, with a one-time `<file>.openmymemo-backup` |
 | `src/openmymemo/proposals.py` | Proposal lifecycle, dedupe, auto-apply and undo |
-| `src/openmymemo/context.py` | Compiles what an AI sees, MEMORY.md, log.md, search |
+| `src/openmymemo/context.py` | Compiles what an AI sees (documents first and whole, within half the budget when there are memories too), MEMORY.md, log.md, search (`search_documents` for documents, by their words) |
 | `src/openmymemo/transfer.py` | Import (ChatGPT / Claude / Markdown / JSON, and other apps' memory files) and export |
 | `src/openmymemo/memfiles.py` | Finds other AI apps' memory and instructions files (CLAUDE.md, AGENTS.md, GEMINI.md, rules, memory.md) for import: known names and places only, never a whole tree, nothing else read |
 | `src/openmymemo/mcp_server.py` | MCP tools (mcp SDK 2.x `MCPServer`); `relayed=` builds the OpenMyMemo Cloud variant (queue wording only with `cloud.queue_enabled()`) |
@@ -58,6 +58,7 @@ python3 scripts/stage_desktop.py && (cd desktop/src-tauri && cargo test)  # Mac 
 | `src/openmymemo/codex.py` | Codex session hook: merges it into `~/.codex/hooks.json` and takes it out again (Codex doesn't run plugin hooks) |
 | `web/` | Vue 3 + Tailwind v4 panel source; all copy lives in `web/src/i18n.ts` |
 | `web/src/components/ConnectApps.vue` | The app list with Connect / Disconnect / Set up, used by the Connectors page and the first-run guide; `ConnectNote` shows what's left to do, `ConnectorPanel` a connected app's permissions, `CloudRow` the OpenMyMemo Cloud row (sign-in, status, setup for ChatGPT and claude.ai, its web apps) |
+| `web/src/views/DocumentsView.vue` | The Documents page (product-design.md §23.4): list, read, edit with a live diff and a version check (409 when it changed elsewhere), private switch, rename, versions, archive and restore; `diff.ts` is the line diff, and `DocumentDiff` shows it here and on the Changes page |
 | `web/src/desktop.ts` | The Mac layout switch (`?desktop=1`), the shell's commands and shortcuts; `MemoriesDesktopView`, `MemoryInspector`, `DesktopSidebar`, `DesktopToolbar` are its screens; `memorySaves.ts` queues the inspector's saves per memory. `PageHeader` becomes the window toolbar there |
 | `desktop/` | Mac and Windows app (Tauri 2, product-design.md §14, §15.2): `src-tauri/src/core.rs` installs the core (non-editable) and finds or starts the server for the folder, `launcher.rs` writes the `openmymemo` launcher AI apps run on a Mac, `winlauncher.rs` installs `desktop/launcher` (a small program, since Windows has no `sh`) as that command on Windows, `install.rs` moves the app from the disk image to Applications, `main.rs` has the window, menus, menu-bar item, notifications, settings and link handling; `tauri.windows.conf.json` makes the Windows installer (NSIS, per user); `scripts/stage_desktop.py` stages the core, `uv` and on Windows the launcher before each build |
 | `.claude-plugin/` | Claude Code plugin manifest and marketplace (the repo root is the plugin) |

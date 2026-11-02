@@ -57,7 +57,11 @@ async function rotate() {
   }
 }
 
-const allSlugs = computed(() => store.state?.topics.map((x) => x.slug) ?? []);
+/** Topics, then documents (product-design.md §23.1): read access is decided by slug for both. */
+const allSlugs = computed(() => [
+  ...(store.state?.topics.map((x) => x.slug) ?? []),
+  ...(store.state?.documents?.map((d) => d.slug) ?? []),
+]);
 
 function toggleTopic(slug: string) {
   const all = allSlugs.value;
@@ -76,6 +80,7 @@ const reads = (slug: string) => c.value.read_topics === "all" || c.value.read_to
 /** What the app actually gets: selected, and not private unless private topics are included. */
 const sees = (slug: string, isPrivate: boolean) => reads(slug) && (!isPrivate || c.value.include_private);
 const seenCount = computed(() => store.state?.topics.filter((tp) => sees(tp.slug, tp.private)).length ?? 0);
+const topicCount = computed(() => store.state?.topics.length ?? 0);
 
 const name = computed(() => props.app?.name ?? c.value.name);
 /** Whether OpenMyMemo can take itself out of the app's settings (it found its entry there). */
@@ -125,7 +130,7 @@ function confirmRemove() {
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0 space-y-0.5">
           <div class="font-semibold">{{ t("con.read") }}</div>
-          <p class="text-[13px] text-muted">{{ t("con.readCount", { n: seenCount, total: allSlugs.length }) }}</p>
+          <p class="text-[13px] text-muted">{{ t("con.readCount", { n: seenCount, total: topicCount }) }}</p>
         </div>
         <button v-if="c.read_topics !== 'all'" class="btn btn-link btn-sm" @click="readAll">{{ t("con.selectAll") }}</button>
       </div>
@@ -139,6 +144,18 @@ function confirmRemove() {
           @click="toggleTopic(tp.slug)"
         >
           <AppIcon v-if="tp.private" name="lock" :size="12" />{{ tp.title }}
+        </button>
+        <button
+          v-for="d in store.state?.documents ?? []"
+          :key="d.id"
+          class="pill"
+          :class="sees(d.slug, d.private) ? 'pill-on' : 'pill-off'"
+          :aria-pressed="reads(d.slug)"
+          :title="t('con.document')"
+          data-test="read-doc"
+          @click="toggleTopic(d.slug)"
+        >
+          <AppIcon :name="d.private ? 'lock' : 'file'" :size="12" />{{ d.title }}
         </button>
       </div>
     </div>

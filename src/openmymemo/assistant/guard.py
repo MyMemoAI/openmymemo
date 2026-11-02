@@ -24,6 +24,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from collections.abc import Iterable, Sequence
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from ..connectors import Connector
@@ -94,6 +95,11 @@ class Guard:
     def _all_memories(self) -> dict[str, Memory]:
         out = {m.id: m for m in self.vault.memories("archived")}
         out.update({m.id: m for m in self.vault.memories()})
+        # A document (MEMORY_FORMAT.md §3.6) is one memory filed under its slug, private when its file says so,
+        # archived or not. The Assistant isn't given documents, but one it could read needn't be held back from a
+        # request that quotes it; a long document would otherwise match almost any text.
+        for status in ("archived", "active"):
+            out.update({d.id: replace(d.memory, private=d.private) for d in self.vault.documents(status)})
         return out
 
     def withheld(self) -> tuple[dict[str, Memory], set[str], list[str]]:

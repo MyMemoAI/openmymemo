@@ -20,10 +20,10 @@ from mcp_types import ToolAnnotations
 from . import __version__
 from .clients import display_name
 from .connectors import Connector, Connectors
-from .context import compile_context
+from .context import compile_context, search_documents
 from .proposals import Proposals
 from .recall import search as recall_search
-from .vault import Vault, VaultError
+from .vault import Vault, VaultError, is_document_id
 
 INSTRUCTIONS = """\
 OpenMyMemo holds the user's long-term memory: facts, preferences, instructions and ongoing work they
@@ -133,6 +133,8 @@ def build_server(vault: Vault, *, stdio_connector: str | None = None, panel_url:
         """Search the user's memory by keywords (any language). Returns matching memories with their ids."""
         # The description is part of OpenMyMemo Cloud's wire fixture (tests/fixtures/cloud/bridge/hello.json), so it
         # stays as is: search by meaning and the Assistant's rerank (§17.4) are added without changing the tool.
+        # Documents (product-design.md §23.3) are listed apart, under `documents`, with a snippet: `results` and its
+        # ranking stay memories only.
         c = who(ctx)
         found = await run(recall_search, vault, c, query, topics=topics, limit=max(1, min(limit, 50)), model=True)
         rows = [{"id": h.memory.id, "content": h.memory.content, "topic": h.memory.topic, "kind": h.memory.kind,
@@ -140,8 +142,13 @@ def build_server(vault: Vault, *, stdio_connector: str | None = None, panel_url:
         if found.mode != "keyword":
             for row, h in zip(rows, found.hits, strict=True):
                 row["match"] = h.match
-        vault.log_activity(c.id, "search", query=query, memory_ids=[r["id"] for r in rows])
-        return {"results": rows}
+        docs = await run(search_documents, vault, c, query, topics=topics)
+        out: dict[str, Any] = {"results": rows}
+        if docs:
+            out["documents"] = [{"id": d.id, "title": d.title, "snippet": text, "updated_at": d.memory.updated_at,
+                                 "score": round(score, 2)} for score, d, text in docs]
+        vault.log_activity(c.id, "search", query=query, memory_ids=[r["id"] for r in rows] + [d.id for _, d, _ in docs])
+        return out
 
     @srv.tool(title="Get memories", annotations=READ_ONLY)
     async def memory_get(ctx: Context, ids: list[str]) -> dict[str, Any]:
@@ -160,6 +167,11 @@ def build_server(vault: Vault, *, stdio_connector: str | None = None, panel_url:
                 if (m.status != "active" or not c.can_read_topic(m.topic, private)
                         or (m.private and not c.include_private)):
                     missing.append(mid)
+                    continue
+                if is_document_id(m.id):  # a document: its whole text, with its title (product-design.md §23.3)
+                    found.append({"id": m.id, "type": "document", "title": vault.document(m.topic).title,
+                                  "content": m.content, "source": m.source, "created_at": m.created_at,
+                                  "updated_at": m.updated_at})
                     continue
                 found.append({"id": m.id, "content": m.content, "topic": m.topic, "section": m.section,
                               "kind": m.kind, "source": m.source, "created_at": m.created_at,

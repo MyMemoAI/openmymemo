@@ -2,8 +2,9 @@
 import { computed, nextTick, ref } from "vue";
 import { api, type Memory, type Proposal } from "../api";
 import { relTime, t } from "../i18n";
-import { act, quoted, store, topicTitle } from "../store";
+import { act, isDocumentId, quoted, store, topicTitle } from "../store";
 import AppIcon from "./AppIcon.vue";
+import DocumentDiff from "./DocumentDiff.vue";
 
 /** One change that applied without the user, in the digest: keep, edit or undo it. */
 const props = defineProps<{ proposal: Proposal }>();
@@ -24,6 +25,8 @@ const movedOnly = computed(() => p.value.op === "update" && p.value.before_conte
 const moved = computed(() => p.value.op === "update" && !!p.value.before_topic && p.value.before_topic !== topic.value);
 const hasDetails = computed(() => !!(p.value.reason || p.value.evidence || p.value.check_note || p.value.original_op === "add"));
 const memory = computed(() => store.memories.find((m) => m.id === p.value.applied_memory_id) ?? null);
+/** A change to a document (product-design.md §23.4): a line diff; its versions are on the document's page. */
+const isDoc = computed(() => isDocumentId(p.value.applied_memory_id));
 
 const OP_STYLE: Record<string, string> = { add: "chip-fresh", update: "chip-accent", archive: "font-semibold" };
 
@@ -43,7 +46,9 @@ async function run(fn: () => Promise<unknown>, okText: string) {
 }
 
 const keep = () => run(() => api.reviewed(p.value.id), t("chg.kept"));
-const save = () => run(() => api.editApplied(p.value.id, draft.value.trim(), draftTopic.value || undefined), t("chg.saved"));
+const save = () =>
+  run(() => api.editApplied(p.value.id, isDoc.value ? draft.value : draft.value.trim(), isDoc.value ? undefined : draftTopic.value || undefined),
+    t("chg.saved"));
 const undo = () => run(() => api.undo(p.value.id), t("chg.undone"));
 const undoAndBlock = () =>
   run(() => api.undo(p.value.id, true), t("chg.blocked", { app: p.value.connector_name, topic: topicTitle(p.value.topic) }));
@@ -61,7 +66,7 @@ function onKey(e: KeyboardEvent) {
 <template>
   <article class="space-y-2 px-4.5 py-3.5">
     <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-muted">
-      <span class="chip" :class="OP_STYLE[p.op]">{{ t(`chg.op.${p.op}`) }}</span>
+      <span class="chip" :class="isDoc ? 'chip-accent' : OP_STYLE[p.op]">{{ t(isDoc ? "chg.op.document" : `chg.op.${p.op}`) }}</span>
       <span class="chip">{{ topicTitle(topic) }}</span>
       <span :title="p.decided_at ?? p.created_at">{{ relTime(p.decided_at ?? p.created_at) }}</span>
       <button
@@ -75,7 +80,8 @@ function onKey(e: KeyboardEvent) {
       </button>
     </div>
 
-    <div v-if="!editing" class="space-y-1 text-[15px] leading-relaxed">
+    <DocumentDiff v-if="isDoc && !editing" :before="p.before_content ?? ''" :after="after" />
+    <div v-else-if="!editing" class="space-y-1 text-[15px] leading-relaxed">
       <template v-if="p.op === 'add'">
         <div class="flex gap-2.5"><span class="plus" aria-hidden="true">+</span><span class="min-w-0 break-words">{{ after }}</span></div>
       </template>
@@ -103,9 +109,10 @@ function onKey(e: KeyboardEvent) {
     </div>
 
     <div v-else class="space-y-2 pt-1">
-      <textarea ref="input" v-model="draft" rows="2" class="input text-[15px]" :aria-label="t('mem.text')" @keydown="onKey" />
+      <textarea v-if="isDoc" ref="input" v-model="draft" class="input min-h-64 font-mono text-[13px]" :aria-label="t('doc.text')" />
+      <textarea v-else ref="input" v-model="draft" rows="2" class="input text-[15px]" :aria-label="t('mem.text')" @keydown="onKey" />
       <div class="flex flex-wrap items-center gap-2">
-        <select v-model="draftTopic" class="input select w-auto max-w-full" :aria-label="t('mem.topics')">
+        <select v-if="!isDoc" v-model="draftTopic" class="input select w-auto max-w-full" :aria-label="t('mem.topics')">
           <option v-for="tp in store.state?.topics" :key="tp.slug" :value="tp.slug">{{ tp.title }}</option>
         </select>
         <button class="btn btn-primary btn-sm" :disabled="busy || !draft.trim()" @click="save">{{ t("common.save") }}</button>
