@@ -274,6 +274,7 @@ Local builds are signed ad hoc, so macOS asks once before opening them (see [The
 
 - **Something not working?** Run `openmymemo doctor`. It checks the memory folder, uv, the panel and each AI app, and says what to fix, without printing your memories. If that doesn't solve it, [open an issue](https://github.com/MyMemoAI/openmymemo/issues/new/choose) and paste its output.
 - **Ideas and questions** are welcome as issues too. Bigger changes start as a proposal.
+- **Feedback:** "Send feedback" at the bottom of the panel (in the Mac and Windows app: Settings → Help, or Help → Send Feedback… in the Mac menu bar), or `openmymemo feedback`. It opens a GitHub issue (public) or an email (private) with your version and system filled in; please don't include your memories.
 - **Contributing:** see [CONTRIBUTING.md](https://github.com/MyMemoAI/openmymemo/blob/main/CONTRIBUTING.md) for how to set up, test and send a pull request.
 - **Where OpenMyMemo is published and listed:** [docs/distribution.md](https://github.com/MyMemoAI/openmymemo/blob/main/docs/distribution.md).
 

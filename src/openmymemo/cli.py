@@ -177,6 +177,23 @@ def brief_cmd(ctx: typer.Context,
         typer.echo(f"\nFrom your memory: {b['resurface']['content']}  (still true?)")
 
 
+@app.command("feedback")
+def feedback_cmd(open_form: Annotated[bool, typer.Option("--open", help="Open the GitHub form in the browser.")]
+                 = False) -> None:
+    """Tell us what works, what doesn't and what you'd like: on GitHub, or by email."""
+    from . import feedback
+
+    f = feedback.links()
+    typer.echo("Tell us what works, what doesn't and what you'd like. Please don't include your memories.")
+    typer.echo(f"  On GitHub (public): {f['issue_url']}")
+    typer.echo(f"  By email (private): {f['email']}")
+    typer.echo(f"The GitHub form has {f['about']} filled in; an email doesn't need it, but it helps.")
+    if open_form:
+        import webbrowser
+
+        webbrowser.open(f["issue_url"])
+
+
 def _read_input(file: Path | None, source: str) -> str:
     if file and str(file) != "-":
         try:
