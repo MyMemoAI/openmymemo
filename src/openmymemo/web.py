@@ -1072,7 +1072,7 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
             text = transfer.export(vault, format, include_private=include_private)
         except ValueError as e:
             raise HTTPException(400, str(e)) from None
-        score.note_export(vault, full=include_private)
+        score.note_export(vault, full=transfer.is_full_export(vault, format, include_private))
         ext = {"json": "json", "markdown": "md"}.get(format, "txt")
         return PlainTextResponse(text, headers={
             "Content-Disposition": f'attachment; filename="openmymemo-{format}.{ext}"'})

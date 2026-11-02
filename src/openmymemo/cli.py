@@ -576,7 +576,7 @@ def export(ctx: typer.Context,
         typer.echo(f"Wrote {output}")
     else:
         typer.echo(text, nl=False)
-    score.note_export(vault, full=include_private)
+    score.note_export(vault, full=transfer.is_full_export(vault, fmt, include_private))
 
 
 def _hook_digest_line(unreviewed: list) -> str | None:

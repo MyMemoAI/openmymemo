@@ -1110,7 +1110,7 @@ Some of what people want every AI app to know isn't a list of one-line facts but
 
 ### 23.3 What AI apps get
 
-- `memory_context` shows each readable document in full under `## <Title> [doc:<slug>]`, before the topics, with the document's own headings moved two levels down so they nest under it. With a character budget and memories to show as well, documents take at most half of it; a document that doesn't fit is cut at a line with a note that `memory_get` returns the rest, and one that doesn't fit at all is named in a line at the end. A one-line note under the header says how to propose a change to a document.
+- `memory_context` shows each readable document in full under `## <Title> [doc:<slug>]`, before the topics, with the document's own headings moved two levels down so they nest under it. With a character budget and memories to show as well, documents take at most half of it; a document that doesn't fit is cut at a line with a note that `memory_get` returns the rest, and one that doesn't fit at all is named in a line at the end. That line comes out of the documents' share too: it names as many as fit in at most 700 characters and counts the rest, so however many documents there are, the context stays within its budget. A one-line note under the header says how to propose a change to a document.
 - `memory_get(["doc:<slug>"])` returns the whole text with its title. `memory_search` lists matching documents under `documents`, with a snippet around the match; `results` stays memories only, so search by meaning and the Assistant's rerank (§17.4) are unchanged.
 - `MEMORY.md` includes the documents of the default scope, in full.
 
@@ -1124,7 +1124,7 @@ Some of what people want every AI app to know isn't a list of one-line facts but
 ### 23.5 Elsewhere
 
 - CLI: `openmymemo doc list | show SLUG | new TITLE [--file F] [--slug S] [--private] | edit SLUG [--file F] | archive SLUG | restore SLUG`; `edit` reads standard input without `--file`, and `show` prints the text exactly, so `openmymemo doc show working-with-me > CLAUDE.md` exports it. `openmymemo import <source> FILE --document` keeps a file whole. `review` shows a document change as a diff.
-- Export: the JSON export gains `documents` and the Markdown export a section per document; the folder export is the folder.
+- Export: the JSON export gains `documents` and the Markdown export a section per document; the folder export is the folder. The Claude and ChatGPT lists leave documents out, so once there are documents only a Markdown or JSON export with private memories counts as a backup for the Memory safety score (§18.2), and a folder with only documents has something to back up.
 - `log.md` names the document and never quotes it: "**Claude Code** edited the document Working with me (doc:working-with-me)".
 - The Memory safety score (§18.2) looks for secrets in documents too.
 - Left out for now: MyMemo Memory sync (MyMemo has no documents), the Assistant's tidy-up, Tell OpenMyMemo and search by meaning (documents are found by their words), and Home's counts.

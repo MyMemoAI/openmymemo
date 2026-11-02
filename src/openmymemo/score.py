@@ -221,7 +221,7 @@ def git_backup(vault: Vault, now: datetime) -> bool:
 
 
 def _backup(vault: Vault, now: datetime) -> list[Issue]:
-    if not vault.memories() and not vault.memories("archived"):
+    if not vault.memories() and not vault.memories("archived") and not vault.documents():
         return []  # nothing to lose yet
     exported = _when(_state(vault).get("last_full_export"))
     if exported and now - exported <= timedelta(days=BACKUP_DAYS):
@@ -287,7 +287,8 @@ def dismiss(vault: Vault, issue_id: str, *, restore: bool = False) -> None:
 
 
 def note_export(vault: Vault, *, full: bool) -> None:
-    """Remember a full export (private memories included) for the Backup area; a partial one is no backup."""
+    """Remember a full export (``transfer.is_full_export``: private memories and documents included) for the Backup
+    area; a partial one is no backup."""
     if not full:
         return
     try:

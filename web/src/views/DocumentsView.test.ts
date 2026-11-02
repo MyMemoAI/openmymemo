@@ -26,6 +26,16 @@ vi.mock("../api", () => ({ api, ApiError }));
 
 enableAutoUnmount(afterEach);
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 function doc(extra: Partial<DocumentInfo> = {}): DocumentInfo {
   return {
     id: "doc:working-with-me", slug: "working-with-me", title: "Working with me", description: null, private: false,
@@ -120,5 +130,47 @@ describe("Documents", () => {
     expect(list.textContent).toContain("changed by Claude Code");
     expect(list.textContent).toContain("written by you");
     expect(list.querySelectorAll('[data-test="doc-diff"]')).toHaveLength(2);
+  });
+  it("shows the document that is open, whatever order the answers come back in", async () => {
+    const a = deferred<DocumentInfo>();
+    const b = deferred<DocumentInfo>();
+    api.document.mockImplementation((s: string) => (s === "a" ? a.promise : b.promise));
+    const w = mount(DocumentsView, { props: { initialSlug: "a" } });
+    await w.setProps({ initialSlug: "b" });
+    expect(w.text()).toContain("Loading…");
+    b.resolve(doc({ id: "doc:b", slug: "b", title: "B", content: "B body" }));
+    await flushPromises();
+    a.resolve(doc({ id: "doc:a", slug: "a", title: "A", content: "A body" }));
+    await flushPromises();
+    expect(w.get('[data-test="doc-body"]').text()).toBe("B body");
+  });
+
+  it("ignores a late answer that the document it left is missing", async () => {
+    const a = deferred<DocumentInfo>();
+    api.document.mockImplementation((s: string) =>
+      s === "a" ? a.promise : Promise.resolve(doc({ id: "doc:b", slug: "b", title: "B", content: "B body" })));
+    const w = mount(DocumentsView, { props: { initialSlug: "a" } });
+    await w.setProps({ initialSlug: "b" });
+    await flushPromises();
+    a.reject(new ApiError("No document a", 404));
+    await flushPromises();
+    expect(w.get('[data-test="doc-body"]').text()).toBe("B body");
+    expect(w.text()).not.toContain("isn't here");
+  });
+
+  it("doesn't show what an action returned once the person has moved to another document", async () => {
+    api.document.mockImplementation(async (s: string) => doc({ id: `doc:${s}`, slug: s, title: s, content: `${s} body` }));
+    const patched = deferred<DocumentInfo>();
+    api.patchDocument.mockImplementation(() => patched.promise);
+    const w = mount(DocumentsView, { props: { initialSlug: "a" } });
+    await flushPromises();
+    await w.get('[data-test="doc-private"]').trigger("click");
+    expect(api.patchDocument).toHaveBeenCalledWith("a", { private: true });
+    await w.setProps({ initialSlug: "b" });
+    await flushPromises();
+    patched.resolve(doc({ id: "doc:a", slug: "a", title: "a", content: "a body", private: true }));
+    await flushPromises();
+    expect(w.get('[data-test="doc-body"]').text()).toBe("b body");
+    expect(w.get('[data-test="doc-private"]').attributes("aria-checked")).toBe("false");
   });
 });

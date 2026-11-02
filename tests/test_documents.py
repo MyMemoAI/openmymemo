@@ -131,6 +131,23 @@ def test_within_a_budget_documents_take_half_and_say_where_they_were_cut(vault):
     assert r["memory_ids"] == ["doc:long", r["memory_ids"][1]] and len(r["memory_ids"]) == 2
 
 
+
+def test_however_many_documents_there_are_the_context_stays_within_its_budget(vault):
+    for i in range(100):
+        vault.add_document(f"Project {i:03d} working instructions", "Synthetic working guidance.\n" * 80)
+    for budget in (8000, 2000):
+        assert compile_context(vault, None, max_chars=budget)["chars"] <= budget
+    text = compile_context(vault, None, max_chars=8000)["text"]
+    (note,) = [line for line in text.splitlines() if line.startswith("_Documents not shown")]
+    assert note.startswith("_Documents not shown to stay within the budget: Project 0")
+    assert note.endswith(" more. `memory_get` returns them, and `memory_search` finds the others by their words._")
+    assert len(note) <= 700
+    small = compile_context(vault, None, max_chars=2000)["text"]
+    assert "_100 documents not shown to stay within the budget: `memory_search` finds them by their words._" in small
+    work = vault.add("work", "Works at Acme as CTO")
+    r = compile_context(vault, None, max_chars=8000)
+    assert r["chars"] <= 8000 and work.id in r["memory_ids"]
+
 def test_private_documents_and_read_lists(vault):
     vault.add_document("Health notes", "Allergic to penicillin.", private=True)
     vault.add_document("Working with me", TEXT)
@@ -312,6 +329,23 @@ def test_export_includes_documents_and_leaves_out_private_ones(vault):
     assert "penicillin" in transfer.export(vault, "markdown", include_private=True)
     assert "Working with me" not in transfer.export(vault, "claude")
 
+
+
+def test_an_export_without_the_documents_is_no_backup(vault):
+    def backup_issue():
+        return "backup" in [i["id"] for i in score.compute(vault)["issues"]]
+
+    vault.add_document("Working with me", TEXT)
+    assert backup_issue()  # a folder with only a document has something to lose
+    vault.add("work", "Works at Acme as CTO")
+    api = TestClient(create_api(vault, 8787), base_url="http://127.0.0.1:8787")
+    r = api.get("/api/export", params={"format": "claude", "include_private": "true"}, headers=H)
+    assert r.status_code == 200 and "Works at Acme" in r.text and "Start with the answer" not in r.text
+    assert backup_issue()
+    out = CliRunner().invoke(app, ["--vault", str(vault.root), "export", "--format", "chatgpt", "--include-private"])
+    assert out.exit_code == 0 and backup_issue()
+    r = api.get("/api/export", params={"format": "json", "include_private": "true"}, headers=H)
+    assert "Start with the answer" in r.text and not backup_issue()
 
 def test_the_safety_score_looks_for_secrets_in_documents(vault):
     vault.add_document("Setup", "Deploy with key sk-ant-api03-" + "a" * 40)

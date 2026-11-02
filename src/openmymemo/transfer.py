@@ -46,6 +46,7 @@ SOURCES = ("chatgpt", "claude", "gemini", "text", "markdown", "json", *DOCUMENT_
 # Read by the Assistant only (assistant/chats.py); they share the preview and commit.
 CHAT_SOURCES = ("chatgpt-export", "claude-export", "claude-code-sessions", "codex-sessions")
 EXPORT_FORMATS = ("markdown", "claude", "chatgpt", "json")
+DOCUMENT_FORMATS = ("markdown", "json")  # the export formats that carry documents; the Claude and ChatGPT lists don't
 SORT_SURE_AT = 0.5  # suggestions at or above this confidence are applied by `sort --yes`
 
 # UI chrome that ends up in a copy-paste of a memory settings page.
@@ -402,6 +403,13 @@ def as_document(source: str, path: str, text: str) -> dict | None:
     return {"title": name, "description": description or f"Imported from {app} on {date.today().isoformat()}",
             "content": body, "chars": len(body),
             "prefer": source in INSTRUCTION_SOURCES and not memory_file}
+
+
+def is_full_export(vault: Vault, fmt: str, include_private: bool) -> bool:
+    """Whether an export holds everything, so the safety score counts it as a backup (product-design.md §18.2):
+    private memories included, and documents too, which the Claude and ChatGPT lists leave out, unless there are
+    none."""
+    return include_private and (fmt in DOCUMENT_FORMATS or not vault.documents())
 
 
 def export(vault: Vault, fmt: str = "markdown", include_private: bool = False) -> str:

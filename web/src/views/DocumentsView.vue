@@ -27,28 +27,39 @@ const draft = ref("");
 const busy = ref(false);
 const movedOn = ref(false); // changed elsewhere while being edited here: saving would say so
 
+/**
+ * Responses can come back out of order: only the latest load is shown, and only for the document still open, so
+ * nothing on the page ever shows or acts on a document the person has left.
+ */
+let loads = 0;
 async function load() {
-  if (!slug.value) {
+  const want = slug.value;
+  const mine = ++loads;
+  if (!want) {
     doc.value = null;
     return;
   }
   try {
-    const fresh = await api.document(slug.value);
+    const fresh = await api.document(want);
+    if (mine !== loads) return; // a later load answers instead
     missing.value = false;
     if (!editing.value || !doc.value) doc.value = fresh;
     else if (fresh.version !== doc.value.version) movedOn.value = true;
   } catch (e) {
+    if (mine !== loads) return;
     if (e instanceof ApiError && e.status === 404) {
       missing.value = true;
       doc.value = null;
     }
   }
 }
-watch([slug, () => store.version], load, { immediate: true });
-watch(slug, () => {
-  editing.value = false;
-  movedOn.value = false;
-});
+
+/** Show what an action returned, if its document is still the one open; whether it is. */
+function show(d: DocumentInfo | null | undefined): boolean {
+  if (!d || d.slug !== slug.value) return false;
+  doc.value = d;
+  return true;
+}
 
 async function loadArchived() {
   try {
@@ -81,8 +92,7 @@ async function save() {
   if (!doc.value) return;
   busy.value = true;
   try {
-    doc.value = await api.saveDocument(doc.value.slug, draft.value, doc.value.version);
-    editing.value = false;
+    if (show(await api.saveDocument(doc.value.slug, draft.value, doc.value.version))) editing.value = false;
     toast(t("doc.saved"));
     await refresh();
   } catch (e) {
@@ -103,7 +113,7 @@ function download() {
 }
 
 const togglePrivate = async () => {
-  if (doc.value) doc.value = (await act(() => api.patchDocument(doc.value!.slug, { private: !doc.value!.private }))) ?? doc.value;
+  if (doc.value) show(await act(() => api.patchDocument(doc.value!.slug, { private: !doc.value!.private })));
 };
 
 // ---- rename ------------------------------------------------------------------------------------------------------
@@ -119,37 +129,34 @@ function startRename() {
 async function rename() {
   if (!doc.value || !newName.value.trim()) return;
   const res = await act(() => api.patchDocument(doc.value!.slug, { title: newName.value.trim(), description: newDescription.value.trim() }));
-  if (res) {
-    doc.value = res;
-    renaming.value = false;
-  }
+  if (show(res)) renaming.value = false;
 }
 
 // ---- versions ----------------------------------------------------------------------------------------------------
 const versions = ref<HistoryRow[] | null>(null);
 async function showVersions() {
-  if (doc.value) versions.value = (await act(() => api.documentHistory(doc.value!.slug))) ?? null;
+  if (!doc.value) return;
+  const of = doc.value.slug;
+  const rows = await act(() => api.documentHistory(of));
+  if (of === slug.value) versions.value = rows ?? null;
 }
 const OPS: Record<string, string> = { create: "doc.op.create", update: "doc.op.update", archive: "doc.op.archive", restore: "doc.op.restore" };
 async function goBack(version: number) {
   if (!doc.value) return;
   const res = await act(() => api.rollbackDocument(doc.value!.slug, version), t("doc.wentBack", { version }));
-  if (res) {
-    doc.value = res;
-    versions.value = null;
-  }
+  if (show(res)) versions.value = null;
 }
 
 // ---- archive / restore / new ---------------------------------------------------------------------------------------
 const archiving = ref(false);
 async function archive() {
   if (!doc.value) return;
-  const title = doc.value.title;
-  const res = await act(() => api.archiveDocument(doc.value!.slug), t("doc.archived", { title }));
+  const { title, slug: of } = doc.value;
+  const res = await act(() => api.archiveDocument(of), t("doc.archived", { title }));
   archiving.value = false;
   if (res) {
     await loadArchived();
-    location.hash = "#/documents";
+    if (of === slug.value) location.hash = "#/documents";
   }
 }
 async function restore(d: DocumentInfo) {
@@ -177,6 +184,20 @@ async function create() {
 }
 
 const number = (n: number) => n.toLocaleString("en");
+
+// ---- the open document -------------------------------------------------------------------------------------------
+// Leaving a document closes it and its dialogs at once (the page shows "Loading" until the next one arrives), then
+// loads the next one; a refresh elsewhere (store.version) reloads it.
+watch(slug, () => {
+  doc.value = null;
+  missing.value = false;
+  editing.value = false;
+  movedOn.value = false;
+  renaming.value = false;
+  versions.value = null;
+  archiving.value = false;
+});
+watch([slug, () => store.version], load, { immediate: true });
 </script>
 
 <template>

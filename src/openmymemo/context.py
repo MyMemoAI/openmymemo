@@ -34,6 +34,7 @@ HEADER = (
 DOC_NOTE = ("Documents are shown whole under `## Title [doc:<slug>]`. To change one, call `memory_propose` with "
             'op "update", its `doc:<slug>` as `memory_id` and the complete new text as `content`.\n')
 DOC_MIN_SHOWN = 300  # a document cut shorter than this is only named
+DOC_NOTE_MAX = 700  # characters, at most, of the note naming the documents left out to stay within a budget
 HEADING_RE = re.compile(r"^(#{1,6})(?=[ \t]|$)")
 
 
@@ -77,6 +78,43 @@ def _document_block(d: Document, room: int | None) -> str | None:
     return head + cut + note.format(n=len(body) - len(cut))
 
 
+
+def _place_documents(docs: list[Document], room: int | None) -> tuple[list[tuple[Document, str]], list[Document]]:
+    """The documents that fit ``room`` characters in turn (None: no limit), each whole or cut at a line, and those
+    left out."""
+    placed: list[tuple[Document, str]] = []
+    left_out: list[Document] = []
+    used = 0
+    for d in docs:
+        block = _document_block(d, None if room is None else room - used - 1)
+        if block is None:
+            left_out.append(d)
+            continue
+        placed.append((d, block))
+        used += len(block) + 1
+    return placed, left_out
+
+
+def _left_out_note(docs: list[Document], room: int) -> str:
+    """The note on documents left out to stay within the budget, in at most ``room`` characters when it can be: as
+    many of their names and ids as fit, then how many more."""
+    def note(names: list[str], more: int) -> str:
+        if not names:
+            return (f"_{more} document{'' if more == 1 else 's'} not shown to stay within the budget: "
+                    "`memory_search` finds them by their words._\n")
+        rest = f" and {more} more" if more else ""
+        others = ", and `memory_search` finds the others by their words" if more else ""
+        return (f"_Documents not shown to stay within the budget: {', '.join(names)}{rest}. "
+                f"`memory_get` returns them{others}._\n")
+
+    names: list[str] = []
+    for d in docs:
+        longer = [*names, f"{d.title} [{d.id}]"]
+        if len(note(longer, len(docs) - len(longer))) > room:
+            break
+        names = longer
+    return note(names, len(docs) - len(names))
+
 def readable(vault: Vault, connector: Connector | None) -> tuple[list[dict], list[Memory]]:
     """Topics and active memories this connector may read (``None`` = default scope: everything non-private)."""
     private_topics = vault.private_topics()
@@ -117,19 +155,23 @@ def compile_context(vault: Vault, connector: Connector | None = None, *, topics:
     used = sum(len(p) + 1 for p in parts)
     shown, omitted = [], 0
     # Documents first (product-design.md §23.3): within a budget, at most half of what's left when there are
-    # memories to show too; one that doesn't fit is cut at a line, or named at the end.
-    unshown_docs: list[Document] = []
+    # memories to show too; one that doesn't fit is cut at a line, or named in a note at the end. That note comes
+    # out of the documents' share too, so however many documents there are, the whole stays within the budget.
+    left_out_note = ""
     if docs:
         has_memories = any(by_topic.get(t["slug"]) for t in shown_topics)
-        limit = None if not max_chars else used + max(0, max_chars - used) // (2 if has_memories else 1)
-        for d in docs:
-            block = _document_block(d, None if limit is None else limit - used - 1)
-            if block is None:
-                unshown_docs.append(d)
-                continue
+        share = None if not max_chars else max(0, max_chars - used) // (2 if has_memories else 1)
+        placed, left_out = _place_documents(docs, share)
+        if left_out and share is not None:
+            note_room = min(DOC_NOTE_MAX, share // 4)
+            placed, left_out = _place_documents(docs, share - note_room)
+            left_out_note = _left_out_note(left_out, note_room) if left_out else ""
+        for d, block in placed:
             parts.append(block)
             used += len(block) + 1
             shown.append(d.id)
+        if left_out_note:
+            used += len(left_out_note) + 1
     for t in _ordered_topics(shown_topics):
         items = by_topic.get(t["slug"], [])
         if not items:
@@ -151,9 +193,8 @@ def compile_context(vault: Vault, connector: Connector | None = None, *, topics:
             text = "\n".join(block) + "\n"
             parts.append(text)
             used += len(text) + 1
-    if unshown_docs:
-        names = ", ".join(f"{d.title} [{d.id}]" for d in unshown_docs)
-        parts.append(f"_Documents not shown to stay within the budget: {names}. `memory_get` returns them._\n")
+    if left_out_note:
+        parts.append(left_out_note)
     if not shown:
         parts.append("_No memories shared yet._\n")
     if omitted:
