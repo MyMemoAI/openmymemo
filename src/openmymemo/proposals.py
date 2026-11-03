@@ -31,6 +31,11 @@ Lifecycle::
        │                            └─(30 days)──▶ expired (never, for a proposal that ``never_expires``)
        └──(already known)──▶ duplicate (nothing is stored)
 
+An app that can show forms (MCP elicitation) may be asked to put a ``protected`` or ``approval`` proposal to the person
+there (``mcp_server.py``, product-design.md §22): ``asked`` records the question and ``answered`` what came back. An
+accept applies the change as the app's (``applied``, in the digest, undoable), never as the person's own, since the
+answer came through the app; a decline rejects it; anything else leaves it waiting.
+
 Applied proposals form the user's digest until they have seen them (``reviewed_at``); keeping, editing
 or undoing one marks it seen. Editing an applied change rewrites the memory as the user's, so it becomes
 protected. A change can be undone for as long as it is still the memory's latest version
@@ -75,6 +80,8 @@ from .vault import (
 
 OPS = ("add", "update", "archive")
 HOLDS = ("approval", "protected", "private", "review")  # what a proposer may ask for (`sensitive` is the check's)
+ASKABLE = ("protected", "approval")  # the holds the person may decide in the app that proposed (§22); never private
+ANSWERS = ("accept", "decline", "cancel")
 UNDOABLE = ("applied", "accepted", "edited_accepted")
 PENDING_TTL = timedelta(days=30)
 DUPLICATE_AT = 0.92
@@ -150,6 +157,8 @@ class Proposal:
     # It waits for the person however long that takes (MyMemo Memory sync's first merge: MyMemo keeps its memory
     # until the folder decides).
     never_expires: bool = False
+    asked_at: str | None = None  # when OpenMyMemo asked the person about it in the app that proposed it (§22)
+    answer: str | None = None  # what they answered there: accept | decline | cancel (None: no answer came)
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -159,6 +168,9 @@ class Proposal:
             del d["private"]  # likewise
         if not d["never_expires"]:
             del d["never_expires"]  # likewise
+        for key in ("asked_at", "answer"):
+            if d[key] is None:
+                del d[key]  # only proposals OpenMyMemo asked about in the app carry them
         return d
 
 
@@ -566,6 +578,10 @@ class Proposals:
         p.check_note = describe(verdict, converted=p.original_op == "add" and p.similarity is None,
                                 routed=routed, held=bool(held), topic_titles={t["slug"]: t["title"] for t in topics})
 
+    def result(self, p: Proposal) -> dict:
+        """What ``propose`` returns about this proposal as it is now."""
+        return self._result(p)
+
     def _result(self, p: Proposal, deduplicated: bool = False, private_topics: set[str] | None = None) -> dict:
         out = {"proposal_id": p.id, "status": p.status, "op": p.op, "topic": p.topic, "hold": p.hold}
         if p.checked_by:
@@ -636,6 +652,68 @@ class Proposals:
             if block_topic and p.topic:
                 self.connectors.block_topic(p.connector_id, p.topic)
             return p
+
+    # ---- asking in the app (product-design.md §22) --------------------------------------------
+
+    def asked(self, pid: str) -> Proposal:
+        """Record that OpenMyMemo is asking the person about this proposal in the app that made it."""
+        with self.vault.lock():
+            p = self.get(pid)
+            p.asked_at = now_iso()
+            self._save(p)
+            return p
+
+    def answered(self, pid: str, connector_id: str, answer: str) -> tuple[Proposal, str]:
+        """What the person answered in the app (`accept`, `decline` or `cancel`) about a proposal of that app's.
+        Returns the proposal and the result for the activity log: the answer, or ``changed`` when an accepted change
+        can't be applied as it was shown (the proposal was decided meanwhile, or its memory, topic or the app's
+        permissions changed), and then it keeps waiting."""
+        if answer not in ANSWERS:
+            raise VaultError(f"answer must be one of {', '.join(ANSWERS)}")
+        v = self.vault
+        with v.lock():
+            p = self.get(pid)
+            if p.connector_id != connector_id:
+                raise NotFound(f"No proposal {pid}")
+            if p.status != "pending":
+                return p, "changed"
+            if answer == "accept" and not self._still_as_asked(p):
+                p.answer = "accept"
+                self._save(p)
+                return p, "changed"
+            p.answer = answer
+            if answer == "accept":
+                try:
+                    self._apply(p, actor=f"connector:{p.connector_id}")  # the app's change, which the person saw there
+                except VaultError:  # e.g. its topic file is gone: it waits for the person
+                    self._save(p)
+                    return p, "changed"
+                p.status, p.hold, p.decided_at = "applied", None, now_iso()
+            elif answer == "decline":
+                p.status, p.decided_at = "rejected", now_iso()
+            self._save(p)
+            if answer == "accept":
+                self._batch_logged(p)
+            return p, answer
+
+    def _still_as_asked(self, p: Proposal) -> bool:
+        """True while the change can still be applied as the question showed it: the app may still write there, the
+        memory still says what it said, and nothing made it private (which only the person decides, here)."""
+        try:
+            connector = self.connectors.get(p.connector_id)
+        except VaultError:
+            return False  # removed meanwhile
+        if connector.write == "none" or p.topic in connector.blocked_topics:
+            return False
+        private = self.vault.private_topics()
+        target = None
+        if p.op in ("update", "archive"):
+            target = self._readable(connector, p.memory_id or "", private)
+            if target is None or target.content != p.before_content or target.topic != p.before_topic:
+                return False
+            if target.topic in connector.blocked_topics:
+                return False
+        return self._hold(connector, p, target, private) in (*ASKABLE, None)
 
     # ---- undo and edit after the fact ----------------------------------------------------------
 

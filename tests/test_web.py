@@ -155,6 +155,35 @@ def live(vault):
     thread.join(timeout=5)
 
 
+@pytest.mark.parametrize("mode", ["legacy", "auto"])
+def test_http_mcp_asks_in_the_app_about_a_change_that_waits(vault, live, mode):
+    """product-design.md §22 over the local HTTP endpoint: elicitation/create on the stream (legacy), or whatever the
+    client and server agree on (auto)."""
+    from mcp_types import ElicitResult
+
+    m = vault.add("work", "Works at Acme as CTO")
+    token = httpx.post(f"{live}/api/connectors", json={"name": "Cursor", "kind": "http"}, headers=H).json()["token"]
+    asked: list[str] = []
+
+    async def answer(context, params):
+        asked.append(params.message)
+        return ElicitResult(action="accept")
+
+    async def steps():
+        http = httpx2.AsyncClient(headers={"Authorization": f"Bearer {token}"})
+        async with Client(streamable_http_client(f"{live}/mcp", http_client=http), mode=mode,
+                          elicitation_callback=answer) as c:
+            return await c.call_tool("memory_propose", {"op": "update", "memory_id": m.id,
+                                                        "content": "Works at Acme as CEO"})
+
+    prop = anyio.run(steps)
+    assert prop.structured_content["status"] == "applied", prop
+    assert prop.structured_content["review_url"] == f"{live}/#/changes"
+    assert len(asked) == 1 and asked[0].startswith("Cursor wants to change a memory you wrote (Work).")
+    assert vault.get(m.id).content == "Works at Acme as CEO"
+    assert [p.answer for p in Proposals(vault).list()] == ["accept"]
+
+
 def test_http_mcp_end_to_end_with_panel_approval(vault, live):
     vault.update_settings(require_approval=True)
     vault.add("work", "在 Acme 做 CTO")

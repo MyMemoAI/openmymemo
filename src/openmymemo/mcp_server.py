@@ -3,7 +3,8 @@
 The same server runs over stdio (``openmymemo mcp --connector claude-desktop``), over local HTTP
 (``openmymemo serve``, bearer token per connector) and, for web apps, relayed by OpenMyMemo Cloud (``cloud.py``,
 connector ``cloud-<slug>``). Every call is attributed to a connector so the user can see who read what. Every write is a proposal: most apply at once and land in the user's
-digest, where they can be undone; the rest wait for the user (see ``proposals.py``).
+digest, where they can be undone; the rest wait for the user (see ``proposals.py``). When one waits and the app can show
+forms, OpenMyMemo asks the user in the app (``ask.py``, product-design.md §22); never through OpenMyMemo Cloud.
 """
 
 from __future__ import annotations
@@ -15,9 +16,9 @@ from typing import Any, Literal
 import anyio
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
-from mcp_types import ToolAnnotations
+from mcp_types import ElicitResult, InputRequiredResult, ToolAnnotations
 
-from . import __version__
+from . import __version__, ask
 from .clients import display_name
 from .connectors import Connector, Connectors
 from .context import compile_context, search_documents
@@ -55,6 +56,13 @@ CLOUD_QUEUED = (' Through OpenMyMemo Cloud, when the person\'s computer is offli
                 "computer is back, where it can still be turned down; memory_proposals then shows it with that "
                 "`queue_id`.")
 CLOUD_QUEUE_ID = "A proposal that waited in OpenMyMemo Cloud's offline queue also has the `queue_id` it was given then."
+
+# What memory_propose's description adds on this computer, where the app may be asked (product-design.md §22). The
+# relayed tools never ask, so OpenMyMemo Cloud's copy (tests/fixtures/cloud/bridge/hello.json) goes without it.
+ASK_NOTE = ('If the change has to wait and this app can show forms (MCP elicitation), OpenMyMemo first asks the user in '
+            'the app, and the call returns once they answer: "applied" (they accepted it), "rejected" (they declined '
+            'it; don\'t propose it again) or "pending" (they left it for later). That question is OpenMyMemo\'s own; '
+            "still don't ask the user to approve anything yourself.")
 
 Kind = Literal["fact", "preference", "ongoing", "instruction", "event"]
 READ_ONLY = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
@@ -114,6 +122,48 @@ def build_server(vault: Vault, *, stdio_connector: str | None = None, panel_url:
             return await anyio.to_thread.run_sync(lambda: fn(*args, **kwargs))
         except VaultError as e:
             raise ToolError(str(e)) from e
+
+    def linked(out: dict[str, Any]) -> dict[str, Any]:
+        if panel_url and relayed is None and out.get("status") in ("applied", "pending"):
+            out["review_url"] = f"{panel_url}/#/changes"
+        return out
+
+    def titles() -> dict[str, str]:
+        return {t["slug"]: t["title"] for t in vault.topics()}
+
+    async def ask_during_call(ctx: Context, c: Connector, pid: str) -> dict[str, Any]:
+        """Ask with an elicitation/create request (protocol up to 2025-11-25) and apply the answer. The proposal is
+        already filed: when the app can't show the question, or no answer comes in time, it just keeps waiting."""
+        p = await run(proposals.asked, pid)
+        action, result = None, "timeout"
+        with anyio.move_on_after(ask.TIMEOUT):  # cancelling the request tells the app to close the question
+            try:
+                reply = await ctx.session.elicit_form(ask.question(p, titles()), ask.FORM,
+                                                      related_request_id=ctx.request_id)
+                action = reply.action
+            except Exception:  # refused, no back-channel, connection gone
+                result = "error"
+        if action is not None:
+            p, result = await run(proposals.answered, pid, c.id, action)
+        vault.log_activity(c.id, "ask", proposal_id=pid, result=result)
+        return ask.outcome(proposals.result(p), result)
+
+    async def answered_in_app(ctx: Context, c: Connector) -> dict[str, Any]:
+        """The second round of an input_required question (protocol 2026-07-28 and later): the app calls again with
+        the person's answer and the request_state naming the proposal (sealed by the SDK)."""
+        try:
+            pid = ask.proposal_from(ctx.request_state or "")
+        except ValueError:
+            raise ToolError("This request_state isn't one of OpenMyMemo's.") from None
+        reply = (ctx.input_responses or {}).get(ask.KEY)
+        if isinstance(reply, ElicitResult):
+            p, result = await run(proposals.answered, pid, c.id, reply.action)
+        else:  # the app came back without an answer: it keeps waiting
+            p, result = await run(proposals.get, pid), "error"
+            if p.connector_id != c.id:
+                raise ToolError(f"No proposal {pid}")
+        vault.log_activity(c.id, "ask", proposal_id=pid, result=result)
+        return linked(ask.outcome(proposals.result(p), result))
 
     @srv.tool(title="Read memory", annotations=READ_ONLY)
     async def memory_context(ctx: Context, topics: list[str] | None = None, max_chars: int = 8000) -> str:
@@ -192,7 +242,7 @@ def build_server(vault: Vault, *, stdio_connector: str | None = None, panel_url:
         reason: str | None = None,
         evidence: str | None = None,
         idempotency_key: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | InputRequiredResult:
         """Add, correct or retire a memory of the user's. Returns at once; it never waits for the user.
 
         - op="add": `content` is one self-contained statement about the user, written in the third person
@@ -211,16 +261,27 @@ def build_server(vault: Vault, *, stdio_connector: str | None = None, panel_url:
         Don't ask the user to approve anything in the chat.
         """
         c = who(ctx)
+        if relayed is None and ctx.request_state is not None:
+            return await answered_in_app(ctx, c)
         out = await run(proposals.propose, c, op, content=content, memory_id=memory_id, topic=topic, kind=kind,
                         reason=reason, evidence=evidence, idempotency_key=idempotency_key, check=True)
-        if panel_url and relayed is None and out.get("status") in ("applied", "pending"):
-            out["review_url"] = f"{panel_url}/#/changes"
-        return out
+        if relayed is None and ask.wanted(c, out):  # it waits: ask the user in the app, if it can show the question
+            via = ask.how(ctx)
+            if via == "input_required":
+                p = await run(proposals.asked, out["proposal_id"])
+                return ask.input_required(p, titles())
+            if via == "request":
+                out = await ask_during_call(ctx, c, out["proposal_id"])
+        return linked(out)
 
+    if relayed is not None:
+        propose_description = memory_propose.__doc__.rstrip() + CLOUD_QUEUED if queue else None
+    else:
+        propose_description = inspect.cleandoc(memory_propose.__doc__) + "\n\n" + ASK_NOTE
     srv.tool(title="Propose a memory change",
              annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True,
                                          openWorldHint=False),
-             description=memory_propose.__doc__.rstrip() + CLOUD_QUEUED if queue else None)(memory_propose)
+             description=propose_description)(memory_propose)
 
     async def memory_proposals(
         ctx: Context,

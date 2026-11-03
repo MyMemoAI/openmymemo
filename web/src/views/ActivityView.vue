@@ -24,6 +24,7 @@ function describe(a: Activity): string {
     case "propose":
       return t("act.propose", { op: a.op ? t(`rev.wants.${a.op}`).replace(/^wants to /, "") : "" })
         + (a.result === "duplicate" ? " " + t("act.duplicate") : a.result ? ` · ${t(`rev.status.${a.result}`)}` : "");
+    case "ask": return t("act.ask") + (a.result ? ` · ${t(`act.ask.${a.result}`)}` : "");
     case "import": return t("act.import", { n, source: prettyName(a.source ?? "") });
     case "link": {
       const who = a.account && a.email_masked ? `${a.account} (${a.email_masked})` : a.account || a.email_masked;
@@ -39,7 +40,8 @@ function describe(a: Activity): string {
 }
 
 const ICON: Record<string, IconName> = {
-  context: "eye", search: "search", get: "file", propose: "pencil", import: "download", link: "plug", call: "star",
+  context: "eye", search: "search", get: "file", propose: "pencil", ask: "info", import: "download", link: "plug",
+  call: "star",
 };
 </script>
 

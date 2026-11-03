@@ -74,6 +74,10 @@ function toggleTopic(slug: string) {
 const setWrite = (write: Connector["write"]) => act(() => api.patchConnector(c.value.id, { write }));
 const readAll = () => act(() => api.patchConnector(c.value.id, { read_topics: "all" }));
 const togglePrivate = () => act(() => api.patchConnector(c.value.id, { include_private: !c.value.include_private }));
+/** Asking in the app (product-design.md §22): only an app on this computer is asked, and only its changes that wait
+ * for the person, which with "Write directly" are just private ones (never asked about). */
+const canAsk = computed(() => (c.value.kind === "stdio" || c.value.kind === "http") && c.value.write === "propose");
+const toggleAsk = () => act(() => api.patchConnector(c.value.id, { ask: !c.value.ask }));
 const unblock = (slug: string) =>
   act(() => api.patchConnector(c.value.id, { blocked_topics: c.value.blocked_topics.filter((x) => x !== slug) }));
 const reads = (slug: string) => c.value.read_topics === "all" || c.value.read_topics.includes(slug);
@@ -170,6 +174,16 @@ function confirmRemove() {
         <p class="text-[13px] text-muted">{{ c.include_private ? t("con.includePrivateOn") : t("con.includePrivateOff") }}</p>
       </div>
       <button role="switch" class="switch" :aria-checked="c.include_private" :aria-label="t('con.includePrivate')" @click="togglePrivate">
+        <span class="switch-knob" />
+      </button>
+    </div>
+
+    <div v-if="canAsk" class="flex items-center justify-between gap-4 px-4.5 py-3.5">
+      <div class="min-w-0 space-y-0.5">
+        <div class="font-semibold">{{ t("con.ask") }}</div>
+        <p class="text-[13px] text-muted">{{ c.ask ? t("con.askOn", { name }) : t("con.askOff") }}</p>
+      </div>
+      <button role="switch" class="switch" :aria-checked="c.ask" :aria-label="t('con.ask')" data-test="ask" @click="toggleAsk">
         <span class="switch-knob" />
       </button>
     </div>

@@ -147,6 +147,7 @@ class ConnectorPatch(BaseModel):
     read_topics: list[str] | str | None = None
     include_private: bool | None = None
     blocked_topics: list[str] | None = None
+    ask: bool | None = None  # ask in the app about changes that wait (product-design.md §22)
 
 
 class DocumentIn(BaseModel):

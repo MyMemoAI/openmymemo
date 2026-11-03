@@ -215,6 +215,7 @@ It downloads an embedding model (and ONNX Runtime, the `openmymemo[semantic]` ex
 - **A change to a memory you wrote, imported or approved yourself waits for you.** So does anything in a private topic (`health` and `finance` by default). AI never silently changes what you wrote.
 - **Undo is one click** for as long as the change is the memory's latest version; after that, the memory's version history.
 - **"Require my approval for AI changes"** makes every change wait. Each connected app can also be set to read-only, or trusted to write directly.
+- **Decide right in the app.** When a change waits and the AI app can show a question (MCP elicitation), OpenMyMemo asks you there: Accept applies it (it shows up in your digest, where you can still undo it), Decline turns it down, Cancel leaves it waiting. Private topics are always decided in OpenMyMemo. Each app has a switch for it on the Connectors page.
 - **A document is changed as a whole.** An app proposes a document's new text, and you see the change as a diff of its lines. It waits for you unless an app wrote the document last; a private document's changes always wait. Apps can't create or archive documents.
 
 ## The memory folder

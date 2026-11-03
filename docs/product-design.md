@@ -182,7 +182,7 @@ Tool names use a `memory_` prefix, following MyMemo's MCP conventions (`structur
 
 - MCP prompt `recall`: a standard instruction — "call memory_context before answering; when you learn something durable about me, call memory_propose with a reason and my words as evidence".
 - The server instructions tell the model what happens to a write: additions apply right away and the user sees them in a digest; changes to memories the user wrote wait for the user; never ask the user to approve anything in the chat.
-- For clients that support MCP elicitation, `memory_propose` could ask for approval right in the chat for the cases that wait; others get `pending` and the user decides in the panel later. (Not in v0.1.)
+- For apps that support MCP elicitation, `memory_propose` asks the person right in the app about a change that waits for them (except in private topics), and applies or rejects it from the answer; others get `pending` and the person decides in the panel later (§22, 2026-11-02).
 - Authentication: stdio is local by nature; identity comes from `--connector <id>` (first use creates a connector with default permissions). Local HTTP uses one `omm_` token per connector; `connectors.yaml` stores only its SHA-256, and the panel can rotate it. Same "store the hash, show the token once" approach as MyMemo's MCP.
 - Protecting the local panel: binding to 127.0.0.1 isn't enough, because any web page in the user's browser can call localhost. Every request must carry a localhost `Host` (defeats DNS rebinding); panel API calls must also carry an `X-OpenMyMemo` header and, if present, a localhost `Origin` (a cross-site page can't add custom headers without a CORS preflight we never grant); `/mcp` requires a connector token.
 
@@ -579,7 +579,7 @@ The OpenMyMemo Cloud row on the Connectors page shows: signed in as (name and ma
 1. Several computers per account: route reads to the most recently active one and queue writes for all, or let the person pick one per web app?
 2. Should a web app's connector default to fewer topics than local apps (e.g. only "How I work" and "Who I am") until the person widens it?
 3. Mobile ChatGPT and Claude apps use the same connectors; anything specific to check there?
-4. MCP elicitation for in-chat approval (§5.4) applies here too once the web apps support it.
+4. MCP elicitation for in-chat approval (§5.4) applies here too once the web apps support it. (§22 asks only over this computer's own connections; the relay would need to carry the question.)
 
 ### 16.10 As built (2026-10-12)
 
@@ -1099,6 +1099,78 @@ People should be able to tell us what works and what doesn't from where they use
 - **Filled in:** the OpenMyMemo version and the operating system with its version and processor ("macOS 15.4 (arm64)"), worked out by the local server, which knows them better than a browser does; in an email, also which app it came from. Nothing else: no memory, no folder path, no app list. The person sees all of it before sending.
 - **The issue form** asks for the feedback itself and, optionally, how they use OpenMyMemo; it reminds people not to paste memories and offers the email for anything private.
 - **Where it lives:** `feedback.py` (the links), `GET /api/feedback`, `FeedbackDialog.vue`, the Mac app's Help menu, `.github/ISSUE_TEMPLATE/feedback.yml`.
+
+## 22. Asking in the app: decide a waiting change in the chat (2026-11-02)
+
+Most AI changes apply at once and show up in the digest (§5.5). The ones that wait (a change to a memory the person wrote, or every change while approval is on) wait on the Changes page, which the person may not open for days; meanwhile the app keeps working from the old memory and may propose the same change again. MCP elicitation lets a server ask the person a question through the app they are using. §5.4 left this for later; this section decides it.
+
+### 22.1 When OpenMyMemo asks
+
+Right after it files a proposal from an app's `memory_propose`, when all of these hold:
+
+- the proposal waits because the person wrote the memory (`hold: protected`) or because approval is on (`approval`);
+- it is a new proposal: a retry with the same `idempotency_key` doesn't ask again;
+- the app declared that it can show forms (the `elicitation` capability, form mode) and the connection can carry the question (22.4);
+- the person hasn't turned it off for that app ("Ask me in the app", on by default).
+
+It never asks:
+
+- about a private topic or a memory marked private (`private`), or a change the Assistant's check found looks sensitive (`sensitive`). Those are decided in OpenMyMemo only, so their text isn't shown in another app's window (MCP also says forms must not be used for sensitive information);
+- through OpenMyMemo Cloud: the relay has no way to carry a question to the web app, and the service keeps the relayed tool descriptions (§16.2);
+- about anything that doesn't come from an app's chat: the Assistant's proposals (such as the tidy-up's `review`), imports, MyMemo Memory sync;
+- about a document (`doc:` ids, MEMORY_FORMAT.md §3.6): its change is read as a diff of a long text, which the panel shows and a dialog can't.
+
+### 22.2 What the person sees
+
+The app shows OpenMyMemo's question in its own dialog with its own buttons (usually Accept, Decline and Cancel). The form has no fields; the button is the answer. The message names the app, what it wants and where, the memory's current text and the new one, and the app's reason (cut at 300 characters; the evidence quote isn't shown, since the person just said it):
+
+```
+Claude Code wants to change a memory you wrote (How to work with me).
+
+Now: Answers start with the conclusion
+New: Answers start with the conclusion, then the reasons
+
+Why: The user asked for the reasons after the conclusion.
+
+Accept saves it now; you can still undo it in OpenMyMemo. Decline turns it down. Cancel leaves it waiting in OpenMyMemo.
+```
+
+An addition reads "wants to remember something (topic)" with its text, an archive "wants to archive a memory you wrote (topic)" with the memory's text.
+
+### 22.3 What each answer does
+
+- **Accept:** the change applies at once, as the app's change. It shows up in the digest marked "Accepted in Claude Code" and can be undone there like any change an app made. This is deliberately less than accepting it in OpenMyMemo: the answer reaches OpenMyMemo through the app, and an app can answer forms without the person (some can be set to, and a faulty one might). So the memory's latest version is recorded as the app's (`history.jsonl` says who wrote each version), it is not protected any more, as after any AI change, and the person still sees it in the digest; editing it there makes it theirs again. Before applying, OpenMyMemo checks that the memory still says what the question showed. If it changed in the meantime, nothing is applied and the proposal keeps waiting.
+- **Decline:** the proposal is rejected, as Reject does on the Changes page (the topic isn't blocked). `memory_proposals` shows the app that it was rejected, so it doesn't propose it again.
+- **Cancel**, closing the dialog, no answer within 10 minutes, or an app that fails to show it: the proposal keeps waiting in OpenMyMemo, as without asking, marked "Asked in Claude Code".
+
+`memory_propose` then returns `applied`, `rejected` or `pending`, with a message the AI can pass on in one line.
+
+### 22.4 How it works
+
+- **MCP up to 2025-11-25:** during the `memory_propose` call, OpenMyMemo sends `elicitation/create` (form mode, an empty object schema) and waits up to 10 minutes; when it stops waiting it cancels the request, so the app can close the dialog. The proposal is filed before the question is sent, so nothing is lost when the app or the connection goes away.
+- **MCP 2026-07-28 and later** (servers may no longer send requests of their own): `memory_propose` returns an `input_required` result with one elicitation (`answer`) and a `request_state` naming the proposal. The app asks the person and calls `memory_propose` again with the same arguments, the answer and that state. The MCP SDK seals the state (encrypted, bound to the tool, its arguments and this server, valid for 10 minutes); OpenMyMemo still checks that the proposal is this app's and waiting before it applies the answer, and a retry without an answer leaves it waiting.
+- An app without the capability, or a connection that can't carry the question: no question, and the proposal waits as before. Over stdio and the local HTTP endpoint both kinds of connection can.
+- The tool description of `memory_propose` on this computer gets one paragraph about this. OpenMyMemo Cloud's copy stays as it is, since the relayed tools never ask. The server instructions don't change: the AI itself still never asks the person to approve anything.
+
+### 22.5 Records
+
+- `connectors.yaml`: `ask: false` on an app the person turned it off for (absent: on).
+- `proposals/<id>.json`: `asked_at` (when OpenMyMemo asked in the app) and `answer` (`accept`, `decline` or `cancel`; absent while no answer has come).
+- `activity.jsonl`: one `ask` entry when a question ends, with `proposal_id` and `result`: `accept`, `decline`, `cancel`, `timeout`, `error` (the app couldn't show it) or `changed` (accepted, but the memory or the proposal changed in the meantime, so nothing was applied).
+
+### 22.6 In the panel and the CLI
+
+- Connectors: a switch "Ask me in the app" for each app on this computer (stdio and HTTP), on by default.
+- Changes: "Accepted in Claude Code" on a digest entry the person accepted there, "Declined in Claude Code" on a rejected one, "Asked in Claude Code; not decided there" on one that waits. Activity lists each question and its answer.
+- `openmymemo review` shows the same notes; `openmymemo connector list` shows `ask=off` for an app it's turned off for.
+
+### 22.7 Decisions
+
+1. Ask only about changes that wait. Changes that apply anyway can be undone in the digest; a question for each of them would interrupt every conversation.
+2. Accept applies as the app's change, not the person's (22.3): what an app answers can't be told apart from what the person answered.
+3. File first, then ask. The SDK's `Resolve(...)` asks before a tool runs, which would ask about changes that end up applying anyway, and lose the proposal if the app never comes back.
+4. Per app and on by default, so the person can turn it off where an app's dialog gets in the way.
+5. Not through OpenMyMemo Cloud for now (22.1); the relay would need to carry the question and the web apps to show it.
 
 ## 23. Documents: prose that AI apps get whole (2026-11-02)
 
