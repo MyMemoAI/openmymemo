@@ -1012,8 +1012,16 @@ def doc_archive(ctx: typer.Context, slug: str) -> None:
 def doc_restore(ctx: typer.Context, slug: str) -> None:
     """Bring back an archived document."""
     vault = _vault(ctx)
+    active = {d.slug: d for d in vault.documents()}
+    if slug in active:
+        typer.echo(f"{active[slug].title} isn't archived.")
+        return
     try:
         vault.restore(f"doc:{slug}")
+    except NotFound:
+        names = ", ".join(d.slug for d in vault.documents("archived")) or "none"
+        typer.secho(f"No archived document {slug}. Archived documents: {names}.", fg="red", err=True)
+        raise typer.Exit(1) from None
     except VaultError as e:
         typer.secho(str(e), fg="red", err=True)
         raise typer.Exit(1) from None

@@ -455,3 +455,21 @@ def test_sync_off_when_it_isnt_on_points_to_mymemo_for_a_kept_copy(tmp_path):
         "MyMemo Memory sync isn't on here, so there is nothing to turn off. A copy kept from an earlier sync stays in "
         "MyMemo until you delete it on MyMemo's memory page (Settings → Memory).\n")
     assert "keeps its copy as ordinary MyMemo Memory" not in r.stdout
+
+
+def test_doc_restore_names_the_archived_documents(tmp_path):
+    root = tmp_path / "v"
+    Vault.create(root)
+    runner = CliRunner()
+    args = ["--vault", str(root), "doc"]
+    page = tmp_path / "w.md"
+    page.write_text("Be brief.\n", encoding="utf-8")
+    assert runner.invoke(app, [*args, "new", "Working with me", "--file", str(page)]).exit_code == 0
+    r = runner.invoke(app, [*args, "restore", "working-with-me"])  # not archived: nothing to restore
+    assert r.exit_code == 0 and r.stdout == "Working with me isn't archived.\n"
+    r = runner.invoke(app, [*args, "restore", "nosuch"])
+    assert r.exit_code == 1 and r.stderr == "No archived document nosuch. Archived documents: none.\n"
+    assert runner.invoke(app, [*args, "archive", "working-with-me"]).exit_code == 0
+    r = runner.invoke(app, [*args, "restore", "workign-with-me"])
+    assert r.exit_code == 1 and r.stderr == "No archived document workign-with-me. Archived documents: working-with-me.\n"
+    assert runner.invoke(app, [*args, "restore", "working-with-me"]).exit_code == 0
