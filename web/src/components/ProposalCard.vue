@@ -2,7 +2,7 @@
 import { computed, ref } from "vue";
 import { api, type Proposal } from "../api";
 import type { IconName } from "../icons";
-import { relTime, t } from "../i18n";
+import { askedNote, relTime, t } from "../i18n";
 import { act, quoted, store, topicTitle } from "../store";
 import AppIcon from "./AppIcon.vue";
 
@@ -18,6 +18,8 @@ const isPending = computed(() => p.value.status === "pending");
 const text = computed(() => p.value.final_content ?? p.value.content);
 /** An update that only sets a review date (a tidy-up's `until` suggestion): the text itself doesn't change. */
 const untilOnly = computed(() => p.value.op === "update" && !!p.value.until && text.value === p.value.before_content);
+/** Asked in the app that proposed it (product-design.md §22): what came of that. */
+const asked = computed(() => askedNote(p.value));
 
 const HOLD: Record<string, { cls: string; icon: IconName | null }> = {
   private: { cls: "chip-private", icon: "lock" },
@@ -88,6 +90,10 @@ const undo = () => run(() => api.undo(p.value.id), t("chg.undone"));
 
     <div v-if="p.until" class="text-[13px] text-muted">
       {{ p.before_until ? t("chg.untilWas", { date: p.until, before: p.before_until }) : t("chg.until", { date: p.until }) }}
+    </div>
+
+    <div v-if="asked" class="flex items-center gap-1.5 text-[13px] text-muted" data-test="ask-note">
+      <AppIcon :name="p.answer === 'accept' && !isPending ? 'check' : 'info'" :size="14" />{{ asked }}
     </div>
 
     <div v-if="p.original_op === 'add' || p.conflict" class="space-y-1 text-[13px]">

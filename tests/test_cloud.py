@@ -149,6 +149,14 @@ def test_changes_to_cloud_json_wait_for_each_other(change, vault, monkeypatch):
     assert real() == new
 
 
+def local_descriptions(vault) -> dict[str, str]:
+    """This computer's tool descriptions, without the paragraph about asking in the app that only they have."""
+    local = {t.name: inspect.cleandoc(t.description) for t in anyio.run(build_server(vault).list_tools)}
+    note = "\n\n" + mcp_server.ASK_NOTE
+    assert local["memory_propose"].endswith(note)
+    return {**local, "memory_propose": local["memory_propose"].removesuffix(note)}
+
+
 def test_hello_carries_the_cloud_variant_of_this_installations_tools(vault):
     hello = fixture("bridge/hello.json")
     link = linked(vault, "http://127.0.0.1:9")
@@ -157,17 +165,19 @@ def test_hello_carries_the_cloud_variant_of_this_installations_tools(vault):
     assert ours["key_id"] == hello["key_id"] == VECTOR["key_id"] and ours["max_inflight"] == hello["max_inflight"]
     assert ours["tools"] == hello["tools"] and ours["instructions"] == hello["instructions"]
     # At launch (live relay only, cloud.FEATURES empty) the descriptors are the local tools' own: the service keeps
-    # them and shows them to ChatGPT and Claude, so nothing in them may promise the offline queue.
-    local = {t.name: inspect.cleandoc(t.description) for t in anyio.run(build_server(vault).list_tools)}
+    # them and shows them to ChatGPT and Claude, so nothing in them may promise the offline queue. Only the local
+    # memory_propose adds that it may ask the person in the app (product-design.md §22); the relayed tools never do.
+    local = local_descriptions(vault)
     assert {t["name"]: t["description"] for t in ours["tools"]} == local
     assert "queue" not in json.dumps(ours["tools"]) and "features" not in ours
+    assert "elicitation" not in json.dumps(ours["tools"])
 
 
 def test_the_queue_is_described_to_web_apps_once_this_computer_takes_it(vault, queue_on):
     link = linked(vault, "http://127.0.0.1:9")
     ours = anyio.run(Bridge(vault, link).hello)
     assert ours["features"] == ["queue"]
-    local = {t.name: inspect.cleandoc(t.description) for t in anyio.run(build_server(vault).list_tools)}
+    local = local_descriptions(vault)
     cloud_tools = {t["name"]: t["description"] for t in ours["tools"]}
     assert {n for n in cloud_tools if cloud_tools[n] != local[n]} == {"memory_propose", "memory_proposals"}
     assert cloud_tools["memory_propose"] == local["memory_propose"] + mcp_server.CLOUD_QUEUED

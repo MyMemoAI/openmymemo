@@ -107,7 +107,7 @@ describe("ConnectApps", () => {
   it("lists an app added by hand under the name Other like any other", async () => {
     const other = {
       id: "other", name: "Other", kind: "stdio" as const, read_topics: "all" as const, include_private: false,
-      write: "propose" as const, blocked_topics: [], token_preview: null, has_token: false, created_at: "",
+      write: "propose" as const, blocked_topics: [], ask: true, token_preview: null, has_token: false, created_at: "",
       last_seen: null, reads: 0, proposals: 0,
     };
     api.apps.mockImplementation(async () => ({ ...catalog(), custom: [other] }));
@@ -162,7 +162,7 @@ describe("ConnectApps", () => {
   it("offers permissions for connected apps only when the page provides them", async () => {
     const connector = {
       id: "cursor", name: "Cursor", kind: "stdio" as const, read_topics: "all" as const, include_private: false,
-      write: "propose" as const, blocked_topics: [], token_preview: null, has_token: false, created_at: "",
+      write: "propose" as const, blocked_topics: [], ask: true, token_preview: null, has_token: false, created_at: "",
       last_seen: "2026-10-12T08:00:00Z", reads: 3, proposals: 0,
     };
     api.apps.mockImplementation(async () => ({

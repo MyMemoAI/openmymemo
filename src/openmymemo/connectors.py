@@ -59,6 +59,9 @@ class Connector:
     token_preview: str | None = None
     created_at: str = ""
     revoked_at: str | None = None
+    # Whether OpenMyMemo may ask the person in the app itself about one of its changes that waits for them (MCP
+    # elicitation, product-design.md §22). Written to connectors.yaml only when off.
+    ask: bool = True
 
     def can_read_topic(self, topic: str, private_topics: set[str]) -> bool:
         if topic in private_topics and not self.include_private:
@@ -78,6 +81,7 @@ class Connector:
             "write": self.write, "blocked_topics": list(self.blocked_topics),
             "token_hash": self.token_hash, "token_preview": self.token_preview, "created_at": self.created_at,
             **({"revoked_at": self.revoked_at} if self.revoked_at else {}),
+            **({} if self.ask else {"ask": False}),
         }
 
     @classmethod
@@ -88,7 +92,7 @@ class Connector:
             read_topics=read.get("topics", "all"), include_private=bool(read.get("include_private", False)),
             write=d.get("write", "propose"), blocked_topics=list(d.get("blocked_topics") or []),
             token_hash=d.get("token_hash"), token_preview=d.get("token_preview"), created_at=d.get("created_at", ""),
-            revoked_at=d.get("revoked_at"),
+            revoked_at=d.get("revoked_at"), ask=d.get("ask") is not False,
         )
 
 
@@ -206,6 +210,8 @@ class Connectors:
                 c.include_private = bool(changes["include_private"])
             if changes.get("blocked_topics") is not None:
                 c.blocked_topics = sorted(set(changes["blocked_topics"]))
+            if changes.get("ask") is not None:
+                c.ask = bool(changes["ask"])
             self._save(items)
             return c
 

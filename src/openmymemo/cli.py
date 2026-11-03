@@ -693,6 +693,19 @@ def add(ctx: typer.Context, topic: str, content: str) -> None:
     typer.echo(f"Added {m.id} to {m.topic}")
 
 
+def _asked_note(p) -> str | None:
+    """What came of asking the person in the app that proposed it (product-design.md §22), as the panel says it."""
+    if not p.asked_at:
+        return None
+    if p.answer == "accept":
+        if p.status == "pending":
+            return f"accepted in {p.connector_name}, but the memory changed before it could be saved"
+        return f"you accepted this in {p.connector_name}"
+    if p.answer == "decline":
+        return f"declined in {p.connector_name}"
+    return f"asked in {p.connector_name}; not decided there" if p.status == "pending" else None
+
+
 WAITS_BECAUSE = {
     "protected": "you wrote this memory yourself",
     "private": "it is in a private topic",
@@ -776,6 +789,8 @@ def _review_digest(props: Proposals, digest: list, titles: dict[str, str]) -> bo
             typer.secho(f"  + {text}", fg="green")
         if p.original_op == "add":
             typer.secho("  (proposed as new; it updated a similar memory)", dim=True)
+        if note := _asked_note(p):
+            typer.secho(f"  ({note})", dim=True)
         if p.reason:
             typer.echo(f"  why: {p.reason}")
         if not props.can_undo(p):
@@ -823,6 +838,8 @@ def _review_pending(props: Proposals, pending: list, titles: dict[str, str]) -> 
             typer.echo(f"  said: “{p.evidence}”")
         if p.hold in WAITS_BECAUSE:
             typer.secho(f"  waiting because {WAITS_BECAUSE[p.hold]}", dim=True)
+        if note := _asked_note(p):
+            typer.secho(f"  ({note})", dim=True)
         choice = typer.prompt("  [a]ccept  [e]dit  [r]eject  [b]lock topic  [s]kip  [q]uit", default="s").lower()[:1]
         try:
             if choice == "a":
@@ -1077,7 +1094,8 @@ def connector_list(ctx: typer.Context) -> None:
         scope = "all topics" if c.read_topics == "all" else ", ".join(c.read_topics)
         priv = " + private" if c.include_private else ""
         typer.echo(f"{c.id:<18} {c.kind:<5} write={c.write:<7} read={scope}{priv}"
-                   + (f" token={c.token_preview}" if c.token_preview else ""))
+                   + (f" token={c.token_preview}" if c.token_preview else "")
+                   + ("" if c.ask or c.kind not in ("stdio", "http") else " ask=off"))
 
 
 @connector_app.command("rotate")

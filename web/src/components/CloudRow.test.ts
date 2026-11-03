@@ -24,7 +24,7 @@ const linked = (extra: Partial<CloudStatus> = {}) => status({
 
 function connector(id: string, name: string): Connector {
   return {
-    id, name, kind: "cloud", read_topics: "all", include_private: false, write: "propose", blocked_topics: [],
+    id, name, kind: "cloud", read_topics: "all", include_private: false, write: "propose", blocked_topics: [], ask: true,
     token_preview: null, has_token: false, created_at: "", last_seen: null, reads: 0, proposals: 0,
   };
 }

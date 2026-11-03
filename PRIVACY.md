@@ -45,6 +45,8 @@ Everything below is stored only on your computer. OpenMyMemo never uploads it, e
 
 When you connect an AI app, it can read memories in the topics you allow and propose changes. By default, additions apply right away and show up for you to review and undo, and changes to memories you wrote yourself wait for you. If you let an app write directly (its write mode "auto"), its changes apply at once, including changes to memories you wrote and while approval is on. Anything in a private topic always waits for you, whatever an app's write mode.
 
+When one of an app's changes waits for you and the app can show a question (MCP elicitation), OpenMyMemo asks you in that app: the question shows the memory's text now and after the change, which the app could already read, and your answer goes back to OpenMyMemo through the app. Changes in private topics are never asked about there. Each app has a switch for this on the Connectors page.
+
 What an app reads, it sends to its own model provider as part of your conversation. That provider's privacy policy then applies, not this one. You decide per app which topics it may read; private topics are excluded by default. You can see exactly what an app receives on the "What AI sees" page or with `openmymemo context --connector <id>`.
 
 ## Network connections
