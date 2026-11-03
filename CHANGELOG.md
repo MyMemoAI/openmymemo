@@ -4,6 +4,7 @@ What changed in each release, for people who use OpenMyMemo. Every release is al
 
 ## Unreleased
 
+- **Send feedback.** "Send feedback" at the bottom of the panel, in Settings → Help in the Mac and Windows app, and in the Mac app's Help menu opens a GitHub issue or an email to us, with your OpenMyMemo version and operating system already filled in. `openmymemo feedback` prints the same. Nothing is sent until you send it yourself, and nothing from your memory folder is added.
 - **Decide a change right in your AI app.** When an app's change has to wait for you (it changes a memory you wrote, or you turned on approval for every change) and the app can show a question (MCP elicitation), OpenMyMemo now asks you there. Accept applies it at once; it still shows up in your digest, marked "Accepted in" that app, where you can undo it. Decline turns it down, and Cancel leaves it waiting in OpenMyMemo. Changes in private topics are never asked about; you decide those in OpenMyMemo. Each app has an "Ask me in the app" switch on the Connectors page, and Activity lists every question and its answer. Apps on the web, through OpenMyMemo Cloud, aren't asked.
 
 ## 0.4.0 — 2026-10-29

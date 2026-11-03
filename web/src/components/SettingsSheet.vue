@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { native, shell, type AppSettings, type Appearance, type NoticeKind } from "../desktop";
+import { native, shell, ui, type AppSettings, type Appearance, type NoticeKind } from "../desktop";
 import { t } from "../i18n";
 import { copy, store, toast } from "../store";
 import AppIcon from "./AppIcon.vue";
@@ -40,6 +40,10 @@ const toggleAutostart = () => run(() => shell.setAutostart(!app.value?.autostart
 function openGuide() {
   location.hash = "#/welcome";
   emit("close");
+}
+function sendFeedback() {
+  emit("close");
+  ui.feedbackOpen = true;
 }
 const toggleNotifications = () => run(() => shell.setNotifications(!app.value?.notifications));
 const toggleNotice = (kind: NoticeKind) => run(() => shell.setNotice(kind, !app.value?.[`notify_${kind}`]));
@@ -177,6 +181,10 @@ const revealLog = () => app.value && run(() => shell.reveal(app.value!.log));
           </button>
           <button v-if="native && app" type="button" class="flex w-full items-center gap-2 px-4.5 py-3 text-left font-semibold" @click="revealLog">
             <span class="flex-1">{{ t("desk.log") }}</span><AppIcon name="file" :size="14" class="text-muted" />
+          </button>
+          <button type="button" class="flex w-full items-center gap-2 px-4.5 py-3 text-left font-semibold" data-test="feedback"
+                  @click="sendFeedback">
+            <span class="flex-1">{{ t("fb.send") }}</span><AppIcon name="arrowRight" :size="14" class="text-muted" />
           </button>
           <a :href="GITHUB" target="_blank" rel="noopener" class="flex items-center gap-2 px-4.5 py-3 font-semibold">
             <span class="flex-1">{{ t("desk.github") }}</span><AppIcon name="arrowRight" :size="14" class="text-muted" />

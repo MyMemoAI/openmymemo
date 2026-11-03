@@ -27,6 +27,7 @@ body:
       multiple: true
       options:
         - Mac app
+        - Windows app
         - Command line (uv tool / uvx)
         - Claude Desktop extension
         - Claude Code plugin
