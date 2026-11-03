@@ -373,8 +373,8 @@ The Mac app (Tauri, Python core as a sidecar) that installs with one click, impo
 5. ~~Chinese tokenisation~~ Decided: v0.1 doesn't use SQLite FTS5 (its trigram tokenizer returns nothing for two-character Chinese queries); search scores Chinese character bigrams and English words in memory.
 6. ~~Should the repo carry a format spec so other tools can read and write the folder directly?~~ Decided: [MEMORY_FORMAT.md](./MEMORY_FORMAT.md).
 7. ~~The rule-based classifier has limits.~~ Decided: nothing is classified at import time; sorting is a previewed step and uses a model when one is configured.
-8. Should `how-to-work-with-me` become a document (prose) by default once documents exist, or stay a list of one-line instructions? A list is easier to review and undo line by line; prose is what `CLAUDE.md` users already write.
-9. How should an AI propose a change to a document: the full new body, or a patch? The full body is simpler for models and for review as a diff; a patch is smaller and conflicts less.
+8. ~~Should `how-to-work-with-me` become a document (prose) by default once documents exist, or stay a list of one-line instructions?~~ Decided (§23.2): it stays a list, reviewed and undone line by line; prose goes in documents, and both reach the AI.
+9. ~~How should an AI propose a change to a document: the full new body, or a patch?~~ Decided (§23.2): the full new text, reviewed as a line diff.
 10. With apply-now as the default, is a per-session cap on AI writes needed to keep the digest readable? Decide from the dogfood numbers.
 
 ## 12. v0.1 status (2026-10-08)
@@ -1171,3 +1171,47 @@ An addition reads "wants to remember something (topic)" with its text, an archiv
 3. File first, then ask. The SDK's `Resolve(...)` asks before a tool runs, which would ask about changes that end up applying anyway, and lose the proposal if the app never comes back.
 4. Per app and on by default, so the person can turn it off where an app's dialog gets in the way.
 5. Not through OpenMyMemo Cloud for now (22.1); the relay would need to carry the question and the web apps to show it.
+
+## 23. Documents: prose that AI apps get whole (2026-11-02)
+
+Some of what people want every AI app to know isn't a list of one-line facts but prose they already keep: a `CLAUDE.md` or `AGENTS.md`, the working agreement for a project, a set of Cursor rules. Imported today, such a file is split into list memories and loses its shape; kept in each app, it drifts apart. MEMORY_FORMAT.md §3.6 reserved `type: document` for this; this section builds it (the v0.3 line in §10).
+
+### 23.1 What a document is
+
+- A file `memories/<slug>.md` with `type: document`: frontmatter like a topic file's (title, description, group, private) and a Markdown body kept as written. It is **one memory**, `doc:<slug>`, versioned like any other: each version in `history.jsonl` holds the whole text. At most 20,000 characters.
+- It is not a topic. Memories are never filed into a document, and documents are listed on their own (the panel's Documents page, `openmymemo doc list`), not among the topics. Its slug works like a topic's where access is decided: a connector's read list can name it or leave it out, and `private: true` hides it from every app that may not read private topics.
+- People make documents: in the panel, with `openmymemo doc new`, by importing an instructions file, or by writing the file in an editor. They edit them in the panel or in any editor, and archive them (the file goes; its text stays in the history and comes back on restore).
+
+### 23.2 How apps change a document (§11 questions 8 and 9)
+
+- **An app sends the whole new text:** `memory_propose(op="update", memory_id="doc:<slug>", content=<the full text>)`. Models produce a whole text reliably and patches less so, and the person reviews a line diff either way. The tool's parameters stay as they are (OpenMyMemo Cloud keeps the same schema); the context tells the AI how (23.3).
+- **The rules are the memory rules (§5.5):** a document the person wrote last is protected, so an app's change to it waits; one an app wrote last changes at once and shows up in the digest; a private document always waits; with approval on, everything waits. As for any change that applied without the person, it can be undone while it is the latest version.
+- **Apps can only update a document,** not create or archive one: an addition has no way to say "document", and removing a whole document is the person's call. An app proposes text, never a new file.
+- A change that leaves the text as it is is a duplicate. The Assistant's check (§17.7) and questions in the app (§22) are for single statements and skip documents; the person decides a document change on the Changes page, where it shows as a diff.
+- **Question 8:** `how-to-work-with-me` stays a list. Lists are reviewed and undone line by line, which is what an AI's small corrections need; a document is for prose the person writes or brings. Both reach the AI.
+
+### 23.3 What AI apps get
+
+- `memory_context` shows each readable document in full under `## <Title> [doc:<slug>]`, before the topics, with the document's own headings moved two levels down so they nest under it. With a character budget and memories to show as well, documents take at most half of it; a document that doesn't fit is cut at a line with a note that `memory_get` returns the rest, and one that doesn't fit at all is named in a line at the end. That line comes out of the documents' share too: it names as many as fit in at most 700 characters and counts the rest, so however many documents there are, the context stays within its budget. A one-line note under the header says how to propose a change to a document.
+- `memory_get(["doc:<slug>"])` returns the whole text with its title. `memory_search` lists matching documents under `documents`, with a snippet around the match; `results` stays memories only, so search by meaning and the Assistant's rerank (§17.4) are unchanged.
+- `MEMORY.md` includes the documents of the default scope, in full.
+
+### 23.4 In the panel
+
+- **Documents** (navigation, both layouts): each document with its size and who changed it last; open one to read it, edit it, make it private, rename it, copy it or download it (`<slug>.md`, to use as a `CLAUDE.md` or `AGENTS.md`), see its versions and go back to one, or archive it. "New document" starts an empty one. Archived documents are listed at the end, with Restore.
+- **Changes:** a document change shows as a line diff (changed lines with two lines of context, long ones folded), with the usual Accept, Edit and accept, Reject, Keep, Edit and Undo.
+- **Import → Files:** an instructions file (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, Cursor, Windsurf, Cline, Kiro and Copilot rules) is offered "as one document" next to splitting it into memories, and that is the default for them; memory files (`memory.md`, Claude Code's auto memory) are split by default. A Cursor rule's own frontmatter is dropped, and its `description` becomes the document's. An imported document is the person's (`import:<source>`), so it is protected.
+- **Connectors:** documents are listed under "Can read" next to the topics.
+
+### 23.5 Elsewhere
+
+- CLI: `openmymemo doc list | show SLUG | new TITLE [--file F] [--slug S] [--private] | edit SLUG [--file F] | archive SLUG | restore SLUG`; `edit` reads standard input without `--file`, and `show` prints the text exactly, so `openmymemo doc show working-with-me > CLAUDE.md` exports it. `openmymemo import <source> FILE --document` keeps a file whole. `review` shows a document change as a diff.
+- Export: the JSON export gains `documents` and the Markdown export a section per document; the folder export is the folder. The Claude and ChatGPT lists leave documents out, so once there are documents only a Markdown or JSON export with private memories counts as a backup for the Memory safety score (§18.2), and a folder with only documents has something to back up.
+- `log.md` names the document and never quotes it: "**Claude Code** edited the document Working with me (doc:working-with-me)".
+- The Memory safety score (§18.2) looks for secrets in documents too.
+- Left out for now: MyMemo Memory sync (MyMemo has no documents), the Assistant's tidy-up, Tell OpenMyMemo and search by meaning (documents are found by their words), and Home's counts.
+
+### 23.6 Open questions
+
+1. Should OpenMyMemo write a document back into an app's own file (keep `~/.claude/CLAUDE.md` in step), or is reading it through MCP enough?
+2. Should an app be able to propose a new document, through a new tool that only this computer's server offers?

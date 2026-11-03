@@ -26,6 +26,38 @@ export interface State {
   counts: { active: number; archived: number; pending: number; unreviewed: number; review_due: number };
   settings: { require_approval: boolean; onboarded: boolean };
   mcp_url: string;
+  /** The documents, without their text (product-design.md §23). */
+  documents?: DocumentInfo[];
+}
+
+/** A document (product-design.md §23): a text AI apps get whole, one memory `doc:<slug>`. `content` comes only when
+ * one document is fetched. */
+export interface DocumentInfo {
+  id: string;
+  slug: string;
+  title: string;
+  description: string | null;
+  private: boolean;
+  chars: number;
+  version: number;
+  status: "active" | "archived";
+  source: string;
+  /** Who wrote the latest version: user, file, import:<source> or connector:<id>. */
+  last_actor: string;
+  created_at: string;
+  updated_at: string;
+  archived_at: string | null;
+  content?: string;
+}
+
+/** An instructions or memory file offered whole, as a document (`transfer.as_document`). */
+export interface DocumentOffer {
+  title: string;
+  description: string;
+  content: string;
+  chars: number;
+  /** Offered first: an instructions file (CLAUDE.md, AGENTS.md, rules), not a memory file. */
+  prefer: boolean;
 }
 
 export interface Memory {
@@ -465,6 +497,8 @@ export interface FilePreview {
   source: string;
   name: string;
   items: ImportItem[];
+  /** The file whole, as a document; null when it can't be one (JSON, or too long). */
+  document?: DocumentOffer | null;
 }
 
 export type AssistantFeature = "import" | "sort" | "recall" | "check" | "session" | "tidy" | "tell";
@@ -669,8 +703,8 @@ export interface SafetyIssue {
   area: "sensitive" | "apps" | "review" | "upkeep" | "backup";
   points: number;
   message: string;
-  /** What the fix opens: a memory or an app (`target`), Changes, Memories, the export, or private topics. */
-  fix: "memory" | "app" | "changes" | "memories" | "export" | "private_topics";
+  /** What the fix opens: a memory, a document or an app (`target`), Changes, Memories, the export, or private topics. */
+  fix: "memory" | "document" | "app" | "changes" | "memories" | "export" | "private_topics";
   target: string | null;
   dismissed: boolean;
 }
@@ -699,7 +733,9 @@ export interface Brief {
   date: string;
   quiet: boolean;
   learned: { app: string; private: number;
-             changes: { op: "add" | "update" | "archive"; memory_id: string | null; content: string | null; topic: string | null }[] }[];
+             changes: { op: "add" | "update" | "archive"; memory_id: string | null; content: string | null; topic: string | null;
+                        /** A document's title (product-design.md §23.5): its change is named, never quoted. */
+                        document?: string }[] }[];
   waiting: { pending: number; review_due: number };
   used: { app: string; reads: number; topics: string[] }[];
   safety: { score: number; change: number } | null;
@@ -762,6 +798,19 @@ export const api = {
   restore: (id: string) => req<Memory>("POST", `/api/memories/${enc(id)}/restore`),
   rollback: (id: string, version: number) => req<Memory>("POST", `/api/memories/${enc(id)}/rollback`, { version }),
   history: (id: string) => req<HistoryRow[]>("GET", `/api/memories/${enc(id)}/history`),
+  documents: (status: "active" | "archived" = "active") => req<DocumentInfo[]>("GET", `/api/documents?status=${status}`),
+  document: (slug: string) => req<DocumentInfo>("GET", `/api/documents/${enc(slug)}`),
+  createDocument: (body: { title: string; content?: string; description?: string | null; private?: boolean; source?: string }) =>
+    req<DocumentInfo>("POST", "/api/documents", body),
+  saveDocument: (slug: string, content: string, expectedVersion?: number) =>
+    req<DocumentInfo>("PUT", `/api/documents/${enc(slug)}`, { content, expected_version: expectedVersion ?? null }),
+  patchDocument: (slug: string, body: { title?: string; description?: string; private?: boolean }) =>
+    req<DocumentInfo>("PATCH", `/api/documents/${enc(slug)}`, body),
+  archiveDocument: (slug: string) => req<{ ok: boolean }>("POST", `/api/documents/${enc(slug)}/archive`),
+  restoreDocument: (slug: string) => req<DocumentInfo>("POST", `/api/documents/${enc(slug)}/restore`),
+  documentHistory: (slug: string) => req<HistoryRow[]>("GET", `/api/documents/${enc(slug)}/history`),
+  rollbackDocument: (slug: string, version: number) =>
+    req<DocumentInfo>("POST", `/api/documents/${enc(slug)}/rollback`, { version }),
   addTopic: (body: { slug: string; title: string; description?: string; group?: string; private?: boolean }) =>
     req<Topic>("POST", "/api/topics", body),
   patchTopic: (slug: string, body: { title?: string; description?: string; private?: boolean }) =>

@@ -66,6 +66,7 @@ openmymemo connect cursor                    # connect one: claude-desktop, clau
 openmymemo disconnect cursor                 # remove its OpenMyMemo entry and revoke its access
 openmymemo import chatgpt                    # paste ChatGPT's "Manage memories" page; it lands in "From ChatGPT"
 openmymemo import auto ~/.claude/CLAUDE.md   # another app's memory file: CLAUDE.md, AGENTS.md, GEMINI.md, rules, memory.md
+openmymemo import auto ~/.claude/CLAUDE.md --document  # or keep it whole, as one document
 openmymemo sort                              # file imported memories into topics, one suggestion at a time
 openmymemo serve                             # open the panel at http://127.0.0.1:8787
 openmymemo status                            # the Memory safety score and the three things that cost the most
@@ -215,6 +216,7 @@ It downloads an embedding model (and ONNX Runtime, the `openmymemo[semantic]` ex
 - **Undo is one click** for as long as the change is the memory's latest version; after that, the memory's version history.
 - **"Require my approval for AI changes"** makes every change wait. Each connected app can also be set to read-only, or trusted to write directly.
 - **Decide right in the app.** When a change waits and the AI app can show a question (MCP elicitation), OpenMyMemo asks you there: Accept applies it (it shows up in your digest, where you can still undo it), Decline turns it down, Cancel leaves it waiting. Private topics are always decided in OpenMyMemo. Each app has a switch for it on the Connectors page.
+- **A document is changed as a whole.** An app proposes a document's new text, and you see the change as a diff of its lines. It waits for you unless an app wrote the document last; a private document's changes always wait. Apps can't create or archive documents.
 
 ## The memory folder
 
@@ -222,14 +224,17 @@ It downloads an embedding model (and ONNX Runtime, the `openmymemo[semantic]` ex
 ~/OpenMyMemo/
 ├── memories/            # one file per topic: frontmatter, then one memory per line
 │   ├── work.md          # - Engineering lead at Acme <!-- until: 2026-12 --> ^m7f3a
-│   └── from-chatgpt.md  # what you imported, in its original order, until you sort it
+│   ├── from-chatgpt.md  # what you imported, in its original order, until you sort it
+│   └── working-with-me.md  # a document (`type: document`): prose kept whole, as written
 ├── MEMORY.md            # generated: what an AI sees with the default scope
 ├── log.md               # generated: what changed, by whom, newest day first
 ├── connectors.yaml      # connected apps and their permissions (tokens stored as hashes)
 └── .openmymemo/         # settings, metadata, history, activity, proposals — all plain text
 ```
 
-Each topic file starts with YAML frontmatter (`type`, `title`, `description`, `group`, `private`). Edit `memories/*.md` in any editor: a new line is a new memory, a deleted line is archived, a line moved to another file changes topic. OpenMyMemo adds the `^id` and records the change in history on its next read. Other tools can read and write the folder by following [docs/MEMORY_FORMAT.md](https://github.com/MyMemoAI/openmymemo/blob/main/docs/MEMORY_FORMAT.md).
+Each topic file starts with YAML frontmatter (`type`, `title`, `description`, `group`, `private`). Edit `memories/*.md` in any editor: a new line is a new memory, a deleted line is archived, a line moved to another file changes topic. OpenMyMemo adds the `^id` and records the change in history on its next read.
+
+A file with `type: document` is a document instead: a page of prose, such as how you like to work or a project's background, of up to 20,000 characters. Its text is one memory, `doc:<file name>`, and AI apps get it whole, before your other memories. Create and edit documents on the panel's Documents page, with `openmymemo doc`, or in any editor; an app's read access and the `private` switch work as for a topic. Other tools can read and write the folder by following [docs/MEMORY_FORMAT.md](https://github.com/MyMemoAI/openmymemo/blob/main/docs/MEMORY_FORMAT.md).
 
 Upgrading from v0.1: open the folder once with v0.2. The files get their frontmatter, nothing else in them changes, and your approval setting is kept as it was.
 

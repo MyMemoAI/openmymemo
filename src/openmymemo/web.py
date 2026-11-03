@@ -150,6 +150,25 @@ class ConnectorPatch(BaseModel):
     ask: bool | None = None  # ask in the app about changes that wait (product-design.md §22)
 
 
+class DocumentIn(BaseModel):
+    title: str
+    content: str = ""
+    description: str | None = None
+    private: bool = False
+    source: str | None = None  # an import's source (`transfer.SOURCES`): the document is the person's, from there
+
+
+class DocumentPatch(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    private: bool | None = None
+
+
+class DocumentText(BaseModel):
+    content: str
+    expected_version: int | None = None  # the version the editor started from: Conflict (409) if it moved on
+
+
 class ImportPreviewIn(BaseModel):
     source: str
     text: str
@@ -350,6 +369,7 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
                 "review_due": sum(1 for m in mems if mem_dict(m)["review_due"]),
             },
             "mcp_url": f"{base_url}/mcp",
+            "documents": [d.to_dict(content=False) for d in vault.documents()],
         }
 
     @api.get("/api/overview")
@@ -467,6 +487,59 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
     @api.patch("/api/topics/{slug}")
     def patch_topic(slug: str, body: TopicPatch) -> dict:
         return vault.update_topic(slug, **body.model_dump(exclude_unset=True))
+
+    # ---- documents (product-design.md §23) ------------------------------------------------------
+
+    @api.get("/api/documents")
+    def list_documents(status: str = "active") -> list[dict]:
+        if status not in ("active", "archived"):
+            raise HTTPException(400, "status is active or archived")
+        return [d.to_dict(content=False) for d in vault.documents(status)]
+
+    @api.post("/api/documents")
+    def create_document(body: DocumentIn) -> dict:
+        source, actor = "user", "user"
+        if body.source:
+            if body.source not in transfer.SOURCES:
+                raise HTTPException(400, f"Unknown import source: {body.source}")
+            source = actor = f"import:{body.source}"  # the person's text, brought from that app: protected
+        return vault.add_document(body.title, body.content, description=body.description, private=body.private,
+                                  source=source, actor=actor).to_dict()
+
+    @api.get("/api/documents/{slug}")
+    def get_document(slug: str) -> dict:
+        return vault.document(slug).to_dict()
+
+    @api.put("/api/documents/{slug}")
+    def save_document(slug: str, body: DocumentText) -> dict:
+        d = vault.document(slug)
+        vault.update(d.id, content=body.content, expected_version=body.expected_version)
+        return vault.document(slug).to_dict()
+
+    @api.patch("/api/documents/{slug}")
+    def patch_document(slug: str, body: DocumentPatch) -> dict:
+        return vault.update_document(slug, **body.model_dump(exclude_unset=True)).to_dict()
+
+    @api.post("/api/documents/{slug}/archive")
+    def archive_document(slug: str) -> dict:
+        vault.archive(vault.document(slug).id)
+        return {"ok": True}
+
+    @api.post("/api/documents/{slug}/restore")
+    def restore_document(slug: str) -> dict:
+        vault.restore(f"doc:{slug}")
+        return vault.document(slug).to_dict()
+
+    @api.get("/api/documents/{slug}/history")
+    def document_history(slug: str) -> list[dict]:
+        mid = f"doc:{slug}"
+        vault.get(mid)
+        return vault.history(mid)
+
+    @api.post("/api/documents/{slug}/rollback")
+    def rollback_document(slug: str, body: RollbackIn) -> dict:
+        vault.rollback(f"doc:{slug}", body.version)
+        return vault.document(slug).to_dict()
 
     # ---- proposals -----------------------------------------------------------------------------
 
@@ -864,7 +937,9 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
             items = assistant_features.import_preview(vault, source, text)
         except ValueError as e:
             raise HTTPException(400, f"{name}: {e}") from None
-        return {"source": source, "name": name, "items": [i.to_dict() for i in items]}
+        # Or the file whole, as a document (product-design.md §23.4): offered first for instructions files.
+        document = transfer.as_document(source, body.path or name, text)
+        return {"source": source, "name": name, "items": [i.to_dict() for i in items], "document": document}
 
     # ---- chat exports and agent sessions, read by the Assistant (product-design.md §17.5) ----------------------
     # Parsed once, kept in this process (never on disk) between the cost estimate and the run; a few at a time.
@@ -1002,7 +1077,7 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
             text = transfer.export(vault, format, include_private=include_private)
         except ValueError as e:
             raise HTTPException(400, str(e)) from None
-        score.note_export(vault, full=include_private)
+        score.note_export(vault, full=transfer.is_full_export(vault, format, include_private))
         ext = {"json": "json", "markdown": "md"}.get(format, "txt")
         return PlainTextResponse(text, headers={
             "Content-Disposition": f'attachment; filename="openmymemo-{format}.{ext}"'})

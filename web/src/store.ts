@@ -91,10 +91,14 @@ export function quoted(text: string): string {
   return text.startsWith("“") ? text : `“${text}”`;
 }
 
+/** A topic's title, or a document's (a document's slug stands in for its topic, product-design.md §23.1). */
 export function topicTitle(slug: string | null | undefined): string {
   if (!slug) return "";
-  return topicsBySlug.value[slug]?.title ?? slug;
+  return topicsBySlug.value[slug]?.title ?? store.state?.documents?.find((d) => d.slug === slug)?.title ?? slug;
 }
+
+/** Whether a memory id is a document's (`doc:<slug>`). */
+export const isDocumentId = (id: string | null | undefined): boolean => !!id && id.startsWith("doc:");
 
 export function connectorName(id: string): string {
   if (id === "user") return t("source.user");

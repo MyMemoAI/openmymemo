@@ -98,9 +98,10 @@ class Finding:
 
 
 def scan(vault: Vault) -> list[Finding]:
-    """Every secret pattern in active memories outside private topics, one finding per memory and kind."""
+    """Every secret pattern in active memories outside private topics, and in documents that aren't private (their
+    slug as the topic), one finding per memory and kind."""
     private = vault.private_topics()
     return [Finding(m.id, m.topic, kind)
-            for m in vault.memories()
+            for m in vault.memories() + [d.memory for d in vault.documents()]
             if not (m.private or m.topic in private)
             for kind in kinds_in(m.content)]

@@ -43,6 +43,10 @@ protected. A change can be undone for as long as it is still the memory's latest
 can also stop the app proposing to that topic (``block_topic``).
 
 A proposal never blocks the AI: ``propose`` returns immediately with the proposal's status.
+A document (MEMORY_FORMAT.md §3.6, ``doc:<slug>``) follows the same rules, as one memory whose content is its whole
+text: an app proposes the complete new text as an ``update`` (never an add or an archive), it is a duplicate only
+when the text is the same, and the Assistant's check skips it (product-design.md §23.2).
+
 Before a proposal is stored it is checked against existing memories: an exact duplicate is not stored,
 and an ``add`` that closely resembles an existing memory becomes an ``update`` of it — so the user
 reviews a diff instead of collecting near-duplicates, and the rules above apply to that memory.
@@ -58,9 +62,21 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 
 from .connectors import Connector, Connectors
+from .mdfile import normalize_document
 from .textutil import KINDS, classify_topic, looks_contradictory, similarity
 from .topics import IMPORTED_GROUP
-from .vault import Conflict, Memory, NotFound, Vault, VaultError, _atomic_write, now_iso, parse_until
+from .vault import (
+    DOC_MAX,
+    Conflict,
+    Memory,
+    NotFound,
+    Vault,
+    VaultError,
+    _atomic_write,
+    is_document_id,
+    now_iso,
+    parse_until,
+)
 
 OPS = ("add", "update", "archive")
 HOLDS = ("approval", "protected", "private", "review")  # what a proposer may ask for (`sensitive` is the check's)
@@ -313,12 +329,22 @@ class Proposals:
             raise VaultError(f"op must be one of {', '.join(OPS)}")
         if kind is not None and kind not in KINDS:
             raise VaultError(f"kind must be one of {', '.join(KINDS)}")
-        content = " ".join(content.split()) if content else None
+        document = op != "add" and is_document_id(memory_id)
+        if document and op == "archive":
+            raise PermissionDenied("Only the user archives a document. To change one, propose an update with its "
+                                   "complete new text.")
+        if document:
+            content = normalize_document(content) if content else None
+            check = False  # the Assistant's check is for single statements
+        else:
+            content = " ".join(content.split()) if content else None
         if op in ("add", "update") and not content:
             raise VaultError(f"content is required for {op}")
-        if content and len(content) > 1000:
+        if document and len(content) > DOC_MAX:
+            raise VaultError(f"A document holds at most {DOC_MAX:,} characters")
+        if not document and content and len(content) > 1000:
             raise VaultError("A memory must be a single statement of at most 1000 characters")
-        if until is not None and (op == "archive" or parse_until(until) is None):
+        if until is not None and (document or op == "archive" or parse_until(until) is None):
             raise VaultError("until must be a date, YYYY-MM or YYYY-MM-DD, on an add or update")
         if hold is not None and hold not in HOLDS:
             raise VaultError(f"hold must be one of {', '.join(HOLDS)}")
@@ -416,6 +442,10 @@ class Proposals:
             if target.status != "active" or not connector.can_read_topic(target.topic, private) or (
                     target.private and not connector.include_private):
                 raise VaultError(f"No memory with id {memory_id}")
+            if is_document_id(target.id):
+                if topic not in (None, "", target.topic):
+                    raise VaultError("A document stays where it is: leave out topic")
+                topic = target.topic
 
         confidence = None
         if topic and topic not in slugs:
@@ -481,6 +511,10 @@ class Proposals:
                         p.before_until = found.until
                     p.topic = found.topic if p.topic not in private else p.topic
                     p.conflict = bool(verdict.contradicts) or looks_contradictory(content, found.content)
+        elif op == "update" and target and is_document_id(target.id):
+            if content == target.content:
+                return {"status": "duplicate", "memory_id": target.id,
+                        "message": "The document already says exactly this; nothing to do."}
         elif op == "update" and target:
             if (similarity(content, target.content) >= 0.999 and topic == target.topic
                     and (until is None or until == target.until)):
@@ -724,7 +758,8 @@ class Proposals:
         untils = None
         history = None
         if any(p.status in UNDOABLE for p in items):
-            mems = self.vault.memories("active") + self.vault.memories("archived")
+            mems = self.vault.memories("active") + self.vault.memories("archived") + [
+                d.memory for d in self.vault.documents() + self.vault.documents("archived")]
             versions = {m.id: m.version for m in mems}
             untils = {m.id: m.until for m in mems}
             if any(p.status in UNDOABLE and p.applied_version is None for p in items):
@@ -761,13 +796,21 @@ class Proposals:
             return p
 
     def edit_applied(self, pid: str, content: str, topic: str | None = None) -> Proposal:
-        """The user rewrites a change that applied without them; the memory becomes theirs (protected)."""
+        """The user rewrites a change that applied without them; the memory becomes theirs (protected). For a
+        document, ``content`` is its whole text."""
         v = self.vault
-        content = " ".join((content or "").split())
-        if not content:
-            raise VaultError("Memory content is empty")
-        if len(content) > 1000:
-            raise VaultError("A memory must be a single statement of at most 1000 characters")
+        if is_document_id(self.get(pid).applied_memory_id):
+            content, topic = normalize_document(content or ""), None
+            if not content:
+                raise VaultError("A document can't be emptied here; archive it instead")
+            if len(content) > DOC_MAX:
+                raise VaultError(f"A document holds at most {DOC_MAX:,} characters")
+        else:
+            content = " ".join((content or "").split())
+            if not content:
+                raise VaultError("Memory content is empty")
+            if len(content) > 1000:
+                raise VaultError("A memory must be a single statement of at most 1000 characters")
         with v.lock():
             p = self.get(pid)
             if p.status not in UNDOABLE:

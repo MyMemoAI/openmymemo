@@ -30,8 +30,13 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from pathlib import Path
 
+import yaml
+
+from . import memfiles
+from .mdfile import normalize_document
 from .textutil import KINDS, classify_kind, classify_topic, similarity
 from .topics import IMPORT_SOURCE_NAMES, IMPORTED_GROUP, import_topic_slug
 from .vault import NotFound, Vault, VaultError, now_iso
@@ -41,6 +46,7 @@ SOURCES = ("chatgpt", "claude", "gemini", "text", "markdown", "json", *DOCUMENT_
 # Read by the Assistant only (assistant/chats.py); they share the preview and commit.
 CHAT_SOURCES = ("chatgpt-export", "claude-export", "claude-code-sessions", "codex-sessions")
 EXPORT_FORMATS = ("markdown", "claude", "chatgpt", "json")
+DOCUMENT_FORMATS = ("markdown", "json")  # the export formats that carry documents; the Claude and ChatGPT lists don't
 SORT_SURE_AT = 0.5  # suggestions at or above this confidence are applied by `sort --yes`
 
 # UI chrome that ends up in a copy-paste of a memory settings page.
@@ -362,15 +368,64 @@ def sort_commit(vault: Vault, moves: list[tuple[str, str]]) -> int:
     return moved
 
 
+# Instructions files are offered as one document by default (product-design.md §23.4); memory files are split.
+INSTRUCTION_SOURCES = tuple(s for s in DOCUMENT_SOURCES if s != "file")
+MEMORY_FILE_NAMES = ("memory.md", "memories.md", "memory.txt", "memories.txt")
+_FRONTMATTER = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|\Z)", re.DOTALL)
+
+
+def as_document(source: str, path: str, text: str) -> dict | None:
+    """An instructions or memory file as a document: its title (the file's name), a description saying where it came
+    from, its text (without the file's own frontmatter, such as a Cursor rule's, whose ``description`` is kept), and
+    whether to offer it as one document first. None for a file that can't be one (JSON, or too long)."""
+    from .vault import DOC_MAX
+
+    if source == "json":
+        return None
+    name = Path(path).name
+    description = None
+    m = _FRONTMATTER.match(text)
+    if m:
+        try:
+            meta = yaml.safe_load(m.group(1))
+        except yaml.YAMLError:
+            meta = None
+        if isinstance(meta, dict):
+            text = text[m.end():]
+            if isinstance(meta.get("description"), str) and meta["description"].strip():
+                description = " ".join(meta["description"].split())
+    body = normalize_document(text)
+    if not body or len(body) > DOC_MAX:
+        return None
+    parts = [p.lower() for p in Path(path).parts[:-1]]
+    memory_file = name.lower() in MEMORY_FILE_NAMES or parts[-1:] in (["memory"], ["memories"])
+    app = memfiles.LABELS.get(source, source)
+    return {"title": name, "description": description or f"Imported from {app} on {date.today().isoformat()}",
+            "content": body, "chars": len(body),
+            "prefer": source in INSTRUCTION_SOURCES and not memory_file}
+
+
+def is_full_export(vault: Vault, fmt: str, include_private: bool) -> bool:
+    """Whether an export holds everything, so the safety score counts it as a backup (product-design.md §18.2):
+    private memories included, and documents too, which the Claude and ChatGPT lists leave out, unless there are
+    none."""
+    return include_private and (fmt in DOCUMENT_FORMATS or not vault.documents())
+
+
 def export(vault: Vault, fmt: str = "markdown", include_private: bool = False) -> str:
     if fmt not in EXPORT_FORMATS:
         raise ValueError(f"format must be one of {', '.join(EXPORT_FORMATS)}")
     topics = {t["slug"]: t for t in vault.topics()}
     mems = [m for m in vault.memories() if include_private or not vault.is_private(m)]
+    docs = [d for d in vault.documents() if include_private or not d.private]  # not in the Claude or ChatGPT lists
     if fmt == "json":
         return json.dumps({"format": "openmymemo/1", "exported_at": now_iso(),
                            "topics": list(topics.values()),
-                           "memories": [m.to_dict(topics.get(m.topic, {}).get("private", False)) for m in mems]},
+                           "memories": [m.to_dict(topics.get(m.topic, {}).get("private", False)) for m in mems],
+                           "documents": [{k: v for k, v in d.to_dict().items()
+                                          if k in ("id", "slug", "title", "description", "private", "content",
+                                                   "source", "created_at", "updated_at", "version")}
+                                         for d in docs]},
                           ensure_ascii=False, indent=2) + "\n"
     if fmt == "claude":
         return "\n".join(f"[{(m.created_at or now_iso())[:10]}] – {m.content}" for m in mems) + "\n"
@@ -385,4 +440,7 @@ def export(vault: Vault, fmt: str = "markdown", include_private: bool = False) -
             title = topics.get(m.topic, {}).get("title", m.topic)
             lines.append(("\n" if lines else "") + f"## {title}\n")
         lines.append(f"- {m.content}")
+    for d in docs:
+        lines.append(("\n" if lines else "") + f"## {d.title}\n")
+        lines.append(d.content)
     return "\n".join(lines) + "\n"

@@ -1,5 +1,8 @@
 """Parse and rewrite a topic file (``memories/<topic>.md``) without disturbing anything we don't own.
 
+A ``type: document`` file (MEMORY_FORMAT.md §3.6) is read with the same class: its frontmatter as for a topic,
+and ``body`` for its text, which is one memory; its list items and headings mean nothing.
+
 The format is specified in docs/MEMORY_FORMAT.md. A topic file is ordinary Markdown. We only interpret:
 
 * the YAML frontmatter (``type``, ``title``, ``description``, ``group``, ``private``; unknown keys are kept);
@@ -230,6 +233,13 @@ class MemoryFile:
         value = (self.frontmatter or {}).get("group")
         return str(value) if value else None
 
+    @property
+    def body(self) -> str:
+        """A document's text: everything after the frontmatter, without leading blank lines and trailing
+        whitespace (MEMORY_FORMAT.md §3.6)."""
+        start = self.fm_end + 1 if self.fm_end is not None else 0
+        return normalize_document("\n".join(self.lines[start:]))
+
     # ---- rendering -----------------------------------------------------------------------------
 
     def render(self) -> str:
@@ -248,6 +258,13 @@ class MemoryFile:
 
     def set_line(self, item: Item, content: str, attrs: dict[str, str | bool] | None = None) -> None:
         self.lines[item.line_no] = render_item(content, item.id, item.attrs if attrs is None else attrs, item.marker)
+        self._reparse()
+
+    def set_body(self, text: str) -> None:
+        """Replace a document's text: one blank line after the frontmatter, then the text, then a newline."""
+        start = self.fm_end + 1 if self.fm_end is not None else 0
+        self.lines[start:] = ["", *text.split("\n")] if text else []
+        self.trailing_newline = True
         self._reparse()
 
     def set_frontmatter(self, mapping: dict) -> None:
@@ -368,6 +385,22 @@ class MemoryFile:
         self.lines.extend(block)
         self.trailing_newline = True
         self._reparse()
+
+
+def normalize_document(text: str) -> str:
+    """A document's text as it is stored: line endings as ``\n``, without leading blank lines and trailing
+    whitespace. Nothing else is touched."""
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    start = 0
+    while start < len(lines) and not lines[start].strip():
+        start += 1
+    return "\n".join(lines[start:]).rstrip()
+
+
+def new_document_file(frontmatter: dict, text: str) -> str:
+    """A new document file (MEMORY_FORMAT.md §3.6): the frontmatter, a blank line and the text."""
+    head = "\n".join(render_frontmatter(frontmatter)) + "\n"
+    return head + (f"\n{text}\n" if text else "")
 
 
 def new_topic_file(title: str, description: str | None, *, group: str | None = None,

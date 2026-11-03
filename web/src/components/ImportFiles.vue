@@ -2,13 +2,14 @@
 import { ref } from "vue";
 import { api, type FilePreview, type MemoryFiles } from "../api";
 import { t, tn } from "../i18n";
-import { toast } from "../store";
+import { act, toast } from "../store";
 import ImportPreview from "./ImportPreview.vue";
 
 /**
  * Import another AI app's memory file (CLAUDE.md, AGENTS.md, GEMINI.md, rules, memory.md, …): find them in a
  * folder (the home folder by default), or choose one, then the same preview as a paste. `imported` also says
- * which source the file read as, since that names the topic it went into.
+ * which source the file read as, since that names the topic it went into. A file can also come in whole, as one
+ * document (product-design.md §23.4), which is the first offer for instructions files.
  */
 const emit = defineEmits<{ imported: [done: { source: string; slug: string; n: number; named: number }] }>();
 
@@ -35,10 +36,31 @@ async function find() {
   if (res) found.value = res;
 }
 
+const whole = ref(false);
+const docTitle = ref("");
+
 function show(res: FilePreview | undefined) {
   if (!res) return;
-  if (res.items.length) preview.value = res;
-  else toast(t("imp.nothing"), "error");
+  if (!res.items.length && !res.document) {
+    toast(t("imp.nothing"), "error");
+    return;
+  }
+  preview.value = res;
+  whole.value = !!res.document && (res.document.prefer || !res.items.length);
+  docTitle.value = res.document?.title ?? "";
+}
+
+async function importWhole() {
+  const offer = preview.value?.document;
+  if (!preview.value || !offer || !docTitle.value.trim()) return;
+  const source = preview.value.source;
+  const d = await act(() => api.createDocument({ title: docTitle.value.trim(), content: offer.content,
+                                                 description: offer.description, source }),
+                      t("imp.doc.done", { title: docTitle.value.trim() }));
+  if (d) {
+    preview.value = null;
+    location.hash = `#/documents/${encodeURIComponent(d.slug)}`;
+  }
 }
 
 async function open(filePath: string) {
@@ -99,6 +121,25 @@ function imported(done: { slug: string; n: number; named: number }) {
   </template>
   <template v-else>
     <p class="text-sm font-semibold">{{ t("imp.files.from", { name: preview.name }) }}</p>
-    <ImportPreview :source="preview.source" :items="preview.items" @imported="imported" @cancel="preview = null" />
+    <div v-if="preview.document && preview.items.length" class="seg" role="radiogroup" :aria-label="t('imp.doc.how')">
+      <button class="seg-item" :class="{ 'is-on': whole }" role="radio" :aria-checked="whole" data-test="imp-whole" @click="whole = true">
+        {{ t("imp.doc.whole") }}
+      </button>
+      <button class="seg-item" :class="{ 'is-on': !whole }" role="radio" :aria-checked="!whole" data-test="imp-split" @click="whole = false">
+        {{ t("imp.doc.split") }}
+      </button>
+    </div>
+    <template v-if="whole && preview.document">
+      <p class="text-[13px] text-muted">{{ t("imp.doc.help") }}</p>
+      <input v-model="docTitle" class="input" :aria-label="t('doc.title')" data-test="imp-doc-title" />
+      <div class="card max-h-80 overflow-auto px-4.5 py-3 text-[14px] leading-relaxed break-words whitespace-pre-wrap">{{ preview.document.content }}</div>
+      <div class="flex justify-end gap-2">
+        <button class="btn" @click="preview = null">{{ t("common.cancel") }}</button>
+        <button class="btn btn-primary" :disabled="busy || !docTitle.trim()" data-test="imp-doc" @click="importWhole">
+          {{ t("imp.doc.import") }}
+        </button>
+      </div>
+    </template>
+    <ImportPreview v-else :source="preview.source" :items="preview.items" @imported="imported" @cancel="preview = null" />
   </template>
 </template>

@@ -103,6 +103,7 @@ function fixHref(issue: SafetyIssue): string {
       const topic = store.memories.find((m) => m.id === issue.target)?.topic;
       return topic ? `#/memories/${encodeURIComponent(topic)}` : "#/memories";
     }
+    case "document": return issue.target ? `#/documents/${encodeURIComponent(issue.target)}` : "#/documents";
     case "app": return issue.target ? `#/connectors/${encodeURIComponent(issue.target)}` : "#/connectors";
     case "changes": return "#/changes";
     case "export": return "#/import";
@@ -194,7 +195,8 @@ function access(a: Overview["apps"][number]): string[] {
           <p class="font-medium">{{ tn("home.saved", a.changes.length + a.private, { app: a.app }) }}</p>
           <ul class="space-y-0.5 text-ink-2">
             <li v-for="(c, i) in a.changes.slice(0, SHOWN)" :key="i" class="truncate">
-              <span class="text-muted">{{ t(`home.op.${c.op}`) }}:</span> {{ c.content }}
+              <template v-if="c.document"><span class="text-muted">{{ t("home.op.document") }}:</span> {{ c.document }}</template>
+              <template v-else><span class="text-muted">{{ t(`home.op.${c.op}`) }}:</span> {{ c.content }}</template>
             </li>
             <li v-if="a.changes.length > SHOWN" class="text-muted">
               <a href="#/changes" class="hover:underline">{{ t("home.andMore", { n: a.changes.length - SHOWN }) }}</a>

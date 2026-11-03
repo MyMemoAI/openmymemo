@@ -47,7 +47,7 @@ When you connect an AI app, it can read memories in the topics you allow and pro
 
 When one of an app's changes waits for you and the app can show a question (MCP elicitation), OpenMyMemo asks you in that app: the question shows the memory's text now and after the change, which the app could already read, and your answer goes back to OpenMyMemo through the app. Changes in private topics are never asked about there. Each app has a switch for this on the Connectors page.
 
-What an app reads, it sends to its own model provider as part of your conversation. That provider's privacy policy then applies, not this one. You decide per app which topics it may read; private topics are excluded by default. You can see exactly what an app receives on the "What AI sees" page or with `openmymemo context --connector <id>`.
+What an app reads, it sends to its own model provider as part of your conversation. That provider's privacy policy then applies, not this one. You decide per app which topics it may read; private topics are excluded by default. Documents work the same way: an app that may read a document gets its whole text, and private documents are excluded by default. Documents aren't sent to the OpenMyMemo Assistant or to MyMemo Memory sync. You can see exactly what an app receives on the "What AI sees" page or with `openmymemo context --connector <id>`.
 
 ## Network connections
 
