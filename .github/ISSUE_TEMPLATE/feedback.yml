@@ -1,0 +1,40 @@
+name: Feedback
+description: "Anything you'd like to tell us: what works, what doesn't, what you'd like."
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for telling us. Please **don't paste your memories** or anything else personal from your memory folder; a public issue is visible to everyone. To say it privately instead, write to leo@mymemo.ai.
+  - type: textarea
+    id: feedback
+    attributes:
+      label: Your feedback
+      description: What you like, what got in the way, what you wish it did. A sentence is enough.
+    validations:
+      required: true
+  - type: dropdown
+    id: how
+    attributes:
+      label: How you use OpenMyMemo
+      multiple: true
+      options:
+        - Mac app
+        - Windows app
+        - Command line (uv tool / uvx)
+        - Claude Desktop extension
+        - Claude Code plugin
+        - Codex plugin
+        - Gemini CLI extension
+        - Connected with "openmymemo connect" or the panel
+        - OpenMyMemo Cloud
+        - Other
+  - type: input
+    id: version
+    attributes:
+      label: OpenMyMemo version
+      description: Filled in when you come from "Send feedback" in OpenMyMemo.
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: e.g. macOS 15.4 (arm64), Windows 11 (AMD64)

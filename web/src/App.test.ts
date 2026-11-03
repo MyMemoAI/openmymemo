@@ -37,6 +37,8 @@ const { api } = vi.hoisted(() => ({
     apps: vi.fn(async () => ({ system: "darwin", apps: [], custom: [] })), // ConnectApps in the guide
     overview: vi.fn(async () => overview), // Home
     brief: vi.fn(async () => { throw new Error("no brief"); }), // Home without its Today card
+    feedback: vi.fn(async () => ({ issue_url: "https://github.com/x", email: "a@b.c", email_url: "mailto:a@b.c",
+                                   about: "OpenMyMemo 0.2.3 · macOS 15.4 (arm64)", version: "0.2.3", system: "macOS" })),
   },
 }));
 vi.mock("./api", () => ({ api }));
@@ -81,6 +83,15 @@ describe("the home page", () => {
     expect(location.hash).toBe("#/home");
     expect(w.find("nav a").attributes("href")).toBe("#/home");
     expect(w.find('nav a[href="#/welcome"]').exists()).toBe(false);
+  });
+
+  it("opens Send feedback from the footer", async () => {
+    await open("#/home", true);
+    expect(document.querySelector('[data-test="fb-github"]')).toBeNull();
+    await wrapper!.find('[data-test="feedback"]').trigger("click");
+    await flushPromises();
+    expect(api.feedback).toHaveBeenCalledWith(false);
+    expect(document.querySelector('[data-test="fb-github"]')?.getAttribute("href")).toBe("https://github.com/x");
   });
 
   it("doesn't take over a page the address names", async () => {

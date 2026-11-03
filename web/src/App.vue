@@ -4,6 +4,7 @@ import AppIcon from "./components/AppIcon.vue";
 import AppToast from "./components/AppToast.vue";
 import DesktopSidebar from "./components/DesktopSidebar.vue";
 import DropMenu from "./components/DropMenu.vue";
+import FeedbackDialog from "./components/FeedbackDialog.vue";
 import NewTopicDialog from "./components/NewTopicDialog.vue";
 import SettingsSheet from "./components/SettingsSheet.vue";
 import { desktop, onCommand, ui, type Command } from "./desktop";
@@ -58,6 +59,7 @@ watch(() => store.state, settleHome);
 function onDesktopCommand(cmd: Command) {
   if (cmd === "toggle-sidebar") ui.sidebarHidden = !ui.sidebarHidden;
   else if (cmd === "settings") ui.settingsOpen = true;
+  else if (cmd === "feedback") ui.feedbackOpen = true;
   else {
     ui.request = cmd;
     if (current.value.route !== "memories") location.hash = "#/memories";
@@ -154,6 +156,7 @@ const moreActive = computed(() => moreItems.value.some((n) => n.id === current.v
       @created="openNewTopic"
     />
     <SettingsSheet v-if="ui.settingsOpen" @close="ui.settingsOpen = false" />
+    <FeedbackDialog v-if="ui.feedbackOpen" @close="ui.feedbackOpen = false" />
     <AppToast />
   </div>
 
@@ -204,6 +207,9 @@ const moreActive = computed(() => moreItems.value.some((n) => n.id === current.v
         <footer class="mx-auto mt-12 max-w-[820px] text-xs text-muted">
           {{ t("app.tagline") }} · <span class="font-mono break-all">{{ store.state?.vault }}</span> · v{{ store.state?.version }}
           · <a href="#/welcome" class="underline-offset-2 hover:underline">{{ t("app.guide") }}</a>
+          · <button type="button" class="underline-offset-2 hover:underline" data-test="feedback" @click="ui.feedbackOpen = true">
+            {{ t("fb.send") }}
+          </button>
         </footer>
       </main>
     </div>
@@ -247,6 +253,7 @@ const moreActive = computed(() => moreItems.value.some((n) => n.id === current.v
       </DropMenu>
     </nav>
 
+    <FeedbackDialog v-if="ui.feedbackOpen" @close="ui.feedbackOpen = false" />
     <AppToast />
   </div>
 </template>
