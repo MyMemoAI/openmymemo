@@ -677,6 +677,17 @@ export interface SafetyScore {
   week_change: number | null;
 }
 
+/** Where to send feedback (product-design.md §21), with the version and system filled in; nothing is sent. */
+export interface FeedbackLinks {
+  issue_url: string;
+  email: string;
+  email_url: string;
+  /** "OpenMyMemo 0.4.0 · macOS 15.4 (arm64) · Mac app": what the form and the email carry besides the text. */
+  about: string;
+  version: string;
+  system: string;
+}
+
 /** One day in memory (product-design.md §18.3); private changes are only counted. */
 export interface Brief {
   date: string;
@@ -732,6 +743,7 @@ export const api = {
   score: () => req<SafetyScore>("GET", "/api/score"),
   dismissIssue: (id: string, restore = false) => req<SafetyScore>("POST", "/api/score/dismiss", { id, restore }),
   brief: (date?: string) => req<Brief>("GET", `/api/brief${date ? `?date=${date}` : ""}`),
+  feedback: (app = false) => req<FeedbackLinks>("GET", `/api/feedback${app ? "?app=true" : ""}`),
   memories: (status: "active" | "archived" = "active") => req<Memory[]>("GET", `/api/memories?status=${status}`),
   addMemory: (body: { topic?: string; content: string; kind?: Kind; section?: string | null; private?: boolean }) =>
     req<Memory>("POST", "/api/memories", body),

@@ -2,6 +2,10 @@
 
 What changed in each release, for people who use OpenMyMemo. Every release is also on [GitHub](https://github.com/MyMemoAI/openmymemo/releases).
 
+## Unreleased
+
+- **Send feedback.** "Send feedback" at the bottom of the panel, in Settings → Help in the Mac and Windows app, and in the Mac app's Help menu opens a GitHub issue or an email to us, with your OpenMyMemo version and operating system already filled in. `openmymemo feedback` prints the same. Nothing is sent until you send it yourself, and nothing from your memory folder is added.
+
 ## 0.4.0 — 2026-10-29
 
 - **MyMemo Memory sync (optional).** With this computer linked to OpenMyMemo Cloud, Connectors → OpenMyMemo Cloud → MyMemo Memory sync keeps a copy of your folder in your MyMemo Memory, so MyMemo's AI (AskMemo, MyMemo's Agent) and the AI apps on the web can use your memory, even while this computer is off. It is a separate consent that names what MyMemo stores, who can read it and how to delete it. Private topics stay here unless you pick them, and moving a memory into a private topic or marking it private deletes it from MyMemo; a memory MyMemo has as private arrives as a change that waits for you and stays private. Your folder wins: what MyMemo's AI or the web apps change there comes back as changes from `cloud-*` apps that you review like any other, and your own edits on MyMemo's memory page come back as your edits, except that a topic change there never makes a private topic public, and a private topic you didn't pick keeps its name and description here. The first sync shows a preview of what MyMemo already has before anything is sent; its memories that wait for you never expire, and MyMemo keeps them until you decide. Turn it off with "Also delete the copy in MyMemo", or choose the same when you unlink. Also `openmymemo cloud sync on | merge | topics | status | off [--delete-copy]` and `openmymemo cloud unlink --delete-copy`. Nothing changes for anyone who doesn't turn it on. PRIVACY.md has a section on it.

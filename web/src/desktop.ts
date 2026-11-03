@@ -54,13 +54,15 @@ export const shell = {
   chooseVault: () => internals?.invoke("choose_vault"),
 };
 
-export type Command = "new-memory" | "find" | "toggle-sidebar" | "settings";
+export type Command = "new-memory" | "find" | "toggle-sidebar" | "settings" | "feedback";
 
 /**
  * `request`: a "new memory" or "find" command for the Memories screen, which may not be open yet; it
  * takes the request when it mounts or when the request changes, and clears it.
  */
-export const ui = reactive({ sidebarHidden: false, settingsOpen: false, request: null as Command | null });
+export const ui = reactive({
+  sidebarHidden: false, settingsOpen: false, feedbackOpen: false, request: null as Command | null,
+});
 
 /**
  * Menu items in the shell dispatch `openmymemo:command` events into the page. The same shortcuts are

@@ -1089,3 +1089,13 @@ One push in flight; pushes of at most about 512 KB; the first merge's upload in 
 2. Should evidence quotes sync, so MyMemo's digest can show them?
 3. Deleting a topic on MyMemo's memory page is refused here (OpenMyMemo has no topic deletion); should it archive the topic's memories instead?
 4. Proposals' "seen" state (`reviewed_at`) stays on each side; should keeping a change in one digest clear it in the other?
+
+## 21. Sending feedback (2026-11-02)
+
+People should be able to tell us what works and what doesn't from where they use OpenMyMemo, without OpenMyMemo collecting anything (§2: no telemetry).
+
+- **Where:** "Send feedback" at the bottom of the panel; in the Mac and Windows app, Settings → Help, and Help → Send Feedback… in the Mac menu bar; `openmymemo feedback` in the terminal.
+- **Two ways, both opened rather than sent:** a GitHub issue from the `feedback.yml` form (public, needs a GitHub account), or an email to the contact in PRIVACY.md (private, in the person's own mail app). The panel shows both side by side, with which is public.
+- **Filled in:** the OpenMyMemo version and the operating system with its version and processor ("macOS 15.4 (arm64)"), worked out by the local server, which knows them better than a browser does; in an email, also which app it came from. Nothing else: no memory, no folder path, no app list. The person sees all of it before sending.
+- **The issue form** asks for the feedback itself and, optionally, how they use OpenMyMemo; it reminds people not to paste memories and offers the email for anything private.
+- **Where it lives:** `feedback.py` (the links), `GET /api/feedback`, `FeedbackDialog.vue`, the Mac app's Help menu, `.github/ISSUE_TEMPLATE/feedback.yml`.

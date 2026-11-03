@@ -30,7 +30,7 @@ from fastapi.staticfiles import StaticFiles
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel, Field
 
-from . import __version__, brief, clients, memfiles, notices, overview, score, transfer
+from . import __version__, brief, clients, feedback, memfiles, notices, overview, score, transfer
 from .assistant import (
     MYMEMO_HIDDEN,
     Assistant,
@@ -362,6 +362,10 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
         except ValueError as e:
             raise HTTPException(400, "date must be YYYY-MM-DD") from e
         return brief.build(vault, day)  # one day in memory (product-design.md §18.3)
+
+    @api.get("/api/feedback")
+    def feedback_links(app: bool = False) -> dict:
+        return feedback.links(app=app)  # where to send feedback (product-design.md §21); nothing is sent from here
 
     # ---- Tell OpenMyMemo (product-design.md §19) ---------------------------------------------------
 

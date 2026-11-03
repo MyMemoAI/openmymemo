@@ -874,13 +874,16 @@ fn app_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         .fullscreen()
         .build()?;
     let window = SubmenuBuilder::new(app, "Window").minimize().maximize().separator().bring_all_to_front().build()?;
-    let help = SubmenuBuilder::new(app, "Help").text("help", "OpenMyMemo on GitHub").build()?;
+    let help = SubmenuBuilder::new(app, "Help")
+        .text("feedback", "Send Feedback…")
+        .text("help", "OpenMyMemo on GitHub")
+        .build()?;
     MenuBuilder::new(app).items(&[&app_sub, &file, &edit, &view, &window, &help]).build()
 }
 
 fn on_menu(app: &AppHandle, id: &str) {
     match id {
-        "settings" | "new-memory" | "find" | "toggle-sidebar" => panel_command(app, id),
+        "settings" | "new-memory" | "find" | "toggle-sidebar" | "feedback" => panel_command(app, id),
         "reload" => {
             if let Some(w) = main_window(app) {
                 let _ = w.eval("location.reload()");
