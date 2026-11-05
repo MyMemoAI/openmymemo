@@ -8,7 +8,7 @@ integrations/icons/icon-*.png and web/public/logo.png. For the Mac app it also w
 desktop/src-tauri/icons/app-icon.png (the rounded icon inside the margin macOS app icons leave;
 `pnpm tauri icon src-tauri/icons/app-icon.png -o src-tauri/icons` in desktop/ turns it into the .icns, the .ico
 and the other sizes), the menu-bar template icon tray.png (the shield alone) and the setup page's
-desktop/splash/icon.png. Pillow and resvg-py are only needed here, so they aren't project dependencies.
+desktop/splash/icon.png, and .claude-plugin/icon.png, the icon of the listing in Claude's plugin directory. Pillow and resvg-py are only needed here, so they aren't project dependencies.
 """
 
 import io
@@ -60,6 +60,7 @@ if __name__ == "__main__":
     targets = {ROOT / "integrations" / "icons" / f"icon-{s}.png": s for s in (16, 32, 48, 128, 512)}
     targets[ROOT / "web" / "public" / "logo.png"] = 256
     targets[DESKTOP / "splash" / "icon.png"] = 256
+    targets[ROOT / ".claude-plugin" / "icon.png"] = 512  # the Claude plugin directory's listing icon
     for path, size in targets.items():
         rounded(size).save(path, optimize=True)
         print(f"wrote {path.relative_to(ROOT)}")
