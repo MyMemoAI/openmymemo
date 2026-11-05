@@ -1,6 +1,6 @@
 # Privacy Policy
 
-Last updated: 2026-10-26
+Last updated: 2026-11-05
 
 OpenMyMemo is open-source software published by MyMemo. It keeps your AI memory in a folder on your own computer. This policy covers the OpenMyMemo command-line tool, its MCP server, its review panel, the Mac and Windows apps and the plugins and extensions in this repository. OpenMyMemo Cloud and MyMemo Memory sync, optional MyMemo services, are covered by the sections of those names below and by MyMemo's own privacy policy.
 
@@ -15,11 +15,11 @@ OpenMyMemo is open-source software published by MyMemo. It keeps your AI memory 
 Everything below is stored only on your computer. OpenMyMemo never uploads it, except the copy MyMemo Memory sync keeps in MyMemo if you turn it on (see below).
 
 - **The memory folder** (`~/OpenMyMemo` by default, or wherever you choose) holds:
-  - your memories in Markdown;
+  - your memories and documents in Markdown;
   - their full history, including earlier versions and private memories;
-  - pending and decided changes proposed by AI apps, with the reason and quote the app gave;
+  - pending and decided changes proposed by AI apps, with the reason and quote the app gave, and, when OpenMyMemo asked you about one in the app, when it asked and your answer;
   - the list of connected apps and their permissions. Connector tokens are stored only as a hash.
-  - an activity log of what each app did: when it read your memory, which memories it read, the text of its searches, its proposals and their outcome, and imports.
+  - an activity log of what each app did: when it read your memory, which memories it read, the text of its searches, its proposals and their outcome, the questions OpenMyMemo asked you in it and your answers, and imports.
   - the Memory safety score's daily history and the checks you dismissed, and which of the apps' notifications were already shown.
 - **Backups of other apps' settings:** before it first edits an AI app's MCP configuration file to connect it, OpenMyMemo keeps a copy next to that file (`<file>.openmymemo-backup`). The copy is readable by you only, whatever the original file allows (a copy made by a version before 2026-10-15 took the original's permissions; OpenMyMemo makes it private the next time it changes that file, and you can delete it yourself), but it contains whatever that file held, which may include other secrets.
 - **Other apps' memory files, when you import them:** the Import page's Files tab lists them, for example `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, Cursor rules or `memory.md`, in the folder you choose (your home folder by default). It reads a file only when you open its preview. What you import is copied into your memory folder; the originals are left as they are. Nothing is uploaded.
@@ -90,7 +90,7 @@ What the MyMemo service stores and how long it keeps it is governed by [MyMemo's
 MyMemo has its own memory for its AI features, MyMemo Memory. MyMemo Memory sync keeps a copy of your folder there, so MyMemo's AI (AskMemo and MyMemo's Agent) and the AI apps you use through OpenMyMemo Cloud can use your memory, even while your computer is off. It is a MyMemo service: it needs this computer linked to OpenMyMemo Cloud and MyMemo Memory turned on for your account, and it does nothing until you turn it on in Connectors → OpenMyMemo Cloud → MyMemo Memory sync (or with `openmymemo cloud sync on`), after a separate consent.
 
 - **What MyMemo stores:** the text of your memories outside private topics, with their topic, section, kind, review date, whether they are pinned and who wrote each version (you, or an app's name); the versions from the day sync started; your topics' names, descriptions, groups and order; and your approval switch.
-- **What it never receives:** memories in private topics (`health` and `finance` by default), unless you pick a topic when you turn sync on or later; memories you marked private; the quotes kept as evidence; your apps and their permissions; the activity log; your search index; and this computer's settings. For a private topic you didn't pick, MyMemo learns only its short name (such as `health`) and that it is private.
+- **What it never receives:** memories in private topics (`health` and `finance` by default), unless you pick a topic when you turn sync on or later; memories you marked private; documents; the quotes kept as evidence; your apps and their permissions; the activity log; your search index; and this computer's settings. For a private topic you didn't pick, MyMemo learns only its short name (such as `health`) and that it is private.
 - **Who can read the copy:** MyMemo's AI features when they answer you, the AI apps on the web you connect through OpenMyMemo Cloud (whether or not your computer is on), and you on MyMemo's memory page, under MyMemo's privacy policy. What MyMemo's AI or those apps change there comes back to this computer as proposals you can review, as for any app; edits you make yourself on MyMemo's memory page come back as your own edits. When the folder and MyMemo disagree, the folder wins.
 - **Moving something private:** if you move a memory into a private topic you didn't pick, mark it private, or make its topic private, OpenMyMemo tells MyMemo to delete that memory and every earlier version of its text.
 - **How long:** until you delete it. To delete it, turn sync off with "Also delete the copy in MyMemo" (or `openmymemo cloud sync off --delete-copy`), choose the same when you unlink this computer, or delete the memories, or all of MyMemo Memory, on MyMemo's memory page. If your computer is offline when you turn sync off, the request is sent the next time it connects. Turning sync off without deleting leaves the copy in MyMemo as ordinary MyMemo Memory, no longer following your folder. Deleting your MyMemo account deletes it.
