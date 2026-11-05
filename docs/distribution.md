@@ -45,7 +45,7 @@ site, from the details above.
 
 | Directory | Status | What to do |
 | --- | --- | --- |
-| [Glama](https://glama.ai/mcp/servers/MyMemoAI/openmymemo) | Listed, with details from 0.2 | Claim it: add a `glama.json` at the repository root naming the maintainers' GitHub accounts (`{"$schema": "https://glama.ai/mcp/schemas/server.json", "maintainers": [...]}`), then "Claim with GitHub" there. Its score needs a Dockerfile that starts the server. [awesome-mcp-servers](https://github.com/punkpeye/awesome-mcp-servers) takes a pull request with a Glama score badge, so this comes first |
+| [Glama](https://glama.ai/mcp/servers/MyMemoAI/openmymemo) | Listed, with details from 0.2 | Claim it: `glama.json` at the repository root names who may claim it (AaaCabbage, leol7000). One of them signs in there, selects "Claim with GitHub" and brings the details up to date. Its score needs a Dockerfile that starts the server. [awesome-mcp-servers](https://github.com/punkpeye/awesome-mcp-servers) takes a pull request with a Glama score badge, so this comes first |
 | mcp.so | Not listed | An issue "Submit MCP Server: OpenMyMemo" in [chatmcp/mcpso](https://github.com/chatmcp/mcpso/issues) with the name, repository, registry name, install command and category (the paid form on the site isn't needed) |
 | GitHub's MCP registry (github.com/mcp), which VS Code's MCP gallery shows | Not listed | It doesn't copy the official registry: ask in the Discussions of [github/github-mcp-server](https://github.com/github/github-mcp-server/discussions); later versions then follow the official registry |
 | Smithery | Not listed | None: it lists only remote servers now |
