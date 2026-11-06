@@ -93,6 +93,15 @@ openmymemo review                            # what AI changed since you last lo
 
 **Then open the panel at [http://127.0.0.1:8787](http://127.0.0.1:8787)** in your browser (the page pictured at the top); bookmark it. It's there whenever Claude Desktop, Claude Code, Codex or Gemini CLI is running. It has Home (the box to tell OpenMyMemo what's new, what's waiting for you and the Memory safety score), your memories, what AI changed (Changes), the exact text each app gets (What AI sees) and the connected apps (Connectors). Without a plugin, `openmymemo serve` starts it and opens the browser.
 
+**What a plugin runs and changes.** Each plugin runs OpenMyMemo from its own folder with `uv run --frozen`, so the libraries are the exact versions in `uv.lock`. They are downloaded once from PyPI, and Python too from python-build-standalone on GitHub if uv needs one. The Claude Code plugin adds:
+
+- an MCP server with the tools listed under [Connecting AI apps by hand](#connecting-ai-apps-by-hand). It reads and writes your memory folder (`~/OpenMyMemo`, created on first use) and serves the panel on `127.0.0.1:8787`, which other devices can't reach;
+- a session-start hook (`integrations/hooks/session-start.sh`) that adds the memory Claude Code may read to each new session (the text `openmymemo context --connector claude-code` prints) and the one-line summary of what AI changed. It adds nothing when OpenMyMemo isn't set up;
+- a session-end hook (`integrations/hooks/session-end.sh`) that prints nothing and does nothing unless you turned on the Assistant's session reading and allowed it for Claude Code. Then a background process sends parts of the session to the model you chose ([OpenMyMemo Assistant](#openmymemo-assistant-optional));
+- the `memory` and `remember` skills, and `codex-setup`, which only does something in Codex: it adds OpenMyMemo's session hook to `~/.codex/hooks.json` when you ask it to.
+
+A plugin never changes an app's settings or permissions by itself. Another AI app's MCP settings change only when you select Connect for it in the panel or run `openmymemo connect`, and OpenMyMemo keeps a backup of the file first. Nothing else goes online unless you turn on one of the optional features in [Privacy Policy](#privacy-policy).
+
 ##### Codex
 
 You need [uv](https://docs.astral.sh/uv/). Steps 2 and 3 are needed only once: Codex doesn't run hooks that plugins ship, so OpenMyMemo adds its own session-start hook.
