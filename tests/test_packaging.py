@@ -28,6 +28,7 @@ def test_versions_match_everywhere():
     assert load("desktop/src-tauri/tauri.conf.json")["version"] == version
     assert tomllib.loads((ROOT / "desktop/src-tauri/Cargo.toml").read_text())["package"]["version"] == version
     assert __version__ == version
+    assert f"> v{version}. " in (ROOT / "README.md").read_text()  # the line under the title (and on PyPI)
 
 
 def test_mac_app_grants_exactly_the_commands_the_panel_calls():

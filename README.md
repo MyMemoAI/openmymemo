@@ -4,7 +4,7 @@ Your AI memory as a plain folder on your own computer. See exactly what models r
 
 <!-- mcp-name: io.github.MyMemoAI/openmymemo -->
 
-> v0.3.1. What changed in each release: [CHANGELOG.md](https://github.com/MyMemoAI/openmymemo/blob/main/CHANGELOG.md). Product design and status: [docs/product-design.md](https://github.com/MyMemoAI/openmymemo/blob/main/docs/product-design.md). The folder format, for any tool that wants to read or write it: [docs/MEMORY_FORMAT.md](https://github.com/MyMemoAI/openmymemo/blob/main/docs/MEMORY_FORMAT.md).
+> v0.5.0. What changed in each release: [CHANGELOG.md](https://github.com/MyMemoAI/openmymemo/blob/main/CHANGELOG.md). Product design and status: [docs/product-design.md](https://github.com/MyMemoAI/openmymemo/blob/main/docs/product-design.md). The folder format, for any tool that wants to read or write it: [docs/MEMORY_FORMAT.md](https://github.com/MyMemoAI/openmymemo/blob/main/docs/MEMORY_FORMAT.md).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/MyMemoAI/openmymemo/main/docs/images/panel-memories-dark.png">
@@ -129,7 +129,7 @@ Tools AI apps see: `memory_context`, `memory_search`, `memory_get`, `memory_prop
 | Codex (the CLI, and Codex in the ChatGPT desktop app) | ✅ Plugin |
 | Gemini CLI | ✅ Extension |
 | Cursor, VS Code, Zed, Cline, Kiro, LM Studio, opencode, GitHub Copilot CLI and other MCP apps | ✅ One click in the app, `openmymemo connect`, or a config to paste (`openmymemo apps` lists them all) |
-| ChatGPT and claude.ai on the web | ✅ Through OpenMyMemo Cloud (optional; MyMemo Pro, Ultra or Lifetime): MyMemo relays their calls to OpenMyMemo on your computer, which has to be running. Your memory stays on your computer. |
+| ChatGPT and claude.ai on the web | ✅ Through OpenMyMemo Cloud (optional; MyMemo Pro, Ultra or Lifetime): MyMemo relays their calls to OpenMyMemo on your computer, which has to be running. Your memory stays on your computer. If your MyMemo account has MyMemo Memory on, they use that instead, even while your computer is off. |
 | ChatGPT chat in its desktop and mobile apps, Claude's mobile apps | Not tested with OpenMyMemo Cloud yet. You can always bring your ChatGPT memories over with `openmymemo import chatgpt`. |
 
 ## Principles
@@ -246,7 +246,7 @@ Found a vulnerability? Please report it privately as described in [SECURITY.md](
 
 ## Privacy Policy
 
-Your memory stays on your computer: MyMemo doesn't receive it, and OpenMyMemo has no account, telemetry or analytics. AI apps you connect read the topics you allow (never `health` or `finance` unless you say so) and send what they read to their own model provider under their own policies. OpenMyMemo goes online only to download Python and its libraries when it is installed or first started, for the Mac and Windows apps' daily look for a new version (which sends nothing about you and can be turned off), and for OpenMyMemo Cloud, which does nothing until you sign in and link this computer; then the memories web apps read pass through the MyMemo service in transit. The optional OpenMyMemo Assistant sends memory text to the model you choose, and only when you turn it on: a model on your own computer keeps it there. Search by meaning on this computer downloads its model from Hugging Face when you turn it on, and sends nothing. The full policy, including what is stored where: [PRIVACY.md](https://github.com/MyMemoAI/openmymemo/blob/main/PRIVACY.md).
+Your memory stays on your computer: MyMemo doesn't receive it unless you turn on MyMemo Memory sync, and OpenMyMemo has no account, telemetry or analytics. AI apps you connect read the topics you allow (never `health` or `finance` unless you say so) and send what they read to their own model provider under their own policies. OpenMyMemo goes online only to download Python and its libraries when it is installed or first started, for the Mac and Windows apps' daily look for a new version (which sends nothing about you and can be turned off), and for OpenMyMemo Cloud, which does nothing until you sign in and link this computer; then the memories web apps read pass through the MyMemo service in transit. MyMemo Memory sync, a separate consent on a linked computer, keeps a copy of your memories in MyMemo (private topics only if you pick them) until you delete it. The optional OpenMyMemo Assistant sends memory text to the model you choose, and only when you turn it on: a model on your own computer keeps it there, and MyMemo's hosted model passes it through MyMemo to Anthropic's Claude models, with MyMemo keeping none of the text. Search by meaning on this computer downloads its model from Hugging Face when you turn it on, and sends nothing. The full policy, including what is stored where: [PRIVACY.md](https://github.com/MyMemoAI/openmymemo/blob/main/PRIVACY.md).
 
 ## Development
 
@@ -286,7 +286,11 @@ Local builds are signed ad hoc, so macOS asks once before opening them (see [The
 
 ## Relationship to MyMemo
 
-An independent project with no dependency on MyMemo accounts or services: everything works without them. The one optional piece that talks to MyMemo is OpenMyMemo Cloud, the relay for ChatGPT and claude.ai on the web, which does nothing until you sign in. MyMemo may later read this memory as an ordinary connector, on equal footing with Claude.
+Published by MyMemo, but independent of it: no MyMemo account or service is needed, and everything works without them. Three optional pieces talk to MyMemo, and each does nothing until you turn it on:
+
+- **OpenMyMemo Cloud**, the relay for ChatGPT and claude.ai on the web, once you sign in and link this computer.
+- **MyMemo Memory sync**, which keeps a copy of your folder in MyMemo so that MyMemo's AI and the web apps can use it even while this computer is off, after a consent of its own. MyMemo then works like any connected app: what its AI changes comes back as changes you review, and when the two disagree, your folder wins.
+- **MyMemo's hosted model** for the [OpenMyMemo Assistant](#openmymemo-assistant-optional), once you choose it and sign in.
 
 ## License
 
