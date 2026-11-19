@@ -21,7 +21,7 @@ from cloud_fake import FakeService, fixture, wait_until
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
-from openmymemo import __version__, clients, cloud, mcp_server
+from openmymemo import __version__, clients, cloud, mcp_server, proposals
 from openmymemo.cli import app as cli
 from openmymemo.cloud import Bridge, Cloud, Link, Timing
 from openmymemo.connectors import Connectors
@@ -1171,7 +1171,10 @@ def test_the_queued_receipt_is_kept_whichever_copy_arrives_first(live_first, vau
     assert p.queue_id == "q-race" and p.idempotency_key == "retry-key"
 
 
-def test_a_long_idempotency_key_keeps_its_identity(vault, fake, clouds, queue_clock, queue_on):
+def test_a_long_idempotency_key_keeps_its_identity(vault, fake, clouds, queue_clock, queue_on, monkeypatch):
+    # The proposal keeps the fixture's queued time, and expiry is measured on the real clock, so without this it
+    # turns `expired` 30 days after the fixtures' date.
+    monkeypatch.setattr(proposals, "PENDING_TTL", timedelta(days=36500))
     vault.update_settings(require_approval=True)
     _, conn = online(vault, fake, clouds)
     args = {"op": "add", "content": "Keeps bees on the roof.", "topic": "goals", "idempotency_key": "a" * 201}
