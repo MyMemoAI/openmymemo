@@ -613,7 +613,8 @@ def test_a_whole_round_trip_over_the_bridge(vault, fake, clouds):
     assert push["merge"] == "done" and push["outcomes"] == fx("sync_push_merge.json")["outcomes"]
     assert push["cursor"] == 2 and sorted(push["known"]) == ["c-7f3a9k", "k2p9d", "m7f3a", "q8r7s"]
     wait_until(lambda: c.sync_status()["state"] == "syncing")
-    assert vault.activity("mymemo-cloud")[0]["action"] == "sync"
+    # The ack saves the state first and logs the activity after it, so the entry can lag the state by a moment.
+    assert wait_until(lambda: vault.activity("mymemo-cloud"))[0]["action"] == "sync"
     # A change here goes up by itself; one from MyMemo comes down and is filed.
     vault.update("k2p9d", content="Head of engineering at Acme")
     up = wait_until(lambda: next((p for p in fake.sync.pushes if any(
