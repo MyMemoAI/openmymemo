@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import stat
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -16,7 +17,7 @@ from cloud_fake import FakeService, FakeSync, fixture, wait_until
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
-from openmymemo import cloud, sync
+from openmymemo import cloud, proposals, sync
 from openmymemo.cli import app as cli
 from openmymemo.cloud import Bridge, Cloud, Link, Timing
 from openmymemo.connectors import Connectors
@@ -255,7 +256,10 @@ def test_the_first_merge_files_mymemos_memories_keeping_their_ids(vault):
     assert sync.file_ops(vault, st, fx("sync_ops_merge.json")["ops"])[0] == []
 
 
-def test_mymemos_ops_are_filed_as_the_fixtures_say(vault):
+def test_mymemos_ops_are_filed_as_the_fixtures_say(vault, monkeypatch):
+    # The fixtures' proposals keep MyMemo's created_at (2026-10-26), and expiry is measured on the real clock, so
+    # without this they would turn `expired` 30 days after the fixtures' date.
+    monkeypatch.setattr(proposals, "PENDING_TTL", timedelta(days=36500))
     st = _merged_state(vault)
     # Two proposals MyMemo sent earlier: they wait here (k2p9d was written by the person).
     for pid in ("p19a2b3c4d5e6f71", "p19a2b3c4d5e6f72"):

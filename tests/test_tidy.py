@@ -63,7 +63,7 @@ def full_answer(ids):
                     "reason": "Both say the same."}],
         "contradictions": [{"ids": [ids["city2"], ids["city1"]], "reason": "Moved since."}],
         "outdated": [{"id": ids["job"], "reason": "Said 2026-04; still true?"}],
-        "until": [{"id": ids["trip"], "until": "2026-12", "reason": "A trip in November."}],
+        "until": [{"id": ids["trip"], "until": "2099-12", "reason": "A trip in November."}],
         "rewrites": [{"id": ids["long"], "content": "Wants short summaries in English for reports.",
                       "reason": "Long and depends on its context."}],
     }
@@ -106,7 +106,7 @@ def test_each_kind_is_filed_in_one_batch(vault, fake):
     assert o.op == "archive" and o.status == "pending" and o.hold == "review" and o.reason == "Said 2026-04; still true?"
     assert vault.get(ids["job"]).status == "active"
     # A review date and a rewrite.
-    assert vault.get(ids["trip"]).until == "2026-12" and pm[ids["trip"]][0].before_until is None
+    assert vault.get(ids["trip"]).until == "2099-12" and pm[ids["trip"]][0].before_until is None
     assert vault.get(ids["long"]).content == "Wants short summaries in English for reports."
     assert r.applied == 6 and r.waiting == 1 and "Tidy-up, " in r.message and "7 changes" in r.message
     # Private memories were never looked at.
@@ -456,7 +456,7 @@ def test_a_memory_edited_or_archived_during_the_call_is_left_alone(vault, fake):
 def test_a_review_date_set_since_is_not_undone(vault, fake):
     trip = vault.add("lifestyle", "Travelling in Japan in November 2026", actor=AI)
     tidy_on(vault)
-    fake.answer = lambda body: json.dumps({**EMPTY, "until": [{"id": trip.id, "until": "2026-12", "reason": "Trip."}]})
+    fake.answer = lambda body: json.dumps({**EMPTY, "until": [{"id": trip.id, "until": "2099-12", "reason": "Trip."}]})
     batch = tidy.run(vault).batch_id
     props = Proposals(vault)
     p = props.batch(batch)[0]
