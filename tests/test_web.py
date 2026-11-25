@@ -126,6 +126,11 @@ def test_panel_fallback_route(api):
     assert api.get("/api/unknown", headers=H).status_code in (404, 405)
 
 
+def test_panel_route_serves_the_built_panel_files(api):
+    r = api.get("/logo.png", headers={})
+    assert r.status_code == 200 and r.headers["content-type"] == "image/png"
+
+
 def test_panel_route_serves_nothing_outside_the_built_panel(api):
     # the containment check behind CodeQL's py/path-injection alerts on this route
     for path in ("/..%2f..%2f..%2fpyproject.toml", "/%2e%2e/%2e%2e/%2e%2e/pyproject.toml", "/..%2f__init__.py", "/..%2fweb.py"):

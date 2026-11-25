@@ -1141,8 +1141,10 @@ def create_api(vault: Vault, port: int, cloud: Cloud | None = None) -> FastAPI:
     def panel(path: str):
         if path.startswith("api/"):
             raise HTTPException(404)
-        candidate = (STATIC_DIR / path).resolve()
-        if path and candidate.is_file() and STATIC_DIR.resolve() in candidate.parents:
+        # Containment first: a path that leads outside the built panel is turned away before any file check.
+        root = os.path.realpath(STATIC_DIR)
+        candidate = os.path.realpath(os.path.join(root, path))
+        if path and candidate.startswith(root + os.sep) and os.path.isfile(candidate):
             return FileResponse(candidate)
         if index.exists():
             return FileResponse(index)
