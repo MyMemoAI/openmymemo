@@ -149,6 +149,48 @@ def test_a_read_that_meets_a_replace_on_windows_is_tried_again(vault, monkeypatc
     assert sync.load_state(st.device_id).enabled
 
 
+def _refused(paths, times: int):
+    """Fails `times` times with Windows' PermissionError for the given paths, then does the real thing."""
+    left = [times]
+
+    def wrap(real):
+        def call(*args, **kwargs):  # os.replace(src, dst) or a Path method (self first): any path argument counts
+            if left[0] and any(isinstance(a, str | os.PathLike) and Path(a) in paths for a in args):
+                left[0] -= 1
+                raise PermissionError(13, "The process cannot access the file")
+            return real(*args, **kwargs)
+        return call
+    return left, wrap
+
+
+def test_a_replace_or_delete_that_meets_a_read_on_windows_is_tried_again(vault, monkeypatch):
+    """On Windows, sync.json and cloud.json can't be replaced or deleted while another thread has them open (the
+    bridge reads them every couple of seconds without the lock). The write must wait for that read, not fail: a
+    failed write stopped MyMemo Memory sync on that connection without a word."""
+    link = linked(vault)
+    sync.turn_on(vault, [])
+    left, wrap = _refused({sync.state_path(), cloud.link_path()}, 2)
+    monkeypatch.setattr(os, "replace", wrap(os.replace))
+    st = sync.update_state(link.device_id, lambda s: setattr(s, "skipped", 3))
+    assert left == [0] and sync.load_state(link.device_id).skipped == st.skipped == 3
+    left[0] = 2
+    cloud._update_link(link.device_id, member={"display_name": "Sam Lee"})
+    assert left == [0] and cloud.load_link().member["display_name"] == "Sam Lee"
+    left[0] = 2
+    monkeypatch.setattr(Path, "unlink", wrap(Path.unlink))
+    assert cloud.forget_link(link.device_id, None)
+    assert left == [0] and cloud.load_link() is None and not sync.state_path().exists()
+
+
+def test_a_read_of_cloud_json_that_meets_a_replace_on_windows_is_tried_again(vault, monkeypatch):
+    """As for sync.json: a moment's PermissionError while cloud.json is replaced must not read as "not linked"."""
+    link = linked(vault)
+    left, wrap = _refused({cloud.link_path()}, 2)
+    monkeypatch.setattr(Path, "read_text", wrap(Path.read_text))
+    again = cloud.load_link()
+    assert left == [0] and again is not None and again.device_id == link.device_id
+
+
 # ---- what goes up -----------------------------------------------------------------------------------------------
 
 
@@ -657,6 +699,28 @@ def test_a_whole_round_trip_over_the_bridge(vault, fake, clouds):
     wait_until(lambda: len([x for x in fake.conns if x.hello]) >= 2 and "features" not in fake.connection().hello)
     wait_until(lambda: not sync.load_state(VECTOR["device_id"]).pending_off)
     assert c.sync_status()["state"] == "off"
+
+
+def test_a_sync_session_that_stops_on_an_error_starts_again(vault, fake, clouds, monkeypatch, caplog):
+    """A session that stopped on an error (a state file it couldn't write) used to leave sync stalled for as long as
+    the connection lasted. Now the bridge connects again and a new session takes over."""
+    seeded(vault)
+    linked(vault, fake.base)
+    sync.turn_on(vault, [])
+    real, fails = sync.Session._update, [1]
+
+    def update(self, fn):
+        if fails[0]:
+            fails[0] -= 1
+            raise PermissionError(13, "The process cannot access the file")
+        return real(self, fn)
+
+    monkeypatch.setattr(sync.Session, "_update", update)
+    c, _ = _online(vault, fake, clouds)
+    wait_until(lambda: len(fake.sync.hellos) >= 2)  # the first session stopped on the status; a new one said hello
+    assert fails == [0] and fake.sync.hellos[1]["sync_id"] == fake.sync.hellos[0]["sync_id"]
+    assert "MyMemo Memory sync: stopped on an error (PermissionError)" in caplog.text
+    wait_until(lambda: c.sync_status()["state"] == "preview")
 
 
 def test_mymemo_refusing_or_turning_it_off_is_shown(vault, fake, clouds):
