@@ -128,6 +128,27 @@ def test_the_state_lives_next_to_cloud_json_never_holds_memory_text(vault):
     assert not str(path).startswith(str(vault.root))
 
 
+def test_a_read_that_meets_a_replace_on_windows_is_tried_again(vault, monkeypatch):
+    """On Windows, opening sync.json while the bridge replaces it can fail with PermissionError for a moment. That
+    must not read as "no state": update_state would write the fresh, off state back over the person's consent."""
+    linked(vault)
+    st = sync.turn_on(vault, [])
+    real, misses = Path.read_text, [2]
+
+    def read_text(self, *args, **kwargs):
+        if self == sync.state_path() and misses[0]:
+            misses[0] -= 1
+            raise PermissionError(13, "The process cannot access the file")
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+    again = sync.load_state(st.device_id)
+    assert again.enabled and again.sync_id == st.sync_id and misses == [0]
+    sync.update_state(st.device_id, lambda s: None)  # read, change nothing, write
+    misses[0] = 2
+    assert sync.load_state(st.device_id).enabled
+
+
 # ---- what goes up -----------------------------------------------------------------------------------------------
 
 

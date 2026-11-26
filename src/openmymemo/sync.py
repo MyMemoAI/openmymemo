@@ -133,11 +133,22 @@ def _lock():
     return _link_lock()
 
 
+def _read_state_text(path: Path) -> str:
+    """On Windows, opening the file while another thread replaces it (``os.replace``) fails with PermissionError for
+    a moment; try again for up to half a second before calling it unreadable."""
+    for _ in range(19):
+        try:
+            return path.read_text(encoding="utf-8")
+        except PermissionError:
+            time.sleep(0.025)
+    return path.read_text(encoding="utf-8")
+
+
 def load_state(device_id: str | None = None) -> SyncState:
     """This computer's sync state; a fresh (off) one when there is none, it is unreadable, or it belongs to another
     link (``device_id`` given and different): a new link is a new consent."""
     try:
-        data = json.loads(state_path().read_text(encoding="utf-8"))
+        data = json.loads(_read_state_text(state_path()))
         st = SyncState(**{k: data[k] for k in SyncState.__dataclass_fields__ if k in data})
     except FileNotFoundError:
         return SyncState(device_id=device_id or "")
