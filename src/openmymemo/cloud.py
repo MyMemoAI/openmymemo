@@ -958,7 +958,7 @@ class Bridge:
         attempt = 0
         try:
             while not self._stopping:
-                current = load_link()
+                current = await asyncio.to_thread(load_link)  # off the loop: the read may wait (FILE_RETRY_S)
                 if current is None or current.device_id != self.link.device_id:
                     return self._set("stopped", "unlinked")
                 self.link = current
@@ -1073,7 +1073,7 @@ class Bridge:
                 if not msg or msg.get("type") != "welcome":
                     await ws.close(4400, "expected welcome")
                     return ws.close_code, 0.0
-                self._on_welcome(msg)
+                await asyncio.to_thread(self._on_welcome, msg)  # it may rewrite cloud.json
                 since = time.monotonic()
                 self._set("online")
                 log.info("OpenMyMemo Cloud: connected")
@@ -1189,7 +1189,7 @@ class Bridge:
                 retry = msg.get("retry_after_ms")
                 self._bye_ms = float(retry) if isinstance(retry, (int, float)) and retry >= 0 else None
             elif kind == "welcome":
-                self._on_welcome(msg)
+                await asyncio.to_thread(self._on_welcome, msg)  # it may rewrite cloud.json
             elif kind in ("sync_status", "sync_ops", "sync_ack"):
                 if self.sync_session is not None:
                     self.sync_session.feed(msg)

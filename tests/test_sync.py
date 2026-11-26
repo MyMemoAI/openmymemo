@@ -5,6 +5,7 @@ API and CLI, and a whole round trip over the bridge.
 
 Every test has its own HOME, OPENMYMEMO_CLOUD_DIR and a local OPENMYMEMO_CLOUD_URL (conftest.py)."""
 
+import asyncio
 import hashlib
 import json
 import os
@@ -144,9 +145,11 @@ def test_a_read_that_meets_a_replace_on_windows_is_tried_again(vault, monkeypatc
     monkeypatch.setattr(Path, "read_text", read_text)
     again = sync.load_state(st.device_id)
     assert again.enabled and again.sync_id == st.sync_id and misses == [0]
-    sync.update_state(st.device_id, lambda s: None)  # read, change nothing, write
     misses[0] = 2
-    assert sync.load_state(st.device_id).enabled
+    sync.update_state(st.device_id, lambda s: None)  # read (refused twice), change nothing, write
+    assert misses == [0]
+    after = sync.load_state(st.device_id)
+    assert after.enabled and after.sync_id == st.sync_id
 
 
 def _refused(paths, times: int):
@@ -721,6 +724,35 @@ def test_a_sync_session_that_stops_on_an_error_starts_again(vault, fake, clouds,
     assert fails == [0] and fake.sync.hellos[1]["sync_id"] == fake.sync.hellos[0]["sync_id"]
     assert "MyMemo Memory sync: stopped on an error (PermissionError)" in caplog.text
     wait_until(lambda: c.sync_status()["state"] == "preview")
+
+
+def test_the_bridge_and_sync_session_read_the_state_files_off_the_event_loop(vault, fake, clouds, monkeypatch):
+    """A read of cloud.json or sync.json may wait up to FILE_RETRY_S while Windows replaces the file; that wait must
+    never hold the panel's event loop, so the bridge and the sync session read them in a worker thread."""
+    seeded(vault)
+    linked(vault, fake.base)
+    sync.turn_on(vault, [])
+    on_loop: list[str] = []
+
+    def watch(name, real):
+        def call(*args, **kwargs):
+            try:
+                asyncio.get_running_loop()
+                on_loop.append(name)
+            except RuntimeError:
+                pass
+            return real(*args, **kwargs)
+        return call
+
+    monkeypatch.setattr(cloud, "load_link", watch("load_link", cloud.load_link))
+    monkeypatch.setattr(sync, "load_state", watch("load_state", sync.load_state))
+    c, conn = _online(vault, fake, clouds)
+    wait_until(lambda: fake.sync.hellos)
+    conn.send(fx("sync_ops_merge.json"))
+    wait_until(lambda: c.sync_status()["state"] == "preview")
+    c.sync_merge()
+    wait_until(lambda: fake.sync.pushes)
+    assert on_loop == []
 
 
 def test_mymemo_refusing_or_turning_it_off_is_shown(vault, fake, clouds):
