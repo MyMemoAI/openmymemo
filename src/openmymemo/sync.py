@@ -133,22 +133,15 @@ def _lock():
     return _link_lock()
 
 
-def _read_state_text(path: Path) -> str:
-    """On Windows, opening the file while another thread replaces it (``os.replace``) fails with PermissionError for
-    a moment; try again for up to half a second before calling it unreadable."""
-    for _ in range(19):
-        try:
-            return path.read_text(encoding="utf-8")
-        except PermissionError:
-            time.sleep(0.025)
-    return path.read_text(encoding="utf-8")
-
-
 def load_state(device_id: str | None = None) -> SyncState:
     """This computer's sync state; a fresh (off) one when there is none, it is unreadable, or it belongs to another
-    link (``device_id`` given and different): a new link is a new consent."""
+    link (``device_id`` given and different): a new link is a new consent. The read is tried again for a moment when
+    Windows refuses it while the file is being replaced, so that doesn't count as unreadable: ``update_state`` would
+    write the fresh, off state back over the person's consent."""
+    from .cloud import _read_private
+
     try:
-        data = json.loads(_read_state_text(state_path()))
+        data = json.loads(_read_private(state_path()))
         st = SyncState(**{k: data[k] for k in SyncState.__dataclass_fields__ if k in data})
     except FileNotFoundError:
         return SyncState(device_id=device_id or "")
@@ -179,8 +172,10 @@ def update_state(device_id: str, fn: Callable[[SyncState], Any]) -> SyncState:
 
 
 def delete_state() -> None:
+    from .cloud import _unlink_private
+
     with _lock(), contextlib.suppress(FileNotFoundError):
-        state_path().unlink()
+        _unlink_private(state_path())
 
 
 def wants_sync(link: Any, vault_root: Path | str) -> bool:
@@ -795,6 +790,7 @@ class Session:
         self.sent_at = 0.0
         self.received = 0  # ops filed since the last activity entry
         self.done = asyncio.Event()
+        self.failed = False  # stopped on an error; the bridge connects again so a new session starts
 
     def feed(self, frame: dict) -> None:
         self.frames.put_nowait(frame)
@@ -834,6 +830,9 @@ class Session:
                     await self._on_frame(frame)
                 if not self.done.is_set():
                     await self._step()
+        except Exception as e:  # noqa: BLE001 - only its kind is logged, never what was being synced
+            self.failed = True
+            log.warning("MyMemo Memory sync: stopped on an error (%s); connecting again", type(e).__name__)
         finally:
             self.done.set()
 

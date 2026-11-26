@@ -175,7 +175,7 @@ def load_settings() -> dict[str, Any]:
     """This computer's OpenMyMemo Cloud preferences (product-design.md §16.11): ``show`` (the panel and ``openmymemo
     apps`` list OpenMyMemo Cloud; on unless the person hid it) and ``service`` (None: MyMemo's own)."""
     try:
-        data = json.loads(settings_path().read_text(encoding="utf-8"))
+        data = json.loads(_read_private(settings_path()))
     except FileNotFoundError:
         data = {}
     except (OSError, ValueError) as e:
@@ -282,9 +282,37 @@ def account_label(member: Mapping[str, Any] | None) -> str:
     return name or email or "your MyMemo account"
 
 
+# On Windows a file can't be opened in the moment os.replace swaps a new copy in, and can't be replaced or deleted
+# while another thread or process has it open: each fails with PermissionError. The per-computer files (cloud.json,
+# sync.json, settings.json) are read without the lock (the bridge looks at them every couple of seconds) and replaced
+# under it, so both sides try again for a moment before the failure counts.
+FILE_RETRY_S = 0.5
+
+
+def _retrying(fn: Callable[[], Any]) -> Any:
+    deadline = time.monotonic() + FILE_RETRY_S
+    while True:
+        try:
+            return fn()
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.02)
+
+
+def _read_private(path: Path) -> str:
+    """One of the per-computer files, read while another thread or process may be replacing it."""
+    return _retrying(lambda: path.read_text(encoding="utf-8"))
+
+
+def _unlink_private(path: Path) -> None:
+    """Delete one of the per-computer files (FileNotFoundError when there is none), while another may be reading it."""
+    _retrying(path.unlink)
+
+
 def load_link() -> Link | None:
     try:
-        data = json.loads(link_path().read_text(encoding="utf-8"))
+        data = json.loads(_read_private(link_path()))
         return Link(**{k: data[k] for k in Link.__dataclass_fields__ if k in data})
     except FileNotFoundError:
         return None
@@ -305,7 +333,7 @@ def _write_private(path: Path, text: str) -> None:
             fh.write(text)
             fh.flush()
             os.fsync(fh.fileno())
-        os.replace(tmp, path)
+        _retrying(lambda: os.replace(tmp, path))
     except BaseException:
         with contextlib.suppress(OSError):
             tmp.unlink()
@@ -351,7 +379,7 @@ def delete_link(device_id: str | None = None) -> bool:
             if current is None or current.device_id != device_id:
                 return False
         try:
-            path.unlink()
+            _unlink_private(path)
             return True
         except FileNotFoundError:
             return False
@@ -367,9 +395,9 @@ def forget_link(device_id: str, vault: Vault | None) -> bool:
         if vault is not None:  # first, so whoever sees the link gone also sees the web apps revoked
             revoke_web_apps(vault)
         with contextlib.suppress(FileNotFoundError):
-            link_path().unlink()
+            _unlink_private(link_path())
         with contextlib.suppress(FileNotFoundError):  # MyMemo Memory sync's consent belonged to this link
-            (cloud_dir() / "sync.json").unlink()
+            _unlink_private(cloud_dir() / "sync.json")
         return True
 
 
@@ -1087,6 +1115,12 @@ class Bridge:
                 log.info("OpenMyMemo Cloud: couldn't read the sync state (%s)", type(e).__name__)
                 continue
             session = self.sync_session
+            if session is not None and session.failed:
+                # Stopped on an error (a file it couldn't write): connect again, with the usual backoff, so it
+                # starts afresh instead of leaving sync stalled while the connection stays up.
+                with contextlib.suppress(Exception):
+                    await ws.close(1000, "sync failed")
+                return
             if want != self._sync_advertised or (st.pending_off and (session is None or session.done.is_set())) or (
                     want and session is not None and session.done.is_set() and st.sync_id != session.sync_id):
                 log.info("OpenMyMemo Cloud: saying hello again for MyMemo Memory sync")
