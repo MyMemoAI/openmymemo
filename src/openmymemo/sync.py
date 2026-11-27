@@ -799,15 +799,16 @@ class Session:
         """Look at the folder (and the state) now instead of at the next tick."""
         self.frames.put_nowait({"type": "_poke"})
 
-    def _state(self) -> SyncState:
-        return load_state(self.link.device_id)
+    async def _state(self) -> SyncState:
+        """Read in a worker thread: on Windows the read may wait for a replace (FILE_RETRY_S), never on the loop."""
+        return await asyncio.to_thread(load_state, self.link.device_id)
 
     def _update(self, fn: Callable[[SyncState], Any]) -> SyncState:
         return update_state(self.link.device_id, fn)
 
     async def run(self) -> None:
         try:
-            st = self._state()
+            st = await self._state()
             if self.off_only or st.pending_off:
                 off = st.pending_off or {}
                 if off.get("sync_id"):
@@ -816,7 +817,7 @@ class Session:
                     await self._await_off()
                 if self.off_only or not st.enabled:
                     return
-                st = self._state()
+                st = await self._state()
             if not st.enabled or not st.sync_id:
                 return
             self.sync_id = st.sync_id
@@ -904,7 +905,7 @@ class Session:
 
     async def _on_ops(self, frame: dict) -> None:
         ops = [op for op in frame.get("ops") or [] if isinstance(op, dict) and isinstance(op.get("seq"), int)]
-        st = self._state()
+        st = await self._state()
         if st.merge in ("pending", "preview"):
             for op in ops:
                 if op["seq"] > st.cursor:
@@ -929,7 +930,7 @@ class Session:
     # -- the folder going up --
 
     async def _step(self) -> None:
-        st = self._state()
+        st = await self._state()
         if not st.enabled or st.sync_id != self.sync_id:
             self.done.set()  # turned off or on again here: the bridge says hello again
             return
@@ -948,7 +949,7 @@ class Session:
             held = [self.held[k] for k in sorted(self.held)]
             self.held.clear()
             await self._file(held, max(op["seq"] for op in held))
-            st = self._state()
+            st = await self._state()
         if st.merge == "pending":
             return
         if self.pending is not None:
